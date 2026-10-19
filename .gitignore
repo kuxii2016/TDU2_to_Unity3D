@@ -1,0 +1,13 @@
+*.db
+*.db-shm
+*.db-wal
+*.vsidx
+*.json
+Client/Assets/_Recovery.meta
+*.asset
+*.meta
+Client/VMF_Report.txt
+/Server/bin
+/Server/obj
+/Server/.vs
+/Client/.vs
