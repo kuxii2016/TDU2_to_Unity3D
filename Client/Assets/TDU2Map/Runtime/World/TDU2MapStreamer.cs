@@ -39,6 +39,8 @@ namespace TDU2.Map
         public bool MirrorX = true;
         public bool PlaceViewerOnStart = true;
         public Vector3 StartPositionGame = new Vector3(97, 8, 363);
+        [Tooltip("Startpunkt wie im Spiel aus GamePC.cpr (DEFAULTSTARTPOSITION bzw. Standard-Haus DefaultHouse) statt StartPositionGame")]
+        public bool StartFromGamePc = true;
 
         [Header("Streaming-Distanzen (m, XZ-Abstand zur Kachel)")]
         public float AreaLoadDistance = 2500f;
@@ -77,8 +79,8 @@ namespace TDU2.Map
         public float GrassRadius = 120f;
         [Range(0, 1)] public float GrassDensity = 0.7f;
         public float GrassSpacing = 1.2f;
-        public float DetailTiling = 0.25f;
-        [Range(0, 1)] public float DetailStrength = 0.5f;
+        public float DetailTiling = 0.098f; //0.25
+        [Range(0, 1)] public float DetailStrength = 1f;//0.5f;
         [Range(0, 1)] public float ShadowMapStrength = 0.6f;
         [Tooltip("Helligkeit von Gebäuden/Objekten")]
         [Range(0.5f, 2f)] public float ObjectBrightness = 1.15f;
@@ -209,21 +211,6 @@ namespace TDU2.Map
         void Start()
         {
             Island = !string.IsNullOrEmpty(IslandOverride) ? IslandOverride : (DebugManager.Instance?.StartMap ?? Island);
-            // Alte Karte aus einer vorherigen Szene (z.B. durch DontDestroyOnLoad mitgenommen) darf nicht weiterstreamen –
-            // sonst liegen nach einem Inselwechsel zwei Inseln übereinander
-#if UNITY_2023_1_OR_NEWER
-            var others = FindObjectsByType<TDU2MapStreamer>(FindObjectsSortMode.None);
-#else
-            var others = FindObjectsOfType<TDU2MapStreamer>();
-#endif
-            foreach (var o in others)
-            {
-                if (o == null || o == this) continue;
-                Debug.LogWarning("[TDU2] Zweite Karte (" + (o._index?.IslandName ?? o.Island) + ") gefunden – wird entfernt");
-                o.enabled = false;
-                if (o._root != null) UnityUtil.SafeDestroy(o._root.gameObject);
-                DestroyImmediate(o);   // sofort: sein OnDestroy (MaterialFactory.Reset) darf nicht nach dem Aufbau der neuen Karte laufen
-            }
             DebugManager.Instance.TDU2MapStreamer = this;
             if (UseFloatingOrigin && FindFloatingOrigin() == null) gameObject.AddComponent<FloatingOrigin>();
             try { Initialize(); }
@@ -233,6 +220,29 @@ namespace TDU2.Map
                 Debug.LogError("[TDU2] " + ex);
                 enabled = false;
             }
+        }
+
+        /// <summary>
+        /// Startpunkt laut GamePC.cpr auf dieser Insel: aktive DEFAULTSTARTPOSITION, sonst das Standard-Haus (DefaultHouse "EPH_L2E_0345I"),
+        /// Kamera etwas darüber (Streaming beginnt dort, TDU2Login setzt danach Auto/Haus).
+        /// </summary>
+        bool GamePcStartPoint(out Vector3 start)
+        {
+            start = default;
+            try
+            {
+                var gp = TDU2GamePC.Load(_index?.BnkDir);
+                if (gp == null) return false;
+                bool sameIsland = string.IsNullOrEmpty(gp.StartIsland) || (_index.IslandName ?? Island ?? "").StartsWith(gp.StartIsland, StringComparison.OrdinalIgnoreCase);
+                if (gp.HasStartPosition && sameIsland) { start = gp.StartPosition + Vector3.up * 30f; return true; }
+                if (string.IsNullOrEmpty(_index.SpotsFile) || !File.Exists(_index.SpotsFile)) return false;
+                var house = gp.FindHouse(SpotsFile.Parse(File.ReadAllBytes(_index.SpotsFile)).Spots);
+                if (house == null) return false;
+                start = house.Position + Vector3.up * 30f;
+                Debug.Log("[TDU2] Startpunkt (GamePC.cpr): Haus " + string.Join("/", gp.Houses) + " bei " + house.Position);
+                return true;
+            }
+            catch (Exception ex) { Debug.LogWarning("[TDU2] GamePC.cpr Startpunkt: " + ex.Message); return false; }
         }
 
         void Initialize()
@@ -310,7 +320,8 @@ namespace TDU2.Map
                     if (PlaceViewerOnStart)
                     {
                         var start = StartPositionGame;
-                        if (start.x < 0 || start.z < 0)
+                        if (StartFromGamePc && GamePcStartPoint(out var gpStart)) start = gpStart;
+                        else if (start.x < 0 || start.z < 0)
                             start = new Vector3(center.x, StartPositionGame.y, center.z);
                         Viewer.position = _root.TransformPoint(start);
                         Viewer.rotation = Quaternion.Euler(35f, 0f, 0f);
@@ -556,6 +567,7 @@ namespace TDU2.Map
             _islandRes.Owned.Add(m);
             var go = CreateMeshObject("Water", _root, new Vector3(center.x, SeaLevel - 1.5f, center.z), m, MaterialFactory.Water, null, false);
             go.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+            _water = go;
         }
         /// <summary>
         /// Create Grass
@@ -611,6 +623,7 @@ namespace TDU2.Map
             if (Viewer == null && Camera.main != null) Viewer = Camera.main.transform;
             if (Viewer == null) return;
             _viewerGame = _root.InverseTransformPoint(Viewer.position);
+            Shader.SetGlobalVector(IdOrigin, _root.position);   // Meer: Wellen in Inselkoordinaten (Floating Origin)
 
             PollLibrary();
             PollActors();
@@ -620,7 +633,139 @@ namespace TDU2.Map
                 ScanAreas();
                 ScanSectors();
             }
+            if (Time.unscaledTime >= _nextLodCheck) { _nextLodCheck = Time.unscaledTime + 1f; EnforceLod1(); }
             BuildCompleted();
+            // Kartengelände im Hintergrund vorbereiten, sobald die Welt um den Spieler steht (dann ist die Karte beim ersten Öffnen scharf)
+            if (PreloadMapTerrain && _mapTask == null && Time.unscaledTime > 15f) RequestMapTerrain();   // ein Hintergrund-Thread
+            PollMapTerrain();
+        }
+
+        // ------------------------------------------------------------------ Kartengelände (große Karte)
+        /// <summary>
+        /// Gelände-Kachel der großen Karte: eine ganze Area aus ihrer eigenen Bank (Höhen 24 m, Colormap 1024² = 6 m je Pixel)
+        /// statt der groben Insel-LOD (384 m Raster, eine einzige Colormap für die ganze Insel). Kein GameObject – die Karte
+        /// zeichnet die Kacheln nur in ihre eigene Kamera (Graphics.DrawMesh), im Spiel sind sie unsichtbar.
+        /// </summary>
+        public sealed class MapTile { public AreaKey Key; public Mesh Mesh; public Material Material; public Texture2D Color; public Vector3 Origin; }
+        [Header("Große Karte")]
+        [Tooltip("Kartengelände (alle Areas mit eigener Colormap) nach dem Start im Hintergrund laden")]
+        public bool PreloadMapTerrain = true;
+        [Tooltip("Raster der Kartenkacheln in Area-Zellen (1 = 24 m, 2 = 48 m, 4 = 96 m)")]
+        [Range(1, 8)] public int MapTerrainStep = 2;
+        readonly List<MapTile> _mapTiles = new List<MapTile>();
+        readonly System.Collections.Concurrent.ConcurrentQueue<(AreaKey key, MeshData mesh, BankModel model)> _mapQueue =
+            new System.Collections.Concurrent.ConcurrentQueue<(AreaKey, MeshData, BankModel)>();
+        Task _mapTask; volatile bool _mapCancel;
+        GameObject _water;
+        Shader _mapShader;
+        static readonly int IdOrigin = Shader.PropertyToID("_TDU2Origin");
+
+        /// <summary>Fertige Kartenkacheln (Spielkoordinaten: Origin = Area-Ecke, unter <see cref="MapRoot"/>).</summary>
+        public IReadOnlyList<MapTile> MapTiles => _mapTiles;
+        /// <summary>Alle Kartenkacheln gebaut.</summary>
+        public bool MapTerrainReady => _mapTask != null && _mapTask.IsCompleted && _mapQueue.IsEmpty && _mapTiles.Count > 0;
+        /// <summary>Meeresfläche (für die Kartenkamera).</summary>
+        public GameObject WaterObject => _water;
+
+        /// <summary>Kartengelände laden (einmal je Insel; ein Hintergrund-Thread, höchstens zwei Bänke gleichzeitig im Speicher).</summary>
+        public void RequestMapTerrain()
+        {
+            if (_mapTask != null || _index == null || _index.AreaBanks == null || _index.AreaBanks.Count == 0) return;
+            var banks = new List<KeyValuePair<AreaKey, string>>(_index.AreaBanks);
+            int step = Mathf.Clamp(MapTerrainStep, 1, 8);
+            var q = _mapQueue;
+            _mapTask = Task.Run(() =>
+            {
+                foreach (var kv in banks)
+                {
+                    if (_mapCancel) return;
+                    while (q.Count >= 2 && !_mapCancel) System.Threading.Thread.Sleep(20);
+                    try
+                    {
+                        var model = BankModel.Load(kv.Value, BankKind.Area, false, false, false);
+                        if (model.Heights == null || model.ColorMapKey == 0) continue;
+                        q.Enqueue((kv.Key, BuildMapGrid(model.Heights, step), model));
+                    }
+                    catch (Exception) { }
+                }
+            });
+        }
+
+        /// <summary>Höchstens eine Kachel je Bild in Unity-Objekte umwandeln (Textur, Material, Mesh).</summary>
+        void PollMapTerrain()
+        {
+            if (!_mapQueue.TryDequeue(out var it)) return;
+            try
+            {
+                var color = it.model.GetTexture(it.model.ColorMapKey, TextureWrapMode.Clamp, TextureWrapMode.Clamp, null);
+                if (color == null) return;
+                // unbeleuchteter Karten-Shader (Tageszeit/Licht/Spiegelung der Welt spielen auf der Karte keine Rolle)
+                if (_mapShader == null) _mapShader = Shader.Find("TDU2/MapTerrain");
+                var mat = _mapShader != null ? new Material(_mapShader) { name = "TDU2 Karte " + it.key, mainTexture = color }
+                                             : MaterialFactory.CreateTerrainMaterial(color, null, null, null, DetailTiling, 0f);
+                color.anisoLevel = 4;
+                _mapTiles.Add(new MapTile { Key = it.key, Mesh = it.mesh.ToMesh(), Material = mat, Color = color, Origin = WorldLayout.AreaOrigin(it.key) });
+                if (_mapTask != null && _mapTask.IsCompleted && _mapQueue.IsEmpty) Debug.Log("[TDU2] Kartengelände: " + _mapTiles.Count + " Areas");
+            }
+            catch (Exception ex) { Debug.LogWarning("[TDU2] Kartengelände " + it.key + ": " + ex.Message); }
+        }
+
+        /// <summary>Ganzes Area-Raster als ein Gitter, jede step-te Zelle (UV wie die LOD1-Stücke: 0..1 über die Area-Colormap).</summary>
+        static MeshData BuildMapGrid(HeightGrid g, int step)
+        {
+            var md = new MeshData { Name = "MapTerrain" };
+            int n = Mathf.Max(1, (g.Size - 1) / step), v = n + 1;
+            float ext = Mathf.Max(1f, g.Extent);
+            for (int z = 0; z < v; z++)
+                for (int x = 0; x < v; x++)
+                {
+                    int gx = Mathf.Min(x * step, g.Size - 1), gz = Mathf.Min(z * step, g.Size - 1);
+                    md.Positions.Add(new Vector3(gx * g.Spacing, g.Get(gx, gz), gz * g.Spacing));
+                    md.Normals.Add(g.NormalAt(gx, gz));
+                    md.UV0.Add(new Vector2(gx * g.Spacing / ext, gz * g.Spacing / ext));
+                }
+            var tris = new List<int>(n * n * 6);
+            for (int z = 0; z < n; z++)
+                for (int x = 0; x < n; x++)
+                {
+                    int v00 = z * v + x, v10 = v00 + 1, v01 = v00 + v, v11 = v01 + 1;
+                    tris.Add(v00); tris.Add(v01); tris.Add(v10);
+                    tris.Add(v10); tris.Add(v01); tris.Add(v11);
+                }
+            md.SubMeshes.Add(tris);
+            md.SubMeshMaterialIndex.Add(0);
+            return md;
+        }
+
+        void DestroyMapTerrain()
+        {
+            _mapCancel = true;
+            foreach (var t in _mapTiles)
+            {
+                if (t.Mesh != null) UnityUtil.SafeDestroy(t.Mesh);
+                if (t.Material != null) UnityUtil.SafeDestroy(t.Material);
+                if (t.Color != null) UnityUtil.SafeDestroy(t.Color);
+            }
+            _mapTiles.Clear();
+            while (_mapQueue.TryDequeue(out _)) { }
+        }
+
+        /// <summary>
+        /// Ladebildschirm: true, sobald alle Areas und Sektoren im Umkreis (Welt-Meter, höchstens die Ladeentfernungen) um
+        /// <paramref name="worldPos"/> gebaut (oder fehlgeschlagen) sind und die Objektbibliothek steht.
+        /// </summary>
+        public bool ReadyAround(Vector3 worldPos, float radius)
+        {
+            if (_index == null || _root == null) return false;
+            if (_libraryTask != null && _library == null) return false;
+            var g = _root.InverseTransformPoint(worldPos);
+            var p = new Vector2(g.x, g.z);
+            float ra = Mathf.Min(radius, AreaLoadDistance), rs = Mathf.Min(radius, SectorLoadDistance);
+            foreach (var k in _index.AreaBanks.Keys)
+                if (WorldLayout.DistanceToRect(p, WorldLayout.AreaRect(k)) < ra && !(_areas.TryGetValue(k, out var a) && (a.Built || a.Failed))) return false;
+            foreach (var k in _index.SectorBanks.Keys)
+                if (WorldLayout.DistanceToRect(p, WorldLayout.SectorRect(k)) < rs && !(_sectors.TryGetValue(k, out var st) && (st.Built || st.Failed))) return false;
+            return true;
         }
 
         int RunningJobs()
@@ -858,6 +1003,20 @@ namespace TDU2.Map
             return !SectorBuilt(key);
         }
 
+        float _nextLodCheck;
+
+        /// <summary>
+        /// LOD1-Objekte (Area-Gebäude, Spot-Exteriors "_low"), deren Sektor schon als LOD0 gebaut ist, ausgeschaltet halten.
+        /// Andere Teile (Interieur: Exterior aus-/einblenden beim Betreten/Verlassen, Teleport in ein Haus) konnten sie wieder
+        /// aktivieren -> Low-Poly-Gebäude standen in/über den richtigen. Nur ausschalten, nie einschalten (das macht SetLod1Visible).
+        /// </summary>
+        public void EnforceLod1()
+        {
+            foreach (var kv in _lod1BySector)
+                foreach (var go in kv.Value)
+                    if (go != null && go.activeSelf && !Lod1Wanted(go, kv.Key)) go.SetActive(false);
+        }
+
         void SetLod1Visible(SectorKey key, bool visible)
         {
             if (!_lod1BySector.TryGetValue(key, out var list)) return;
@@ -1041,6 +1200,14 @@ namespace TDU2.Map
             }
             _library = _libraryTask.Result;
             _library.MirrorMeshes = MirrorX;
+            // Meer: Normalmap aus commonworld (im Original erzeugt td_ocean_nmap_from_hmap sie zur Laufzeit)
+            var wn = _textures.Get(_textures.KeyByName("water_n.2db"), TextureWrapMode.Repeat, TextureWrapMode.Repeat);
+            if (wn != null && MaterialFactory.Water.HasProperty("_NormalMap"))
+            {
+                MaterialFactory.Water.SetTexture("_NormalMap", wn);
+                MaterialFactory.Water.SetFloat("_HasNormalMap", 1f);
+                Debug.Log("[TDU2] Meer: Normalmap water_n.2db");
+            }
             Debug.Log($"Library Loadet: {_library.Scene?.InsHash.Count ?? 0} Objekte, {_textures.Count} Textures");
             foreach (var st in _sectors.Values) if (st.Built) TryAddVegetation(st);
         }
@@ -1334,6 +1501,7 @@ namespace TDU2.Map
 
         void OnDestroy()
         {
+            DestroyMapTerrain();
             foreach (var k in new List<SectorKey>(_sectors.Keys)) UnloadSector(k);
             foreach (var k in new List<AreaKey>(_areas.Keys)) UnloadArea(k);
             _islandRes.Destroy();
@@ -1357,18 +1525,40 @@ namespace TDU2.Map
         public string lib = "";
         public int Jobs = 0;
         public int builtA = 0, builtS = 0, inst = 0, areaCount = 0, sectorCount = 0;
+        /// <summary>Fehlgeschlagene Areas/Sektoren (seit dem Laden der Insel, Stand von <see cref="RefreshStats"/>).</summary>
+        public int failedA = 0, failedS = 0;
+
+        /// <summary>Lade-Status der Insel ("ready", "Fehler: …").</summary>
+        public string Status => _status;
+        /// <summary>World-Actors (Ampeln, Schilder …): geladen / lädt / aus.</summary>
+        public string ActorsState => _actors != null ? "geladen" : _actorsTask != null ? "lädt…" : "aus";
+
+        /// <summary>Zähler für Debug-Anzeigen (Entwicklermenü F1, DebugManager F3) aktualisieren.</summary>
+        public void RefreshStats()
+        {
+            Jobs = RunningJobs();
+            builtA = 0; builtS = 0; inst = 0; failedA = 0; failedS = 0;
+            foreach (var a in _areas.Values) { if (a.Built) builtA++; if (a.Failed) failedA++; }
+            foreach (var s in _sectors.Values) { if (s.Built) { builtS++; inst += s.Instances; } if (s.Failed) failedS++; }
+            sectorCount = _sectors.Count;
+            areaCount = _areas.Count;
+            lib = _library != null ? $"Library OK ({_library.MissingCount} unbekannte Keys)" : (_libraryTask != null ? "Library lädt..." : "keine Library");
+        }
+
+        /// <summary>Alle Areas und Sektoren entladen; der nächste Scan lädt sie mit den aktuellen Einstellungen neu.</summary>
+        public void ReloadWorld()
+        {
+            foreach (var k in new List<SectorKey>(_sectors.Keys)) UnloadSector(k);
+            foreach (var k in new List<AreaKey>(_areas.Keys)) UnloadArea(k);
+            foreach (var ip in _islandPieces.Values) if (ip != null) ip.SetActive(ShowIslandLod);
+            _nextScan = 0f;
+        }
 
         void OnGUI()
         {
             if (DebugManager.Instance != null && DebugManager.Instance.isSectorDebug == false) return;
-            Jobs = RunningJobs();
-            builtA = 0; builtS = 0; inst = 0;
-            foreach (var a in _areas.Values) if (a.Built) builtA++;
-            foreach (var s in _sectors.Values) if (s.Built) { builtS++; inst += s.Instances; }
+            RefreshStats();
             var sk = WorldLayout.SectorAt(_viewerGame.x, _viewerGame.z);
-            sectorCount = _sectors.Count;
-            areaCount = _areas.Count;
-            lib = _library != null ? $"Library OK ({_library.MissingCount} unbekannte Keys)" : (_libraryTask != null ? "Library lädt..." : "keine Library");
             if (!ShowDebugOverlay || _index == null) return;
             //GUI.Box(new Rect(10, 10, 430, 110), "");
             //GUI.Label(new Rect(20, 15, 420, 100),

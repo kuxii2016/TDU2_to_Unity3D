@@ -202,12 +202,12 @@ namespace TDU2.Map.World
         [Tooltip("Sonne/Ambient der Wetterdatei x Faktor (die Werte sind für die Original-Shader, ~0.65 / 0.75 passt zu unseren)")]
         public float DiffuseScale = 0.65f, AmbientScale = 0.75f;
         public bool ApplyFog = true;
-        [Range(0f, 1f)] public float FogStrength = 0.8f;
+        [Range(0f, 1f)] public float FogStrength = 0.05f;
         public bool AutoHeadlights = true;
-        [Tooltip("Straßenlampen: echte Lichter an den nächsten Masten (nachts)")] public int LampLights = 16;
+        [Tooltip("Straßenlampen: echte Lichter an den nächsten Masten (nachts)")] public int LampLights = 64;
         public float LampRadius = 140f;
         [Range(0f, 2f)] public float LampIntensity = 1f;
-        [Tooltip("Straßenlicht im Gelände (Splatmap G) x outside_street_lightmap")] [Range(0f, 1f)] public float StreetLightStrength = 0.5f;
+        [Tooltip("Straßenlicht im Gelände (Splatmap G) x outside_street_lightmap")][Range(0f, 1f)] public float StreetLightStrength = 0.5f;
         public int RainDrops = 1400;
 
         TDU2MapStreamer _streamer;
@@ -235,6 +235,9 @@ namespace TDU2.Map.World
         float _nextThunder, _flash;
 
         static readonly int IdNightK = Shader.PropertyToID("_TDU2NightK");
+        static readonly int IdOceanFresnel = Shader.PropertyToID("_TDU2OceanFresnel"), IdOceanSpec = Shader.PropertyToID("_TDU2OceanSpec"),
+            IdOceanRefl = Shader.PropertyToID("_TDU2OceanRefl"), IdOceanSpecPow = Shader.PropertyToID("_TDU2OceanSpecPower"),
+            IdOceanBlur = Shader.PropertyToID("_TDU2OceanBlur"), IdOceanNMap = Shader.PropertyToID("_TDU2OceanNMap"), IdOceanSet = Shader.PropertyToID("_TDU2OceanSet");
         static readonly int IdWet = Shader.PropertyToID("_TDU2Wet"), IdDayDim = Shader.PropertyToID("_TDU2DayDim"),
             IdStreet = Shader.PropertyToID("_TDU2StreetLight"), IdNightWin = Shader.PropertyToID("_TDU2NightWindows");
 
@@ -332,8 +335,12 @@ namespace TDU2.Map.World
                 float P(string n, float d) => float.TryParse(Attr(n), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : d;
                 _lampDefs[name] = new LampDef
                 {
-                    Color = new Color32(r, g, b, 255), Intensity = al / 255f,
-                    Near = P("near", 8f), Far = P("far", 10f), Open = P("open_angle", 30f), Falloff = P("falloff_angle", 50f),
+                    Color = new Color32(r, g, b, 255),
+                    Intensity = al / 255f,
+                    Near = P("near", 8f),
+                    Far = P("far", 10f),
+                    Open = P("open_angle", 30f),
+                    Falloff = P("falloff_angle", 50f),
                 };
             }
         }
@@ -465,6 +472,16 @@ namespace TDU2.Map.World
                     RenderSettings.fogEndDistance = fs + (fe - fs) / fm;   // bei fog_end ist der Nebel bei fog_max
                 }
             }
+
+            // ---------------- Meer (TD_Ocean): Fresnel, Reflexion, Glanz, Normalmap-Kacheln – teils nur im ersten Wetterblock angegeben
+            Vector4 O(string n, Vector4 d) => _data.Sample(n, hour, ba, bb, t, _data.Sample(n, hour, 1, 1, 0f, d));
+            Shader.SetGlobalVector(IdOceanFresnel, O("ocean_fresnel", new Vector4(0.3f, 30f, 0.5f, 0f)));
+            Shader.SetGlobalVector(IdOceanSpec, O("ocean_specularColorAndCutOff", new Vector4(0.502f, 0.596f, 0.674f, 0f)));
+            Shader.SetGlobalVector(IdOceanRefl, O("ocean_reflectionColor", new Vector4(0.498f, 0.498f, 0.498f, 0f)));
+            Shader.SetGlobalFloat(IdOceanSpecPow, O("ocean_specularPower", new Vector4(20f, 0, 0, 0)).x);
+            Shader.SetGlobalFloat(IdOceanBlur, O("ocean_reflectionBluriness", new Vector4(0.05f, 0, 0, 0)).x);
+            Shader.SetGlobalVector(IdOceanNMap, new Vector4(O("ocean_NMapHR", new Vector4(0.15f, 1f, 0, 0)).x, O("ocean_NMapLR", new Vector4(0.015f, 1f, 0, 0)).x, 0f, 0f));
+            Shader.SetGlobalFloat(IdOceanSet, 1f);
 
             // ---------------- Tag/Nacht-Leuchten
             Night = Mathf.Clamp01(S("spot_exterior_lightmap_day_night", new Vector4(1, 0, 0, 0)).y);

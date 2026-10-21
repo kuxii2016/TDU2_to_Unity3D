@@ -43,6 +43,16 @@ namespace TDU2.Map.Flash
             public Vector2? Position;    // vom Spiel gesetzt (Bühnenkoordinaten relativ zum Eltern-Clip, ersetzt Tx/Ty)
             /// <summary>Wie in Flash: nachdem ein Skript _x/_y/_xscale/_rotation bzw. _alpha gesetzt hat, ignoriert die Zeitleiste Matrix bzw. Farbe.</summary>
             public bool ScriptMatrix, ScriptCx;
+            /// <summary>Korrekturen (VmfPatches / Flash Debugger): zusätzlich zur Zeitleiste – Versatz (Bühnenpixel im Eltern-Clip),
+            /// Skalierung (Faktor je Achse), eigener Text für Textfelder (null = Variable/Starttext).</summary>
+            public Vector2 Offset;
+            public Vector2 ScaleMul = Vector2.one;
+            public string TextOverride;
+            /// <summary>Atomares Einblenden (VmfPlayerAsync.cs): Nummer des letzten Zeichnens, vollständig gezeigt, wartet seit,
+            /// Zeitleiste angehalten bis (solange die Shapes des neu erscheinenden Clips noch gerastert werden).</summary>
+            internal int SeenDraw = -10;
+            internal bool Revealed;
+            internal float RevealSince, FrozenUntil;
         }
 
         /// <summary>Begrenzung eines Clips im Koordinatensystem seines Eltern-Clips (für _width/_height); null = leer.</summary>
@@ -161,7 +171,11 @@ namespace TDU2.Map.Flash
         /// "_root.MyMoneyStr" (= "/:MyMoneyStr"), "name" (= Wurzel). Textfelder lösen ihre (auch relativen) Variablennamen
         /// ("../../:cur_power", "_parent.num_contest", "val") auf denselben absoluten Schlüssel auf.
         /// </summary>
-        public void SetVariable(string name, string value) { var k = ResolveVar(null, name); _vars[k] = value; _vars[name] = value; _objVars.Remove(k); }
+        public void SetVariable(string name, string value)
+        {
+            if (AutoPin) _pinVars[name] = new PinVar { Value = value ?? "", Typed = false };
+            var k = ResolveVar(null, name); _vars[k] = value; _vars[name] = value; _objVars.Remove(k);
+        }
         public string GetVariable(string name) => _vars.TryGetValue(ResolveVar(null, name), out var v) ? v : (_vars.TryGetValue(name, out v) ? v : null);
 
         /// <summary>Absoluter Pfad einer Instanz ("/" = Wurzel, sonst "/a/b"; unbenannte Clips als "#Tiefe").</summary>
@@ -205,6 +219,7 @@ namespace TDU2.Map.Flash
         /// <summary>Clip auf eine Bildnummer setzen (0-basiert), z.B. Balkenanzeigen mit 101 Bildern (0..100 %).</summary>
         public bool GotoFrameNumber(string path, int frame, bool play = false)
         {
+            if (!play && AutoPin) return PinFrame(path, frame + 1);
             var inst = path == "/" || string.IsNullOrEmpty(path) ? Root : Find(path)?.Sprite;
             if (inst == null) return false;
             inst.Playing = play; GotoFrame(inst, frame, true);   // stop() im Ziel-Frame behält Vorrang
@@ -271,7 +286,9 @@ namespace TDU2.Map.Flash
                 if (part == "..") { inst = inst?.Owner?.Parent; continue; }
                 if (inst == null) return null;
                 cur = null;
-                foreach (var d in inst.List.Values) if (string.Equals(d.Name, part, StringComparison.OrdinalIgnoreCase)) { cur = d; break; }
+                // "#12" = unbenanntes Objekt auf Tiefe 12 (so zeigt es der Flash Debugger)
+                if (part.Length > 1 && part[0] == '#' && int.TryParse(part.Substring(1), out int dep)) inst.List.TryGetValue(dep, out cur);
+                else foreach (var d in inst.List.Values) if (string.Equals(d.Name, part, StringComparison.OrdinalIgnoreCase)) { cur = d; break; }
                 if (cur == null) return null;
                 inst = cur.Sprite;
             }
@@ -280,6 +297,7 @@ namespace TDU2.Map.Flash
 
         public bool GotoLabel(string path, string label, bool play = false)
         {
+            if (!play && AutoPin) return PinLabel(path, label);
             var inst = path == "/" || string.IsNullOrEmpty(path) ? Root : Find(path)?.Sprite;
             if (inst == null || !inst.Timeline.Labels.TryGetValue(label, out var f)) return false;
             inst.Playing = play; GotoFrame(inst, f, true);   // stop() im Ziel-Frame behält Vorrang
@@ -290,8 +308,11 @@ namespace TDU2.Map.Flash
         public void SetRotation(string path, float deg) { var d = Find(path); if (d != null) d.Rotation = deg; }
         public void SetPosition(string path, Vector2 pos) { var d = Find(path); if (d != null) d.Position = pos; }
         /// <summary>Textur nur für diesen einen Clip (Pfad) setzen – z.B. Markenlogo in "/HUD/minimap/spot_0/ic/logo/lure".</summary>
-        public bool SetClipTexture(string path, Texture tex)
+        /// <param name="onTop">Bild nach dem ganzen Film zeichnen (über allem). Nur für Vorschaubilder, die im Film von höher
+        /// liegenden Fenster-Teilen verdeckt würden (Händler-Kauffenster); sonst normal in der Ebenenfolge (Karten-Tooltip).</param>
+        public bool SetClipTexture(string path, Texture tex, bool onTop = false)
         {
+            if (tex != null) { if (onTop) _topTextures.Add(tex); else _topTextures.Remove(tex); }
             // gemerkt: legt die Zeitleiste den Clip neu an (Animation "extend" …), bekommt er die Textur wieder (ApplyClipTextures)
             if (tex != null) _clipTex[path] = tex; else _clipTex.Remove(path);
             var d = Find(path); if (d == null) return false; d.DynTex = tex; return true;
@@ -335,6 +356,8 @@ namespace TDU2.Map.Flash
         {
             var mm = d.Matrix;
             if (d.Position.HasValue) { mm.Tx = d.Position.Value.x; mm.Ty = d.Position.Value.y; }
+            mm.Tx += d.Offset.x; mm.Ty += d.Offset.y;
+            if (d.ScaleMul.x != 1f || d.ScaleMul.y != 1f) { mm.A *= d.ScaleMul.x; mm.B *= d.ScaleMul.x; mm.C *= d.ScaleMul.y; mm.D *= d.ScaleMul.y; }
             if (d.Rotation.HasValue) mm = mm * Matrix2D.Rotation(d.Rotation.Value);
             return mm;
         }
@@ -379,6 +402,12 @@ namespace TDU2.Map.Flash
 
         /// <summary>Maus steht über einem Flash-Button (Klick gehört dem Film).</summary>
         public bool MouseOverButton => _hoverBtn != null;
+        /// <summary>
+        /// Clips, deren Buttons die Maus nicht treffen soll (Pfade wie in Find), z.B. der Kartencursor /curseur, der selbst
+        /// unter der Maus liegt: sonst meldet er sich als "Maus über Knopf" und flackert mit dem Mauszeiger.
+        /// </summary>
+        public readonly HashSet<string> MouseIgnore = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        readonly HashSet<DisplayObject> _mouseIgnoreObjs = new HashSet<DisplayObject>();
 
         /// <summary>
         /// Textbreite (Bühnenpixel) des Werts einer Textvariable in der Schrift ihres Textfelds – Ersatz für die native
@@ -445,6 +474,8 @@ namespace TDU2.Map.Flash
             var pt = MouseGui();
             var stage = StageMatrix();
             if (_dragD != null) UpdateDrag();
+            _mouseIgnoreObjs.Clear();
+            foreach (var ip in MouseIgnore) { var io = Find(ip); if (io != null) _mouseIgnoreObjs.Add(io); }
             var hit = HitButton(Root, stage, pt);
             if (hit != _hoverBtn)
             {
@@ -460,7 +491,8 @@ namespace TDU2.Map.Flash
                     if (_pressBtn == _hoverBtn) RunButton(_pressBtn, 0x08);              // release
                     else RunButton(_pressBtn, 0x40);                                     // releaseOutside
                 }
-                else if (_mouseDown && _hoverBtn != null) RunButton(_hoverBtn, 0x08);
+                // wie Flash: ohne Druck auf denselben Button kein onRelease (sonst löste ein Klick, der ein Menü unter der Maus
+                // öffnet, gleich dessen ersten Eintrag aus – z.B. Mini-Menü der Karte)
                 else if (_mouseDown && _hoverBtn == null) HandleFreeClick(pt);   // Tasten-Symbol / Textfeld (VmfHelpers)
                 _mouseDown = false; _pressBtn = null;
             }
@@ -475,6 +507,7 @@ namespace TDU2.Map.Flash
             {
                 var d = list[i];
                 if (!d.Visible || d.ClipDepth > 0 || (d.Cx.Mul.w <= 0.003f && d.Cx.Add.w <= 0.003f)) continue;
+                if (_mouseIgnoreObjs.Count > 0 && _mouseIgnoreObjs.Contains(d)) continue;
                 var mw = m * LocalMatrix(d);
                 if (d.Sprite != null) { var h = HitButton(d.Sprite, mw, pt); if (h != null) { ReturnList(list); return h; } continue; }
                 if (!Movie.Chars.TryGetValue(d.CharId, out var ch) || !(ch is VmfMovie.Button b)) continue;
@@ -529,10 +562,15 @@ namespace TDU2.Map.Flash
             while (_accum >= step && guard++ < 4) { _accum -= step; Tick(Root); RunEnterFrames(); }
             if (guard >= 4) _accum = 0f;
             ApplyForcedVisibility();   // ForceVisible (VmfHelpers) gilt auch nach _visible-Änderungen des Films
+            ApplyPins();               // festgehaltene Werte/Labels (VmfHelpers: PinText/PinValue/PinLabel/PinScope)
+            ApplyPatches();            // Korrekturen aus TDU2FlashPatches (VmfPatches.cs)
         }
 
         void Tick(Instance inst)
         {
+            // neu erscheinender Clip wartet auf seine Shapes: Zeitleiste (samt Kindern) kurz anhalten, damit seine
+            // Öffnen-Animation danach vollständig zu sehen ist (VmfPlayerAsync.cs, atomares Einblenden)
+            if (inst.Owner != null && inst.Owner.FrozenUntil > Time.unscaledTime) return;
             if (inst.Playing && inst.Timeline.FrameCount > 1)
             {
                 int next = inst.Frame + 1;
@@ -665,8 +703,12 @@ namespace TDU2.Map.Flash
         }
 
         // ---------------------------------------------------------------- Rendering
+        readonly List<(DisplayObject d, Matrix2D m, ColorTransform c)> _dynTop = new List<(DisplayObject, Matrix2D, ColorTransform)>();
+        readonly HashSet<Texture> _topTextures = new HashSet<Texture>();
+
         void OnGUI()
         {
+            GUI.depth = GuiDepth;   // in jedem Ereignis setzen (Unity sortiert die OnGUI-Aufrufe nach der Tiefe des Layout-Durchgangs)
             if (!Visible || Root == null || Event.current.type != EventType.Repaint) return;
             GUI.depth = GuiDepth;
             ApplyClipTextures();
@@ -696,10 +738,14 @@ namespace TDU2.Map.Flash
                 }
                 _holdUntil = 0f;
             }
+            _drawSerial++; _revealHolding = false;   // atomares Einblenden neuer Clips (VmfPlayerAsync.cs)
             GL.PushMatrix();
             GL.LoadPixelMatrix(0, Screen.width, Screen.height, 0);
             _batchOpen = false;
+            _dynTop.Clear();
             Draw(Root, stage, cx, null);
+            foreach (var (dd, dm, dc) in _dynTop) if (dd.Sprite != null && dd.DynTex != null) Draw(dd.Sprite, dm, dc, null, dd.DynTex);
+            _dynTop.Clear();
             FlushBatch();
             GL.PopMatrix();
             if (Highlight != null) DrawHighlight(Highlight);
@@ -774,7 +820,9 @@ namespace TDU2.Map.Flash
                 }
                 if (!d.Visible) continue;
                 var mw = m * LocalMatrix(d);
-                var cw = cx * d.Cx;
+                // Clip mit Spieltextur (z.B. shopscar window_buy/lure, Vorschaukamera): im Film steht der Platzhalter mit Alpha 0 –
+                // das Spiel setzt dort sein Bild ein. Eigene Farb-/Alpha-Transformation des Clips daher nicht anwenden (nur die der Eltern).
+                var cw = d.DynTex != null ? cx : cx * d.Cx;
                 if (cw.Mul.w <= 0.003f && cw.Add.w <= 0.003f) continue;
                 if (d.CharId == -2 && d.Sprite != null) { Draw(d.Sprite, mw, cw, dynamicClip, d.DynTex ?? clipTex); continue; }   // createEmptyMovieClip
                 if (!Movie.Chars.TryGetValue(d.CharId, out var ch)) continue;
@@ -782,6 +830,10 @@ namespace TDU2.Map.Flash
                 {
                     case VmfMovie.Timeline _:
                         string dyn = d.Name != null && _dynamic.ContainsKey(d.Name) ? d.Name : dynamicClip;
+                        if (!_probe && !RevealReady(d, mw, cw, dyn, d.DynTex ?? clipTex)) break;   // noch nicht vollständig gerastert
+                        // Clip mit Spielbild (z.B. Vorschaukamera window_buy/lure): zuletzt über den Film zeichnen – im Spiel setzt
+                        // die Engine das Bild selbst ein; Hintergrundflächen höherer Tiefe würden es sonst verdecken
+                        if (d.DynTex != null && !_probe && _dynTop != null && _topTextures.Contains(d.DynTex)) { _dynTop.Add((d, mw, cw)); break; }
                         Draw(d.Sprite, mw, cw, dyn, d.DynTex ?? clipTex);
                         break;
                     case VmfMovie.Shape s:
@@ -790,7 +842,7 @@ namespace TDU2.Map.Flash
                         else DrawShape(s, mw, cw);
                         break;
                     case VmfMovie.EditText t:
-                        DrawText(t, mw, cw, inst);
+                        DrawText(t, mw, cw, inst, d.TextOverride);
                         break;
                     case VmfMovie.Button btn:
                         {
@@ -824,6 +876,7 @@ namespace TDU2.Map.Flash
                         if (Movie.Chars.TryGetValue(c.CharId, out var cc) && cc is VmfMovie.Shape s1) { sh = s1; mw = mw * LocalMatrix(c); }
             }
             if (sh == null || Mathf.Abs(mw.B) > 1e-3f || Mathf.Abs(mw.C) > 1e-3f) return;
+            if (sh.Morph) return;   // Morph-Maske (z.B. Füllbalken der Fahrzeugdaten): nur als Rechteck nach Ratio (MaskRect)
             var (tex, rect) = ShapeTexture(sh, mw);
             if (tex == null) return;
             var a = mw.Apply(new Vector2(rect.xMin, rect.yMin)); var b = mw.Apply(new Vector2(rect.xMax, rect.yMax));
@@ -832,13 +885,22 @@ namespace TDU2.Map.Flash
         }
 
         /// <summary>Bildschirm-Begrenzung aller Shapes eines Masken-Objekts (GUI-Pixel).</summary>
+        /// <summary>Begrenzung einer Shape; bei Morph-Shapes zwischen Start- und Endform nach Ratio (Masken von Balken-Animationen).</summary>
+        static Rect MorphBounds(VmfMovie.Shape s, DisplayObject d)
+        {
+            if (!s.Morph || d == null) return s.Bounds;
+            float t = Mathf.Clamp01(d.Ratio / 65535f);
+            var a = s.Bounds; var b = s.EndBounds;
+            return Rect.MinMaxRect(Mathf.Lerp(a.xMin, b.xMin, t), Mathf.Lerp(a.yMin, b.yMin, t), Mathf.Lerp(a.xMax, b.xMax, t), Mathf.Lerp(a.yMax, b.yMax, t));
+        }
+
         Vector4? MaskRect(DisplayObject d, Matrix2D m)
         {
             var mw = m * LocalMatrix(d);
             if (!Movie.Chars.TryGetValue(d.CharId, out var ch)) return null;
             if (ch is VmfMovie.Shape sh)
             {
-                var b = sh.Bounds;
+                var b = MorphBounds(sh, d);
                 var a0 = mw.Apply(new Vector2(b.xMin, b.yMin)); var a1 = mw.Apply(new Vector2(b.xMax, b.yMin));
                 var a2 = mw.Apply(new Vector2(b.xMax, b.yMax)); var a3 = mw.Apply(new Vector2(b.xMin, b.yMax));
                 return new Vector4(Mathf.Min(Mathf.Min(a0.x, a1.x), Mathf.Min(a2.x, a3.x)), Mathf.Min(Mathf.Min(a0.y, a1.y), Mathf.Min(a2.y, a3.y)),
@@ -885,7 +947,8 @@ namespace TDU2.Map.Flash
                 if (background)
                 {
                     RequestRaster(s.Id, target, true);
-                    if (!haveSmaller) { _missing = true; return (null, default); }
+                    // Prüfdurchgang (Einblenden): auch eine nur unscharfe kleinere Stufe zählt als "fehlt" -> erst scharf zeigen
+                    if (!haveSmaller || _probe) { _missing = true; return (null, default); }
                     found = true;
                 }
                 else if (haveSmaller && Time.frameCount == _rasterFrame && _rasterMs > RasterBudgetMs)
@@ -948,11 +1011,11 @@ namespace TDU2.Map.Flash
             GL.TexCoord2(0, vb); GL.Vertex3(p3.x, p3.y, 0);
         }
 
-        void DrawText(VmfMovie.EditText t, Matrix2D m, ColorTransform cx, Instance ctx)
+        void DrawText(VmfMovie.EditText t, Matrix2D m, ColorTransform cx, Instance ctx, string overrideText = null)
         {
             if (_probe) return;
-            string s = null;
-            if (!string.IsNullOrEmpty(t.Variable))
+            string s = overrideText;
+            if (s == null && !string.IsNullOrEmpty(t.Variable))
             {
                 if (!_vars.TryGetValue(ResolveVar(ctx, t.Variable), out s)) _vars.TryGetValue(t.Variable, out s);
             }
@@ -986,7 +1049,16 @@ namespace TDU2.Map.Flash
             _textStyle.normal.textColor = new Color(cMul.x + cx.Add.x, cMul.y + cx.Add.y, cMul.z + cx.Add.z, cMul.w + cx.Add.w);
             _textStyle.richText = true;
             _textStyle.wordWrap = t.WordWrap;
-            var lr = new Rect(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y), Mathf.Abs(b.x - a.x) + h, Mathf.Abs(b.y - a.y) + h);
+            // Feldrand (2 px + Ränder) wie bei der Original-Schrift; Überlänge nur zur freien Seite: rechtsbündige Felder enden am
+            // rechten Rand (sonst rutschte z.B. "$ 0" in das Geld-Symbol bzw. "28" über das "/ 25" daneben), zentrierte bleiben mittig
+            float sc = m.ScaleEstimate;
+            float fx0 = Mathf.Min(a.x, b.x) + (2f + t.LeftMargin) * sc, fx1 = Mathf.Max(a.x, b.x) - (2f + t.RightMargin) * sc;
+            if (fx1 < fx0) { float mid = (fx0 + fx1) * 0.5f; fx0 = fx1 = mid; }
+            float fy = Mathf.Min(a.y, b.y) + 2f * sc, fh = Mathf.Abs(b.y - a.y) + h;
+            float fw = fx1 - fx0;
+            var lr = t.Align == 1 ? new Rect(fx0 - h, fy, fw + h, fh)
+                   : t.Align == 2 ? new Rect(fx0 - h * 0.5f, fy, fw + h, fh)
+                   : new Rect(fx0, fy, fw + h, fh);
             // Maske (ClipDepth) auch für die Ersatzschrift – sonst stehen z.B. Listenzeilen der nächsten Seite neben dem Fenster
             var cr = Rect.MinMaxRect(Mathf.Max(lr.xMin, _clip.x), Mathf.Max(lr.yMin, _clip.y), Mathf.Min(lr.xMax, _clip.z), Mathf.Min(lr.yMax, _clip.w));
             if (cr.width <= 0.5f || cr.height <= 0.5f) return;

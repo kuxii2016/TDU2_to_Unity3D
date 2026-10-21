@@ -210,7 +210,11 @@ namespace TDU2.Map.Vehicles
                 case "stic:list:canc": case "stic:list:clos": if (_mode == Mode.List) _mode = Mode.Menu; return;
 
                 // ---------------- Platzieren
-                case "stic:move": case "stic:rota": case "stic:scal": case "stic:alph": case "stic:colo":
+                case "stic:move":
+                case "stic:rota":
+                case "stic:scal":
+                case "stic:alph":
+                case "stic:colo":
                     _tool = s.Substring(5); if (_tool == "colo") BeginStickerColor(); UpdateInfos(); return;
                 case "stic:appl": Apply(); return;
                 case "stic:flip": _flip = !_flip; return;
@@ -630,8 +634,14 @@ namespace TDU2.Map.Vehicles
             if (a.sqrMagnitude > 1f || b.sqrMagnitude > 1f) return null;   // entartet (Naht)
             return new StickerPlacement
             {
-                Board = (byte)_board.Id, Index = (byte)_stickerIndex, U = uv.x, V = uv.y, A = a, B = b,
-                Tint = new Color32(_tint.r, _tint.g, _tint.b, (byte)Mathf.RoundToInt(_alpha * 255f)), Flags = (byte)(_flip ? 1 : 0),
+                Board = (byte)_board.Id,
+                Index = (byte)_stickerIndex,
+                U = uv.x,
+                V = uv.y,
+                A = a,
+                B = b,
+                Tint = new Color32(_tint.r, _tint.g, _tint.b, (byte)Mathf.RoundToInt(_alpha * 255f)),
+                Flags = (byte)(_flip ? 1 : 0),
             };
         }
 

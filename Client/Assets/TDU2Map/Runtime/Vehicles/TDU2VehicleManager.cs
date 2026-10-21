@@ -38,6 +38,7 @@ namespace TDU2.Map.Vehicles
         Task _dbTask;
         Task<CarAssets> _loadTask;
         int _carIndex = -1, _colorIndex;
+        bool _colorFromChoice;   // _colorIndex stammt aus einer gekauften Ausstattung (TDU2CarChoices)
         Vector3? _pendingPos; Quaternion _pendingRot; Vector3 _pendingVel;
         CarAssets _assets;
         CarModel _model;
@@ -46,6 +47,8 @@ namespace TDU2.Map.Vehicles
         TDU2VehicleLights _lights;
         [Tooltip("Echtzeit-Reflexionen für Spiegel und Lack (kostet etwas Leistung)")]
         public bool MirrorReflections = true;
+        [Tooltip("Fahrer-Avatar im Auto zeigen (Kleidung aus dem Spielstand)")]
+        public bool ShowDriver = true;
         [Tooltip("Original-HUD des Spiels (Flash/VMF: Drehzahlmesser, Tacho, Gang)")]
         public bool ShowOriginalHud = true;
         TDU2VehicleHud _hud;
@@ -74,6 +77,14 @@ namespace TDU2.Map.Vehicles
         public bool ExternalControl { get; set; }
         public string BnkDir => _bnkDir;
         public int ColorIndex => _colorIndex;
+        /// <summary>Felge des aktuellen Autos (DBRims._hashcode, 0 = keine) – geht an die Mitspieler (UDP).</summary>
+        public int RimId { get; private set; }
+        /// <summary>Innenraum des aktuellen Autos (DBInterior._hashcode, 0 = keiner) – geht an die Mitspieler (UDP).</summary>
+        public int InteriorId { get; private set; }
+        /// <summary>Glühende Bremsscheiben des aktuellen Autos (null ohne Auto/Scheibenmaterial).</summary>
+        public TDU2BrakeGlow BrakeGlow { get { var fx = Current != null ? Current.GetComponent<TDU2VehicleEffects>() : null; return fx != null ? fx.Glow : null; } }
+        /// <summary>Türen/Fenster/Verdeck des aktuellen Autos (null, solange nicht angelegt).</summary>
+        public TDU2Accessories Accessories => _model != null ? TDU2Accessories.Existing(_model) : null;
         /// <summary>Modell des aktuellen Autos (null ohne Auto).</summary>
         public CarModel Model => _model;
         bool _liveryHooked;
@@ -137,8 +148,12 @@ namespace TDU2.Map.Vehicles
             if (i >= 0) _carIndex = i;
             _pendingPos = pos; _pendingRot = rot; _pendingVel = Vector3.zero;
             string bnk = _bnkDir; var db = Database; int color = _colorIndex; bool snd = LoadSound;
+            // gekaufte Ausstattung (Autohändler: Lack, Felgen, Innenraum); der Lack-Index geht auch an die Mitspieler (UDP)
+            int rim = 0, interior = 0;
+            if (TDU2CarChoices.TryGet(car.FileName, out var ch)) { color = _colorIndex = ch.Color; rim = ch.Rim; interior = ch.Interior; _colorFromChoice = true; }
+            else if (_colorFromChoice) { color = _colorIndex = 0; _colorFromChoice = false; }   // Lack eines anderen Autos nicht übernehmen
             _status = "Lade " + car.ModelName + " ...";
-            _loadTask = Task.Run(() => CarAssets.Load(bnk, db, car, color, snd));
+            _loadTask = Task.Run(() => CarAssets.Load(bnk, db, car, color, snd, rim, interior));
             return true;
         }
 
@@ -190,6 +205,9 @@ namespace TDU2.Map.Vehicles
                 avail.Sort((a, b) => string.Compare(a.ModelName, b.ModelName, StringComparison.OrdinalIgnoreCase));
                 lock (Available) { Available.Clear(); Available.AddRange(avail); }
                 Database = db; Cameras = cams; Physics = phys;
+                // Avatare (Kleidung aus DBClothe, Bänke unter avatar/, Animationen unter scenarics/avatars)
+                try { Avatars.AvatarLibrary.Init(bnk, db.Root); }
+                catch (Exception ex) { Debug.LogWarning("[TDU2] Avatare: " + ex.Message); }
             });
         }
 
@@ -211,7 +229,9 @@ namespace TDU2.Map.Vehicles
             }
 
             PollLoad();
+            TrySettle();
             if (Suspended) return;
+            RememberRoad();
             HandleKeys(ready);
             DriveInput();
         }
@@ -228,6 +248,111 @@ namespace TDU2.Map.Vehicles
             Load(_carIndex, pos, Quaternion.LookRotation(fwd.normalized, Vector3.up), Vector3.zero);
         }
 
+        // ------------------------------------------------------------------ Zurück auf die Straße / sicherer Teleport
+        Vector3 _roadPos; Quaternion _roadRot = Quaternion.identity; bool _hasRoad; float _roadAt;
+        Vector3 _settlePos; Quaternion _settleRot = Quaternion.identity; float _settleRefY, _settleStart, _settleUntil = -1f; bool _settleHasRef;
+
+        /// <summary>Gerade ein Teleport, der auf das Nachladen der Umgebung wartet (Auto steht still).</summary>
+        public bool Settling => _settleUntil > 0f;
+
+        /// <summary>Letzte Stelle, an der das Auto mit allen Rädern auf der Straße stand (alle 0,5 s, aufrecht).</summary>
+        void RememberRoad()
+        {
+            var v = Current;
+            if (v == null || Settling || Time.time - _roadAt < 0.5f) return;
+            _roadAt = Time.time;
+            if (v.Wheels == null || v.Wheels.Length == 0 || v.transform.up.y < 0.85f) return;
+            foreach (var w in v.Wheels)
+            {
+                if (!w.Grounded || w.Surface != 0 || w.GroundCollider == null) return;
+                if (w.GroundCollider.name.IndexOf("Terrain", StringComparison.OrdinalIgnoreCase) >= 0) return;
+            }
+            var f = Vector3.ProjectOnPlane(v.transform.forward, Vector3.up);
+            if (f.sqrMagnitude < 1e-3f) return;
+            var root = Streamer != null ? Streamer.MapRoot : null;
+            _roadPos = root != null ? root.InverseTransformPoint(v.transform.position) : v.transform.position;   // Spielraum (Gleitkomma-Ursprung)
+            _roadRot = Quaternion.LookRotation(f.normalized, Vector3.up);
+            _hasRoad = true;
+        }
+
+        /// <summary>R / "Back on track": an die letzte Straßenstelle (bis 1 km), sonst auf die nächste Straße, sonst aufrichten.</summary>
+        public void ResetToRoad()
+        {
+            var v = Current;
+            if (v == null) return;
+            var root = Streamer != null ? Streamer.MapRoot : null;
+            var here = v.transform.position;
+            if (_hasRoad)
+            {
+                var p = root != null ? root.TransformPoint(_roadPos) : _roadPos;
+                if ((p - here).sqrMagnitude < 1000f * 1000f) { TeleportSafe(p, _roadRot); return; }
+            }
+            if (_minimap != null && root != null)
+            {
+                var g = root.InverseTransformPoint(here);
+                if (_minimap.NearestRoad(g, 300f, out var rp))
+                {
+                    var f = Vector3.ProjectOnPlane(v.transform.forward, Vector3.up);
+                    if (_minimap.NearestRoad(rp + new Vector3(f.x, 0f, f.z).normalized * 12f, 10f, out var n1) && (n1 - rp).sqrMagnitude > 1f)
+                    { var d = root.TransformVector(n1 - rp); d.y = 0f; if (Vector3.Dot(d, f) < 0f) d = -d; f = d; }
+                    TeleportSafe(root.TransformPoint(rp), Quaternion.LookRotation(f.sqrMagnitude > 1e-3f ? f.normalized : Vector3.forward, Vector3.up));
+                    return;
+                }
+            }
+            var q = here; q.y = GroundY(q) + 0.3f;
+            var fw = Vector3.ProjectOnPlane(v.transform.forward, Vector3.up);
+            v.ResetVehicle(q, Quaternion.LookRotation(fw.sqrMagnitude > 1e-3f ? fw.normalized : Vector3.forward, Vector3.up));
+        }
+
+        /// <summary>
+        /// Teleport (Karte, Spieler, R): Auto an der Zielstelle festhalten, bis dort Boden-Collider geladen sind, dann auf die
+        /// Fläche setzen, die der Zielhöhe am nächsten liegt (Straße statt Brücke/Dach/Tunneldecke). Vorher fiel das Auto durch
+        /// noch nicht geladene Sektoren bzw. steckte im Boden und wurde weggeschleudert.
+        /// </summary>
+        public void TeleportSafe(Vector3 world, Quaternion rot)
+        {
+            var v = Current;
+            if (v == null) return;
+            var sroot = Streamer != null ? Streamer.MapRoot : null;
+            _settlePos = sroot != null ? sroot.InverseTransformPoint(world) : world;   // Spielraum (Gleitkomma-Ursprung kann sich verschieben)
+            _settleRot = rot;
+            _settleRefY = world.y; _settleHasRef = !float.IsNaN(world.y) && !float.IsInfinity(world.y);
+            _settleStart = Time.unscaledTime; _settleUntil = Time.unscaledTime + 12f;
+            var rb = v.GetComponent<Rigidbody>();
+            v.ResetVehicle(world + Vector3.up * 1.5f, rot);
+            if (rb != null) rb.isKinematic = true;
+            _hasRoad = false;
+            TrySettle();
+        }
+
+        void TrySettle()
+        {
+            if (_settleUntil < 0f) return;
+            var v = Current;
+            if (v == null) { _settleUntil = -1f; return; }
+            var rb = v.GetComponent<Rigidbody>();
+            var sroot = Streamer != null ? Streamer.MapRoot : null;
+            var sp = sroot != null ? sroot.TransformPoint(_settlePos) : _settlePos;
+            float refY = sp.y;
+            float top = refY + 500f, len = 3000f;
+            var hits = UnityEngine.Physics.RaycastAll(new Vector3(sp.x, top, sp.z), Vector3.down, len, ~(1 << 2), QueryTriggerInteraction.Ignore);
+            bool ok = false; float y = 0f, best = float.MaxValue;
+            foreach (var h in hits)
+            {
+                if (h.collider == null || (rb != null && h.collider.attachedRigidbody == rb) || h.normal.y < 0.6f) continue;
+                float d = _settleHasRef ? Mathf.Abs(h.point.y - refY) : -h.point.y;
+                if (d < best) { best = d; y = h.point.y; ok = true; }
+            }
+            bool timeout = Time.unscaledTime > _settleUntil;
+            // Fläche nahe der Zielhöhe (±6 m) sofort; weiter weg erst nach 3 s (Zielhöhe evtl. ungenau), sonst weiter warten
+            if (ok && _settleHasRef && best > 6f && Time.unscaledTime - _settleStart < 3f) ok = false;
+            if (!ok && !timeout) return;   // Umgebung noch nicht geladen: weiter festhalten
+            if (!ok) y = _settleHasRef ? refY : GroundY(sp);
+            if (rb != null) rb.isKinematic = false;
+            v.ResetVehicle(new Vector3(sp.x, y + 0.45f, sp.z), _settleRot);
+            _settleUntil = -1f;
+        }
+
         float GroundY(Vector3 p)
         {
             if (UnityEngine.Physics.Raycast(p + Vector3.up * 200f, Vector3.down, out var hit, 2000f, ~(1 << 2), QueryTriggerInteraction.Ignore)) return hit.point.y;
@@ -242,8 +367,12 @@ namespace TDU2.Map.Vehicles
             var car = Available[_carIndex];
             _pendingPos = pos; _pendingRot = rot; _pendingVel = vel;
             string bnk = _bnkDir; var db = Database; int color = _colorIndex; bool snd = LoadSound;
+            // gekaufte Ausstattung (Autohändler: Lack, Felgen, Innenraum); der Lack-Index geht auch an die Mitspieler (UDP)
+            int rim = 0, interior = 0;
+            if (TDU2CarChoices.TryGet(car.FileName, out var ch)) { color = _colorIndex = ch.Color; rim = ch.Rim; interior = ch.Interior; _colorFromChoice = true; }
+            else if (_colorFromChoice) { color = _colorIndex = 0; _colorFromChoice = false; }   // Lack eines anderen Autos nicht übernehmen
             _status = "Lade " + car.ModelName + " ...";
-            _loadTask = Task.Run(() => CarAssets.Load(bnk, db, car, color, snd));
+            _loadTask = Task.Run(() => CarAssets.Load(bnk, db, car, color, snd, rim, interior));
         }
 
         void PollLoad()
@@ -272,6 +401,8 @@ namespace TDU2.Map.Vehicles
             rb.isKinematic = true;
 
             _model = CarModel.Build(a, go.transform);
+            RimId = a.Rim != null ? a.Rim.Id : 0;
+            InteriorId = a.Interior != null ? a.Interior.Id : 0;
             foreach (var t in go.GetComponentsInChildren<Transform>(true)) t.gameObject.layer = 2;
             // eigene Lackierung/Beklebung aus dem Sticker-Shop (TDU2Liveries)
             if (!Racing.RacingSchoolMenu.IsSchoolCar(car)) { TDU2StickerLibrary.Ensure(_bnkDir); TDU2LiveryView.ApplyOwn(_model, car.FileName); }
@@ -356,6 +487,12 @@ namespace TDU2.Map.Vehicles
             go.AddComponent<TDU2VehicleEffects>().Setup(veh, _model, a);
             // Verschmutzung (dirt_scratch, DBCarDirtData)
             go.AddComponent<TDU2CarDirt>().Setup(veh, _model);
+            // Fahrer: eigener Avatar mit der Kleidung aus dem Spielstand (Hände am Lenkrad, Füße an den Pedalen)
+            if (ShowDriver)
+            {
+                var drv = Avatars.TDU2CarAvatar.Attach(go, _model, Avatars.AvatarConfigs.Local, false, () => veh.Steer);
+                if (drv != null) drv.ConfigCode = () => Avatars.AvatarConfigs.LocalCode;
+            }
 
             // Spiegel/Lack: Echtzeit-Reflexionen der Umgebung (Rück- und Außenspiegel sind Chrommaterialien)
             if (MirrorReflections)
@@ -409,7 +546,8 @@ namespace TDU2.Map.Vehicles
         void Despawn(bool restoreFlyCam)
         {
             if (Current != null) { UnityUtil.SafeDestroy(Current.gameObject); Current = null; }
-            _model?.Destroy(); _model = null;
+            TDU2Accessories.Forget(_model);
+            _model?.Destroy(); _model = null; RimId = 0; InteriorId = 0;
             _assets?.DestroyTextures(); _assets = null;
             _audio = null;
             _lights = null;
@@ -452,12 +590,7 @@ namespace TDU2.Map.Vehicles
             if (TDU2Controls.Pressed("gearbox")) { AutomaticGearbox = !AutomaticGearbox; Current.AutomaticGearbox = AutomaticGearbox; }
             if (TDU2Controls.Pressed("gearup")) Current.ShiftUp();
             if (TDU2Controls.Pressed("geardown")) Current.ShiftDown();
-            if (TDU2Controls.Pressed("reset"))
-            {
-                var p = Current.transform.position; p.y = GroundY(p) + 0.3f;
-                var f = Vector3.ProjectOnPlane(Current.transform.forward, Vector3.up);
-                Current.ResetVehicle(p, Quaternion.LookRotation(f.sqrMagnitude > 1e-3f ? f.normalized : Vector3.forward, Vector3.up));
-            }
+            if (TDU2Controls.Pressed("reset")) ResetToRoad();   // "Back on track": zurück auf die Straße
             if (_audio != null) _audio.SetHorn(TDU2Controls.Held("horn"));
             if (_lights != null)
             {
@@ -466,6 +599,19 @@ namespace TDU2.Map.Vehicles
                 if (TDU2Controls.Pressed("blinkr")) { _lights.IndicatorRight = !_lights.IndicatorRight; _lights.IndicatorLeft = false; }
                 if (TDU2Controls.Pressed("hazard")) _lights.Hazard = !_lights.Hazard;
                 _lights.Flash = TDU2Controls.Held("flash");   // Lichthupe (im Original: Herausforderung an Mitspieler)
+            }
+            // Zubehör wie im Spiel (HUD-Menü /HUD/ig_menu): Verdeck, Fenster, Blinker – Auswahl beim Fahren mit 1–4
+            var acc = _model != null ? TDU2Accessories.For(_model, _lights) : null;
+            if (acc != null)
+            {
+                acc.Audio = _audio;
+                // Türen nur im Stand; ab ~12 km/h gehen offene Türen von selbst zu
+                if (TDU2Controls.Pressed("doors") && Mathf.Abs(Current.SpeedKmh) < 5f) acc.ToggleDoors();
+                else if (acc.DoorsOpen && Mathf.Abs(Current.SpeedKmh) > 12f) { acc.SetDoor(true, false); acc.SetDoor(false, false); }
+                if (TDU2Controls.Pressed("windows")) acc.ToggleWindows();
+                acc.Update(Time.deltaTime);
+                if (TDU2AccessoryMenu.IsOpen) TDU2AccessoryMenu.Update(false);
+                else if (TDU2Controls.Pressed("accessories")) TDU2AccessoryMenu.Open(acc, Current.Car != null && Current.Car.Raw != null && Current.Car.Raw.I("_vehiclecategory") >= 18 && Current.Car.Raw.I("_vehiclecategory") <= 24);
             }
 #endif
         }

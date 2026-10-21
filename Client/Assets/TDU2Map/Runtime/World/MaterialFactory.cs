@@ -37,25 +37,16 @@ namespace TDU2.Map.World
     public static class MaterialFactory
     {
         public static TDU2ShaderSet Shaders = new TDU2ShaderSet();
-        public static float VertexColorStrength = 0.5f;
-        public static float ShadowMapStrength = 0.6f;
-        /// <summary>Additive Leucht-Materialien (Neon, Halos, Lampenschein). Im Spiel nur nachts sichtbar -> standardmäßig aus.</summary>
-        public static bool ShowGlowMaterials = false;
-        /// <summary>Gerade wird ein Interieur gebaut (Casino-/Interieur-Shader wie im Original, kein Nacht-Ausblenden).</summary>
+        public static float VertexColorStrength = Renderconfig.VertexColorStrength;
+        public static float ShadowMapStrength = Renderconfig.ShadowMapStrength;
+        public static bool ShowGlowMaterials = Renderconfig.ShowGlowMaterials;
         public static bool Interior;
-        // Shader-Sets (Docs/shader-sets.csv)
-        const ulong ShaderGouraud = 0x73078865ca37336dUL, ShaderNeonDecal = 0x63078165ca37416dUL,
-                    ShaderActors = 0xd5013ed0dcacafafUL, ShaderCasinoScroll = 0xfafafafafafafafaUL;
-        public static float GlowIntensity = 0.35f;
-        /// <summary>Helligkeit der Lampen-Halos (Billboards).</summary>
-        public static float HaloIntensity = 0.8f;
-        /// <summary>Wind für Laub (TDU2/Foliage).</summary>
-        public static float WindStrength = 1f;
-        /// <summary>Gebäude/Objekte: Helligkeitsfaktor und Wrap-Lighting (0 = reines Lambert).</summary>
-        public static float ObjectBrightness = 1.15f, WrapLighting = 0.35f;
-
+        const ulong ShaderGouraud = 0x73078865ca37336dUL, ShaderNeonDecal = 0x63078165ca37416dUL, ShaderActors = 0xd5013ed0dcacafafUL, ShaderCasinoScroll = 0xfafafafafafafafaUL;
+        public static float GlowIntensity = Renderconfig.GlowIntensity;
+        public static float HaloIntensity = Renderconfig.HaloIntensity;
+        public static float WindStrength = Renderconfig.WindStrength;
+        public static float ObjectBrightness = Renderconfig.ObjectBrightness, WrapLighting = Renderconfig.WrapLighting;
         static Material _water, _fallback;
-
         public static bool IsSrp => GraphicsSettings.currentRenderPipeline != null;
 
         static Shader SrpLit()
@@ -150,7 +141,7 @@ namespace TDU2.Map.World
                     var c = new Color(0.05f, 0.25f, 0.35f, 0.85f);
                     _water.color = c;
                     if (_water.HasProperty("_BaseColor")) _water.SetColor("_BaseColor", c);
-                    if (_water.HasProperty("_Smoothness")) _water.SetFloat("_Smoothness", 0.9f);
+                    if (_water.HasProperty("_Smoothness")) _water.SetFloat("_Smoothness", 0.5f);
                 }
                 return _water;
             }

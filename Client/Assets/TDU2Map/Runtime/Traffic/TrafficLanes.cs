@@ -259,6 +259,7 @@ namespace TDU2.Map.Traffic
                         pts.Add(p); off.Add(o); hgt.Add(h); lim.Add(speed);
                     }
                 }
+
                 if (pc.Points.Length == 1 && pts.Count == 0) { pts.Add(pc.Points[0]); off.Add(o); hgt.Add(h); lim.Add(speed); }
             }
             int n = pts.Count;
@@ -388,6 +389,13 @@ namespace TDU2.Map.Traffic
             _junctions[(from, to)] = j;
             return j;
         }
+
+
+        public IEnumerable<JunctionTrack> GetDebugJunctions()
+        {
+            return _junctions.Values;
+        }
+
 
         /// <summary>Nächster Spurpunkt zu p (Inselkoordinaten), passend zur Richtung (Wiedereinfädeln nach einem Unfall).</summary>
         public bool Nearest(Vector3 p, Vector3 dir, float maxDist, out LaneTrack best, out float bestS)

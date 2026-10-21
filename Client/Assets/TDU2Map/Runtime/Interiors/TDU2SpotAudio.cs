@@ -10,7 +10,8 @@ namespace TDU2.Map.Vehicles
 {
     /// <summary>
     /// Ton in Interieurs wie im Spiel: Autoradio aus, stattdessen die Spot-Musik aus sound/musics (MngMusic, "%sSound/Musics/%s").
-    ///   ERS_A schoolasphalt, ERS_B schooldirt, ERS_C schoolclassic, ECD_* cardealer, EPH_* playerhouse01..03, ...
+    ///   ERS_A schoolasphalt, ERS_B schooldirt, ERS_C schoolclassic, ECD_* cardealer, EPH_* playerhouse01..03,
+    ///   EAS_* (Kleidungsläden) clothesshop01/02, ...
     /// Zuerst wird im Exterior-Bank des Spots (entities.xmb) nach einem Verweis auf eine der Musikdateien gesucht
     /// (MusicDesc o.ä.), sonst gilt die Tabelle unten. Beim Verlassen läuft das Radio weiter.
     /// Wird von <see cref="TDU2Interiors"/> automatisch angehängt (Option SpotAudio).
@@ -32,7 +33,7 @@ namespace TDU2.Map.Vehicles
             ("ECDC", "cardealer"), ("ECD", "cardealer"), ("EBD", "cardealer"),
             ("EPH", "playerhouse"), ("ETUN", "tunershop"), ("ESUR", "surgeryclinic"),
             ("EHD", "hairdresser"), ("EGAM", "gamblinghall"), ("EAIR", "airport"),
-            ("ERE", "realtor"), ("ECH", "clothesshop"), ("EUC", "club"),
+            ("ERE", "realtor"), ("ECH", "clothesshop"), ("EAS", "clothesshop"), ("EUC", "club"),
         };
 
         AudioSource _src;

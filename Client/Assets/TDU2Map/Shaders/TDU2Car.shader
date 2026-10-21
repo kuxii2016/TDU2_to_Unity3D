@@ -7,6 +7,9 @@ Shader "TDU2/Car"
         _Color2 ("Zweite Farbe (Bicolor-Lack, Farbwechsel nach Blickwinkel)", Color) = (1,1,1,1)
         _Bicolour ("Bicolor-Lack", Range(0,1)) = 0
         _MainTex ("Textur (DETAIL)", 2D) = "white" {}
+        _MainGray ("Textur nur Rotkanal als Helligkeit (gepackte AO-Maske, z.B. Reifenprofil lr_ambocc)", Float) = 0
+        _Heat ("Hitze (Bremsscheibe glüht, 0..1)", Range(0,1)) = 0
+        _HeatColor ("Glühfarbe", Color) = (1,0.25,0.04,1)
         _Glossiness ("Glätte", Range(0,1)) = 0.5
         _Metallic ("Metallisch", Range(0,1)) = 0
         _Cutoff ("Alpha Cutoff (0 = aus)", Range(0,1)) = 0
@@ -51,7 +54,8 @@ Shader "TDU2/Car"
         fixed4 _Color, _Color2, _EmissionTint;
         half _Bicolour;
         half _Emission, _EmissionDiff, _SelfIllum, _ClearCoat, _ClearCoatPower, _UseMask, _LgtLights, _LgtBrake, _LgtReverse, _LgtBlink;
-        half _Glossiness, _Metallic, _Cutoff, _Occlusion, _Flake;
+        half _Glossiness, _Metallic, _Cutoff, _Occlusion, _Flake, _MainGray, _Heat;
+        fixed4 _HeatColor;
         float _FlakeScale;
         float FlakeHash(float2 p) { return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453); }
         struct Input { float2 uv_MainTex; float2 uv2_StickerTex; float3 worldNormal; float3 worldPos; float3 worldRefl; };
@@ -64,7 +68,9 @@ Shader "TDU2/Car"
                 float ndvB = saturate(dot(normalize(IN.worldNormal), normalize(_WorldSpaceCameraPos - IN.worldPos)));
                 baseCol.rgb = lerp(_Color.rgb, _Color2.rgb, smoothstep(0.15, 0.95, 1.0 - ndvB) * _Bicolour);
             }
-            fixed4 c = tex2D(_MainTex, IN.uv_MainTex) * baseCol;
+            fixed4 tx = tex2D(_MainTex, IN.uv_MainTex);
+            if (_MainGray > 0.5) tx.rgb = tx.rrr;   // R = scharfe Verschattung (G/B dieselbe weicher) – keine Farbe
+            fixed4 c = tx * baseCol;
             clip(c.a - _Cutoff);
             if (_UseSticker > 0.5)
             {
@@ -137,6 +143,12 @@ Shader "TDU2/Car"
                 half4 envF = UNITY_SAMPLE_TEXCUBE_LOD(unity_SpecCube0, reflect(-v, fn), 2.0);
                 o.Emission += (_LightColor0.rgb * spark * 0.7 + DecodeHDR(envF, unity_SpecCube0_HDR) * step(0.93, h1) * 0.04)
                               * (o.Albedo * 0.6 + 0.4) * _Flake * (1 - dirtK);
+            }
+            if (_Heat > 0.001)
+            {
+                // glühende Bremsscheibe: erst dunkelrot, mit mehr Hitze heller/orange (nach Vollbremsungen, kühlt langsam ab)
+                half h = saturate(_Heat);
+                o.Emission += _HeatColor.rgb * lerp(half3(0.6, 0.12, 0.02), half3(1.6, 0.7, 0.2), h * h) * h * 2.0;
             }
             o.Alpha = 1;
         }

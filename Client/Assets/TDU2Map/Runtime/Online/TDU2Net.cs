@@ -35,7 +35,73 @@ namespace TDU2.Map.Online
         public List<int> stickerBoards = new List<int>();
         /// <summary>"Meine Farben" des Sticker-Shops (6 Plätze, 0xRRGGBB, -1 = leer).</summary>
         public List<int> favoriteColors = new List<int>();
+        /// <summary>Aussehen des Avatars (AvatarConfig.Encode: Geschlecht, Herkunft, Kleidung mit Farben).</summary>
+        public string avatar = "";
+        /// <summary>Gekaufte Kleidungsstücke (DBClothe._hashcode).</summary>
+        public List<int> ownedClothes = new List<int>();
+        /// <summary>Lesezeichen der großen Karte (je Insel, Spielkoordinaten).</summary>
+        public List<BookmarkEntry> bookmarks = new List<BookmarkEntry>();
+        /// <summary>Als Favorit markierte Spots der großen Karte (Spot-Code).</summary>
+        public List<string> favoriteSpots = new List<string>();
+        /// <summary>My House: Einrichtung je Haus (Spot-Code) – Möbel-Bank je Entity, Material je Fläche.</summary>
+        public List<HouseLayout> houses = new List<HouseLayout>();
+        /// <summary>Gekaufte Möbel (DBFurniture._hashcode) und Böden/Tapeten (DBMaterial._hashcode).</summary>
+        public List<int> ownedFurniture = new List<int>();
+        public List<int> ownedMaterials = new List<int>();
+        /// <summary>MyTDULife (Tagebuch "My Life"): Stimmung, Profil, Kästen, Avatar-Foto.</summary>
+        public MyLifeData myLife = new MyLifeData();
+        /// <summary>Zuletzt betretenes Interieur ("SPOT|bank", leer = draußen) – beim Anmelden geht es dort weiter.</summary>
+        public string interior = "";
+        /// <summary>Ausstattung je Auto (Autohändler: Felgen, Lack, Innenraum).</summary>
+        public List<CarConfigEntry> carConfigs = new List<CarConfigEntry>();
         public string savedAt = "";
+    }
+
+    /// <summary>Ausstattung eines Autos: Lack = Index in DBCarsAndColors des Autos, Felge = DBRims._hashcode, Innenraum = DBInterior._hashcode (0 = Standard).</summary>
+    [Serializable]
+    public sealed class CarConfigEntry
+    {
+        public string car = "";
+        public int color;
+        public int rim;
+        public int interior;
+    }
+
+    /// <summary>MyTDULife – andere Spieler lesen es über op "profile" (Foto) bzw. die Spielerliste (Stimmung).</summary>
+    [Serializable]
+    public sealed class MyLifeData
+    {
+        public string mood = "neutral";                              // Smiley-Label (neutral, big_smile, tongue, wink, sad …)
+        public string moodText = "";                                 // Stimmungstext
+        public List<string> boxes = new List<string>();              // Kästen ed1..ed7
+        public List<HouseEntry> fields = new List<HouseEntry>();     // Profilangaben: Liste -> Index ("attitude" -> "2")
+        public int birthDay, birthMonth, birthYear;
+        public string gender = "";
+        public string photo = "";                                    // Avatar-Foto (JPG, Base64)
+        public int photoVer;
+    }
+
+    [Serializable]
+    public sealed class HouseLayout
+    {
+        public string spot = "";
+        public List<HouseEntry> furn = new List<HouseEntry>();   // Entity-Name -> Bank (interior/myhouse)
+        public List<HouseEntry> mats = new List<HouseEntry>();   // Fläche ("Floor1", "Wall2") -> Material (ground_NN / wall_NN)
+    }
+
+    [Serializable]
+    public sealed class HouseEntry
+    {
+        public string k = "";
+        public string v = "";
+    }
+
+    [Serializable]
+    public sealed class BookmarkEntry
+    {
+        public int id;
+        public string island = "";
+        public float x, y, z;
     }
 
     [Serializable]
@@ -57,6 +123,18 @@ namespace TDU2.Map.Online
         public int version = 1;
         public int nationality;
         public SaveData save;
+        public int target;          // invite/invreply: Spielernummer
+        public bool accept;         // invreply
+        public string kind = "";    // invite: "codriving"
+    }
+
+    /// <summary>Offene Einladung (op "status": invites).</summary>
+    [Serializable]
+    public sealed class InviteEntry
+    {
+        public int from;
+        public string nick = "";
+        public string kind = "";
     }
 
     /// <summary>Eintrag der Spielerliste des Servers (op "status").</summary>
@@ -73,6 +151,12 @@ namespace TDU2.Map.Online
         public float px, pz;
         public int nationality;
         public int island;          // 1 Ibiza, 2 Hawaii, 0 unbekannt (Server ohne Inseltrennung)
+        public string avatar = "";  // Aussehen (AvatarConfig.Encode) – Mitspieler im Auto mit ihrer Kleidung
+        public string mood = "";    // MyTDULife: Smiley, Stimmungstext, Foto-Version (Foto über op "profile")
+        public string moodTxt = "";
+        public int photoVer;
+        public int rideWith;        // fährt als Beifahrer bei Spieler … mit (0 = nein)
+        public int passenger;       // hat Spieler … als Beifahrer (0 = nein)
     }
 
     [Serializable]
@@ -98,6 +182,15 @@ namespace TDU2.Map.Online
         public long radioEpoch;
         public int radioSeed;
         public long serverTime;
+        /// <summary>status: offene Einladungen an mich, Meldungen ("accepted:id:nick", "declined:…", "rideend:…"), Mitfahrt.</summary>
+        public List<InviteEntry> invites = new List<InviteEntry>();
+        public List<string> notices = new List<string>();
+        public string inviteKind = "";   // invreply: Art der angenommenen Einladung ("game|…", "room|SPOT|Bank|Ort")
+        public int rideWith;
+        public int passenger;
+        /// <summary>profile: MyTDULife des angefragten Spielers (mit Foto).</summary>
+        public MyLifeData life;
+        public int lifeOf;
 
         public static NetResponse Error(string e) => new NetResponse { ok = false, error = e };
     }
@@ -242,6 +335,15 @@ namespace TDU2.Map.Online
             if (Save.liveries == null) Save.liveries = new List<LiveryEntry>();
             if (Save.stickerBoards == null) Save.stickerBoards = new List<int>();
             if (Save.favoriteColors == null) Save.favoriteColors = new List<int>();
+            if (Save.bookmarks == null) Save.bookmarks = new List<BookmarkEntry>();
+            if (Save.favoriteSpots == null) Save.favoriteSpots = new List<string>();
+            if (Save.houses == null) Save.houses = new List<HouseLayout>();
+            if (Save.ownedFurniture == null) Save.ownedFurniture = new List<int>();
+            if (Save.ownedMaterials == null) Save.ownedMaterials = new List<int>();
+            if (Save.myLife == null) Save.myLife = new MyLifeData();
+            if (Save.carConfigs == null) Save.carConfigs = new List<CarConfigEntry>();
+            if (Save.myLife.boxes == null) Save.myLife.boxes = new List<string>();
+            if (Save.myLife.fields == null) Save.myLife.fields = new List<HouseEntry>();
             Config = r;
             Online = r.online;
             PlayerId = r.playerId; UdpKey = (uint)r.udpKey; UdpPort = r.udpPort;

@@ -7,11 +7,11 @@ Shader "TDU2/Terrain"
         _MainTex ("Colormap", 2D) = "white" {}
         _SplatTex ("Splat/Shadow Map", 2D) = "white" {}
         _UseSplat ("Use Splat", Float) = 0
-        _ShadowStrength ("Baked Shadow Strength", Range(0,1)) = 0.6
+        _ShadowStrength ("Baked Shadow Strength", Range(0,1)) = 0.75
         _Detail1 ("Detail 1 (R)", 2D) = "gray" {}
         _Detail2 ("Detail 2 (R)", 2D) = "gray" {}
-        _DetailTiling ("Detail Tiling (pro Meter)", Float) = 0.25
-        _DetailStrength ("Detail Strength", Range(0,1)) = 0.5
+        _DetailTiling ("Detail Tiling (pro Meter)", Float) = 0.098
+        _DetailStrength ("Detail Strength", Range(0,1)) = 1
     }
     SubShader
     {

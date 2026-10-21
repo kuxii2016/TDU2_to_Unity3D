@@ -30,6 +30,8 @@ namespace TDU2.Map.Flash
         public sealed class Shape : Character
         {
             public Rect Bounds;
+            /// <summary>DefineMorphShape: Endform-Begrenzung (Bounds = Startform); Zwischenstand über DisplayObject.Ratio (0..65535).</summary>
+            public bool Morph; public Rect EndBounds;
             public List<FillStyle> Fills = new List<FillStyle>();
             public List<LineStyle> Lines = new List<LineStyle>();
             public List<Path> Paths = new List<Path>();
@@ -323,8 +325,8 @@ namespace TDU2.Map.Flash
         void ReadMorph(byte[] d, int p, int len)
         {
             var br = new BitReader(d, p);
-            var s = new Shape { Id = br.U16(), Bounds = br.Rect() };
-            br.Rect(); br.Pos += 4;
+            var s = new Shape { Id = br.U16(), Bounds = br.Rect(), Morph = true };
+            s.EndBounds = br.Rect(); br.Pos += 4;
             s.Fills = ReadFills(br, 3, true);
             s.Lines = ReadLines(br, 3, true);
             int nf = br.UB(4), nl = br.UB(4);

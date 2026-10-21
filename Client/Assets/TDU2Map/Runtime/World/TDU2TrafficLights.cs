@@ -69,10 +69,14 @@ namespace TDU2.Map.World
             h ^= h >> 13; h *= 0x5bd1e995; h ^= h >> 15;
             var s = new Signal
             {
-                Root = holder, Pos = pos, Axis = ax,
+                Root = holder,
+                Pos = pos,
+                Axis = ax,
                 Group = Mathf.Abs(ax.x) > Mathf.Abs(ax.z) ? 1 : 0,
                 Offset = (h % 10000) / 10000f * Cycle,
-                R = r.ToArray(), O = o.ToArray(), G = g.ToArray(),
+                R = r.ToArray(),
+                O = o.ToArray(),
+                G = g.ToArray(),
             };
             _all.Add(s);
             Show(s, StateOf(s));

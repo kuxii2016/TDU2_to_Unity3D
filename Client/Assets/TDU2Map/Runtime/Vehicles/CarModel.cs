@@ -103,11 +103,14 @@ namespace TDU2.Map.Vehicles
             return a;
         }
 
-        public static CarAssets Load(string bnkDir, CarDatabase db, CarPhysics car, int colorIndex, bool loadSound)
+        /// <param name="rimId">Felge (DBRims._hashcode, 0 = Standardfelge des Autos)</param>
+        /// <param name="interiorId">Innenraum (DBInterior._hashcode, 0 = erster Innenraum der Lackfarbe)</param>
+        public static CarAssets Load(string bnkDir, CarDatabase db, CarPhysics car, int colorIndex, bool loadSound, int rimId = 0, int interiorId = 0)
         {
             var a = new CarAssets { Car = car };
-            // Felgen: Standardfelge des Autos (DBRims)
-            if (!db.Rims.TryGetValue(car.DefaultRims, out a.Rim) && db.CarRims.TryGetValue(car.Id, out var rl) && rl.Count > 0)
+            // Felgen: gewählte Felge (Autohändler) bzw. Standardfelge des Autos (DBRims)
+            if (rimId != 0) db.Rims.TryGetValue(rimId, out a.Rim);
+            if (a.Rim == null && !db.Rims.TryGetValue(car.DefaultRims, out a.Rim) && db.CarRims.TryGetValue(car.Id, out var rl) && rl.Count > 0)
                 db.Rims.TryGetValue(rl[0], out a.Rim);
             // Sondermodelle (Rennschule, Polizei ...) haben eigene IDs ohne Farbtabelle: _duplicate = Basis-Auto (Farben/Felgen)
             int dup = car.Raw != null ? car.Raw.I("_duplicate", 0) : 0;
@@ -116,7 +119,8 @@ namespace TDU2.Map.Vehicles
             if (cols != null && cols.Count > 0)
             {
                 a.Color = cols[((colorIndex % cols.Count) + cols.Count) % cols.Count];
-                db.Interiors.TryGetValue(a.Color.Interiors[0], out a.Interior);
+                if (interiorId == 0 || Array.IndexOf(a.Color.Interiors, interiorId) < 0 || !db.Interiors.TryGetValue(interiorId, out a.Interior))
+                    db.Interiors.TryGetValue(a.Color.Interiors[0], out a.Interior);
             }
 
             // Werks-Beklebung
@@ -172,33 +176,36 @@ namespace TDU2.Map.Vehicles
             }
             catch (Exception ex) { a.Log.Add("hud.ini: " + ex.Message); }
 
-            if (loadSound)
-            {
-                var sb = CarDatabase.SoundBank(bnkDir, car);
-                if (sb != null)
-                {
-                    try
-                    {
-                        var bank = BnkArchive.Open(sb);
-                        var cfgEntry = bank.Find("CarVSTConfig.xmb");
-                        if (cfgEntry != null) a.Sound = CarSoundConfig.Parse(bank.Read(cfgEntry));
-                        if (a.Sound != null)
-                        {
-                            var needed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                            foreach (var s in a.Sound.Samples) if (s.Wave != null) needed.Add(s.Wave);
-                            foreach (var e in bank.Entries)
-                            {
-                                if (!needed.Contains(e.Name)) continue;
-                                if (WavDecoder.TryDecode(bank.Read(e), out var data, out int ch, out int rate)) a.Waves[e.Name] = (data, ch, rate);
-                                else a.Log.Add("WAV nicht lesbar: " + e.Name);
-                            }
-                        }
-                    }
-                    catch (Exception ex) { a.Log.Add("Sound: " + ex.Message); }
-                }
-                else a.Log.Add("Keine Soundbank für " + car.FileName);
-            }
+            if (loadSound) LoadSound(a, bnkDir, car);
             return a;
+        }
+
+        /// <summary>
+        /// Motor-/Fahrsound (CarVSTConfig.xmb + WAVs der Soundbank) in vorhandene Assets laden – z.B. für das Ausstellungsauto
+        /// beim Händler (Einsteigen: Motor anlassen, Gas im Stand, Hupe). Ohne Unity-API, darf im Hintergrund laufen.
+        /// </summary>
+        public static void LoadSound(CarAssets a, string bnkDir, CarPhysics car)
+        {
+            if (a == null || car == null) return;
+            var sb = CarDatabase.SoundBank(bnkDir, car);
+            if (sb == null) { a.Log.Add("Keine Soundbank für " + car.FileName); return; }
+            try
+            {
+                var bank = BnkArchive.Open(sb);
+                var cfgEntry = bank.Find("CarVSTConfig.xmb");
+                var sound = cfgEntry != null ? CarSoundConfig.Parse(bank.Read(cfgEntry)) : null;
+                if (sound == null) return;
+                var needed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var s in sound.Samples) if (s.Wave != null) needed.Add(s.Wave);
+                foreach (var e in bank.Entries)
+                {
+                    if (!needed.Contains(e.Name)) continue;
+                    if (WavDecoder.TryDecode(bank.Read(e), out var data, out int ch, out int rate)) a.Waves[e.Name] = (data, ch, rate);
+                    else a.Log.Add("WAV nicht lesbar: " + e.Name);
+                }
+                a.Sound = sound;   // zuletzt: wer Sound sieht, findet auch die WAVs
+            }
+            catch (Exception ex) { a.Log.Add("Sound: " + ex.Message); }
         }
 
         static void TryLoad(CarAssets a, string path, Action<BnkArchive> use)
@@ -275,7 +282,9 @@ namespace TDU2.Map.Vehicles
             MaterialLayer layer;
             // Verkehrsautos (TD_CarDeform_TS): SHADOW = Karosserie-Schattierung (weiß, UV0) x Lackfarbe, DETAIL = Lichter-/Detail-Atlas
             // mit Alpha auf dem zweiten UV-Satz darüber. Vorher wurde der Detail-Atlas als ganze Textur genommen (weiße Flecken).
-            if (src.TryGetLayer(MaterialDef.SemShadow, out var shl) && shl.TextureKey != 0 && src.TryGetLayer(MaterialDef.SemDetail, out var dtl) && dtl.TextureKey != 0)
+            // (Bremsscheiben Mat_TS_Disk_xx haben SHADOW = DETAIL = dieselbe Scheibentextur: dann einfach die Textur, kein Overlay)
+            if (src.TryGetLayer(MaterialDef.SemShadow, out var shl) && shl.TextureKey != 0 && src.TryGetLayer(MaterialDef.SemDetail, out var dtl) && dtl.TextureKey != 0
+                && shl.TextureKey != dtl.TextureKey)
             {
                 tex = getTex(shl.TextureKey, TextureDef.WrapFromEden(shl.AddressU), TextureDef.WrapFromEden(shl.AddressV));
                 overlay = getTex(dtl.TextureKey, TextureDef.WrapFromEden(dtl.AddressU), TextureDef.WrapFromEden(dtl.AddressV));
@@ -284,8 +293,12 @@ namespace TDU2.Map.Vehicles
                 tex = getTex(layer.TextureKey, TextureDef.WrapFromEden(layer.AddressU), TextureDef.WrapFromEden(layer.AddressV));
 
             Color col = Color.white;
-            if (src.TryGetParam("RAMPCLR1", out var rc) && (rc.x + rc.y + rc.z) > 0.001f) col = new Color(rc.x, rc.y, rc.z, 1f);
-            else if (tex == null && src.TryGetParam("RAMPCLR1", out rc)) col = new Color(rc.x, rc.y, rc.z, 1f);
+            // Reifenprofil (rim/tire/t_<Zoll>p_oh, Material T_SpCa_O): DETAIL ist lr_ambocc_* = gepackte Verschattung (R scharf,
+            // G/B weicher) und keine Farbtextur – als RGB gezeigt gab das bunte Streifen. Grundton = Diffusfarbe des Materials (0,3).
+            bool aoMask = tex != null && tex.name != null && tex.name.IndexOf("ambocc", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (aoMask) col = new Color(0.30f, 0.30f, 0.30f, 1f);
+            else if (src.TryGetParam("RAMPCLR1", out var rc) && (rc.x + rc.y + rc.z) > 0.001f) col = new Color(rc.x, rc.y, rc.z, 1f);
+            else if (tex == null && src.TryGetParam("RAMPCLR1", out var rc0)) col = new Color(rc0.x, rc0.y, rc0.z, 1f);
 
             float smooth = 0.35f, metal = 0f;
             if (src.TryGetParam("SPECPARM", out var sp) && sp.x > 0f) smooth = Mathf.Clamp01(Mathf.Log10(Mathf.Max(1f, sp.x)) / 3.1f);
@@ -328,6 +341,7 @@ namespace TDU2.Map.Vehicles
             m.color = col;
             if (m.HasProperty("_Color")) m.SetColor("_Color", col);
             if (tex != null) m.mainTexture = tex;
+            if (aoMask && m.HasProperty("_MainGray")) { m.SetFloat("_MainGray", 1f); m.SetFloat("_Glossiness", 0.18f); m.SetFloat("_Metallic", 0f); }
             if (overlay != null && m.HasProperty("_StickerTex"))
             {
                 m.SetTexture("_StickerTex", overlay);
@@ -381,6 +395,8 @@ namespace TDU2.Map.Vehicles
         public Transform CockpitRoot;
         public static float InteriorSelfIllum = 0.04f;
         public static float InteriorOcclusion = 0.4f;
+        /// <summary>Höchste Glätte matter Innenraum-Materialien (Stoff, Leder, Kunststoff – im Original ohne Umgebungsspiegelung).</summary>
+        public static float InteriorGloss = 0.1f;
 
         static readonly string[] KnownNames =
         {
@@ -501,6 +517,17 @@ namespace TDU2.Map.Vehicles
                         m.SetFloat("_SelfIllum", hud ? 0.12f : InteriorSelfIllum);
                         // Innenraum: Himmelslicht und Umgebungsreflexion dämpfen (zu hell ohne Verdeckung durch Dach/Säulen)
                         if (m.HasProperty("_Occlusion")) m.SetFloat("_Occlusion", InteriorOcclusion);
+                        // Original (TD_CarMat_NM / TD_CarVelour / TD_CarPaint_NM): Stoffe, Leder, Kunststoff haben ENVCOEFF = 0 – keine
+                        // Umgebungsspiegelung, nur ein schwacher, breiter Glanz (SPECPARM 3…10). Standard-PBR mit Glätte ~0,2–0,35 und
+                        // Echtzeit-Reflexion ließ sie wie lackiert glänzen -> matt; Chrom/Stahl/Spiegel/Glas/Instrumente bleiben.
+                        bool shiny = hud || mn.Contains("CHROME") || mn.Contains("STEEL") || mn.Contains("MIRROR") || mn.Contains("GLASS") || mn.Contains("ALU") || mn.Contains("METAL");
+                        if (!shiny)
+                        {
+                            if (m.HasProperty("_Glossiness")) m.SetFloat("_Glossiness", Mathf.Min(m.GetFloat("_Glossiness"), InteriorGloss));
+                            if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", 0f);
+                            if (m.HasProperty("_ClearCoat")) m.SetFloat("_ClearCoat", 0f);
+                            if (m.HasProperty("_Flake")) m.SetFloat("_Flake", 0f);
+                        }
                         if (hud) cm.DashMaterials.Add(m);
                     }
             }
@@ -524,19 +551,41 @@ namespace TDU2.Map.Vehicles
             cm.SteeringWheel = cm.Find("STEER_HR") ?? cm.Find("STEER_LR");
 
             // Karosserie-Bounds im Fahrzeugraum (parent)
-            var body = cm.Find("BODY_HR") ?? cm.Visual.transform;
+            cm._parent = parent;
+            cm._fallbackSize = new Vector3(a.Car.Width, a.Car.Height, a.Car.Length) * 0.001f;
+            cm.RecomputeBodyBounds();
+            return cm;
+        }
+
+        Transform _parent;
+        Vector3 _fallbackSize;
+
+        /// <summary>
+        /// Karosserie-Bounds im Fahrzeugraum neu berechnen (nur sichtbare Teile). Aus den 8 Ecken der Mesh-Bounds jedes Teils –
+        /// unabhängig von der Drehung des Autos in der Welt (Welt-Bounds eines gedrehten Autos wären zu groß und schief).
+        /// </summary>
+        public Bounds RecomputeBodyBounds()
+        {
+            var parent = _parent != null ? _parent : Visual.transform.parent;
+            var body = Find("BODY_HR") ?? Visual.transform;
             bool any = false;
-            var b = new Bounds();
+            Vector3 mn = Vector3.zero, mx = Vector3.zero;
             foreach (var r in body.GetComponentsInChildren<MeshRenderer>())
             {
-                var rb = r.bounds;
-                var mn = parent.InverseTransformPoint(rb.min); var mx = parent.InverseTransformPoint(rb.max);
-                var lb = new Bounds((mn + mx) * 0.5f, new Vector3(Mathf.Abs(mx.x - mn.x), Mathf.Abs(mx.y - mn.y), Mathf.Abs(mx.z - mn.z)));
-                if (!any) { b = lb; any = true; } else b.Encapsulate(lb);
+                if (!r.enabled) continue;
+                var mf = r.GetComponent<MeshFilter>();
+                if (mf == null || mf.sharedMesh == null) continue;
+                var lb = mf.sharedMesh.bounds;
+                var m = parent.worldToLocalMatrix * r.transform.localToWorldMatrix;
+                for (int i = 0; i < 8; i++)
+                {
+                    var c = new Vector3((i & 1) != 0 ? lb.max.x : lb.min.x, (i & 2) != 0 ? lb.max.y : lb.min.y, (i & 4) != 0 ? lb.max.z : lb.min.z);
+                    var p = m.MultiplyPoint3x4(c);
+                    if (!any) { mn = mx = p; any = true; } else { mn = Vector3.Min(mn, p); mx = Vector3.Max(mx, p); }
+                }
             }
-            if (!any) b = new Bounds(new Vector3(0, 0.6f, 0), new Vector3(a.Car.Width, a.Car.Height, a.Car.Length) * 0.001f);
-            cm.BodyBounds = b;
-            return cm;
+            BodyBounds = any ? new Bounds((mn + mx) * 0.5f, mx - mn) : new Bounds(new Vector3(0, 0.6f, 0), _fallbackSize);
+            return BodyBounds;
         }
 
         /// <summary>UV-Satz der Stickermap/Schmutzmaske auf der Karosserie: -1 = automatisch, 0 = erster, 1 = zweiter UV-Satz.</summary>

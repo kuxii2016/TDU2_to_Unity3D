@@ -622,7 +622,12 @@ namespace TDU2.Map.Flash
                 string path = c >= 0 ? name.Substring(0, c) : name.Substring(0, dot);
                 string var = c >= 0 ? name.Substring(c + 1) : name.Substring(dot + 1);
                 var owner = path.Length == 0 ? Root : ResolveClip(scope, path);
-                if (owner == null) return Undefined;
+                if (owner == null)
+                {
+                    // Punkt-Pfad über Objektverweise ("_root.Clip.IsCardLoaded": Clip ist eine Variable, kein Kind-Clip)
+                    if (c < 0 && name.IndexOf('/') < 0) { var o = WalkMembers(scope, locals, path); return o != null && !(o is Undef) ? GetMember(o, var) : Undefined; }
+                    return Undefined;
+                }
                 return GetMember(owner, var);
             }
             // Clip-Variable, Kind-Clip, global
@@ -648,9 +653,27 @@ namespace TDU2.Map.Flash
                 string var = c >= 0 ? name.Substring(c + 1) : name.Substring(dot + 1);
                 var owner = path.Length == 0 ? Root : ResolveClip(scope, path);
                 if (owner != null) SetMember(owner, var, v);
+                else if (c < 0 && name.IndexOf('/') < 0)
+                {
+                    var o = WalkMembers(scope, locals, path);   // "_root.Clip.IsCardLoaded = true"
+                    if (o != null && !(o is Undef)) SetMember(o, var, v);
+                }
                 return;
             }
             StoreClipVar(scope ?? Root, name, v);
+        }
+
+        /// <summary>"a.b.c" Glied für Glied auflösen: erstes über GetVar (Variable, _root, this …), danach Mitglieder (auch Objektverweise).</summary>
+        object WalkMembers(Instance scope, Dictionary<string, object> locals, string dotted)
+        {
+            var parts = dotted.Split('.');
+            object o = GetVar(scope, locals, parts[0]);
+            for (int i = 1; i < parts.Length; i++)
+            {
+                if (o == null || o is Undef) return Undefined;
+                o = GetMember(o, parts[i]);
+            }
+            return o;
         }
 
         void StoreClipVar(Instance clip, string name, object v)
@@ -911,6 +934,29 @@ namespace TDU2.Map.Flash
                         catch (Exception ex) { Debug.LogWarning("[TDU2] ASFlashList " + l.Name + ": " + ex.Message); }
                         return l;
                     }
+                // MovieClip-Methoden als globale Funktion im aktuellen Ziel (tellTarget/SetTarget): z.B. menu_sq.attachOtherIcons()
+                // ruft nach SetTarget(sq0/ic) "attachMovie(targetMovie, 'icLoaded', 0)" auf -> Symbole der Spielerkarte
+                case "attachMovie":
+                case "createEmptyMovieClip":
+                case "duplicateMovieClip":
+                case "removeMovieClip":
+                case "gotoAndStop":
+                case "gotoAndPlay":
+                case "play":
+                case "stop":
+                case "nextFrame":
+                case "prevFrame":
+                case "swapDepths":
+                case "getNextHighestDepth":
+                case "getDepth":
+                case "localToGlobal":
+                case "globalToLocal":
+                case "getBounds":
+                case "hitTest":
+                case "setMask":
+                case "startDrag":
+                    if (scope != null) return CallMethod(scope, name, args, scope);
+                    break;
             }
             return Undefined;
         }
@@ -1247,6 +1293,7 @@ namespace TDU2.Map.Flash
         /// <summary>Wert (Zahl/Bool/Text) für Vergleiche im Skript typisiert setzen ("/:IsInOptions", true).</summary>
         public void SetValue(string name, object value)
         {
+            if (AutoPin) _pinVars[name] = new PinVar { Value = value, Typed = true };
             if (value is int iv) value = (double)iv; else if (value is float fv) value = (double)fv;
             SetVar(Root, null, name.StartsWith("/:") ? name.Substring(1) : name, value);
         }

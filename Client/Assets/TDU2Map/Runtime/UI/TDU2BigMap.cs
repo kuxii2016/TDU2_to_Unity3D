@@ -41,7 +41,7 @@ namespace TDU2.Map.Vehicles
         [Tooltip("Hintergrund außerhalb der Insel (Meer)")]
         public Color SeaColor = new Color32(0, 18, 47, 255); //new Color32(18, 54, 82, 255);
         [Tooltip("Größe der Spot-Symbole")]
-        public float SpotScale = 0.5f;
+        public float SpotScale = 0.75f;
         public int MaxSpots = 160;
 
         VmfPlayer _ui;
@@ -56,9 +56,12 @@ namespace TDU2.Map.Vehicles
         float _savedTimeScale = 1f; bool _savedFog, _savedMinimap, _savedHud = true, _savedCursor; CursorLockMode _savedLock;
         int _pointChar; int _pointDepth0 = 1000;
         /// <summary>Spot auf der Karte: normaler Spot, Meisterschaft (cup = Index) oder – im Wettbewerbsmodus – deren Rennen (race).</summary>
-        sealed class MapSpot { public Spot spot; public string label; public int cup = -1, race = -1; }
+        sealed class MapSpot { public Spot spot; public string label; public int cup = -1, race = -1; public int bookmark = -1; public bool gps; }
         readonly List<MapSpot> _spots = new List<MapSpot>();
         // Wettbewerbsmodus (map.vmf: IsContest, "contest"/"co_direct_enter", FSCommands coin/coou/giup)
+        /// <summary>Gewählter Reiter der Filterleiste oben links (/presets, _root.numIcFilter): 0 Einzelspieler-Herausforderungen,
+        /// 1 Multiplayer-Herausforderungen, 2 Orte für Avatar, 3 Orte für Fahrzeuge, 4 Spieler, 5 eigene Orte (Lesezeichen). Bleibt bis zum nächsten Öffnen.</summary>
+        static int _filter;
         int _contestCup = -1;            // Meisterschaft, deren Rennen gezeigt werden (-1 = normale Karte)
         bool _contestDirect;             // vom Treffpunkt aus geöffnet: zurück = Karte schließen
         int _contestEnterCup = -1;       // nach dem Öffnen in den Wettbewerb wechseln (wartet auf das Ende von map_open)
@@ -68,10 +71,13 @@ namespace TDU2.Map.Vehicles
         readonly Dictionary<int, string> _slotLabel = new Dictionary<int, string>();
         int _hover = -1;
         bool _sysCursor;
+        bool? _cibleOff; bool _cursorOverSpot;
         int _openFrame = -10;   // Taste, mit der geöffnet wurde (Enter am Treffpunkt, M), nicht gleich als Klick werten
         bool _lod;
         Vector3 _lastMouse, _downMouse; bool _dragging;
         int _selected = -1; Vector3? _cursorWorld;
+        // Mini-Menü der freien Fläche (/mini_menu: Teleport, GPS-Ziel, Lesezeichen) und Rechtsklick = GPS-Ziel
+        bool _miniMenu, _menuTargetPresent; Vector3? _menuWorld; Vector3 _downMouseR;
         bool _extended; float _fillAt = -1f;
         // Mitspieler (TDU2GameData): Blips "player" als weitere Kopien von /pack/point (Tiefen ab _pointDepth0 + MaxSpots)
         readonly Dictionary<int, int> _playerSlots = new Dictionary<int, int>();   // Spieler-Id -> Slot
@@ -83,7 +89,7 @@ namespace TDU2.Map.Vehicles
         [Tooltip("Straßennetz (wie Minimap/Original-Karte) über die 3D-Insel legen")]
         public bool ShowRoads = true;
         [Tooltip("Mindestbreite einer Straße auf dem Bildschirm (Pixel)")]
-        public float RoadMinPixels = 2.5f;
+        public float RoadMinPixels = 1f;
         [Tooltip("3D-Welt nur neu zeichnen, wenn sich die Kartenkamera bewegt (sonst stehendes Bild) – spart sehr viel GPU-Last")]
         public bool RenderOnDemand = true;
         [Tooltip("Neu zeichnen spätestens nach so vielen Sekunden (nachgeladene Kacheln)")]
@@ -92,6 +98,11 @@ namespace TDU2.Map.Vehicles
         public int MapFrameRate = 60;
         [Tooltip("Ab dieser Zoomstufe (WhatZoom) Gebäude/Objekte der nahen Sektoren nicht zeichnen (1 = immer, 5 = nie)")]
         public int HideSectorObjectsFromZoom = 2;
+        [Tooltip("Ab dieser Zoomstufe das Kartengelände zeigen (alle Areas mit eigener Colormap, wie die Original-Karte) statt der " +
+                 "Spielwelt, deren ferne Teile nur die grobe Insel-LOD sind (0 = nie)")]
+        public int MapTerrainFromZoom = 1;
+        const int MapLayer = 30;           // nur für die Kartenkamera (Graphics.DrawMesh), keine GameObjects auf dieser Ebene
+        int _worldMask = ~0; bool _rtMapTerrain;
 
         RenderTexture _rt;
         Camera _clearCam;
@@ -155,7 +166,7 @@ namespace TDU2.Map.Vehicles
                     _bank = CarDatabase.FindFile(Path.Combine(bnkDir, "frontend", res), "map.bnk");
                     if (_bank != null) break;
                 }
-                if (_bank == null) { Debug.LogWarning("[TDU2] Karte: frontend/<res>/map.bnk nicht gefunden"); return; }
+                if (_bank == null) { DebugManager.Error("frontend/<res>/map.bnk nicht gefunden"); return; }
                 try
                 {
                     if (_ui == null) { _ui = gameObject.AddComponent<VmfPlayer>(); _ui.GuiDepth = -8; _ui.MouseEnabled = true; }
@@ -165,7 +176,7 @@ namespace TDU2.Map.Vehicles
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning("[TDU2] Karte: map.bnk nicht nutzbar: " + ex.Message);
+                    DebugManager.Error("map.bnk nicht nutzbar: " + ex.Message);
                     if (_ui != null) { Destroy(_ui); _ui = null; }
                 }
             }
@@ -223,6 +234,8 @@ namespace TDU2.Map.Vehicles
                 _cam = go.AddComponent<Camera>();
             }
             if (_mainCam != null) { _cam.CopyFrom(_mainCam); _mainCam.enabled = false; }
+            _worldMask = _cam.cullingMask & ~(1 << MapLayer);
+            Manager.Streamer.RequestMapTerrain();   // falls noch nicht im Hintergrund geladen
             _cam.clearFlags = CameraClearFlags.SolidColor;
             _cam.backgroundColor = SeaColor;
             _cam.fieldOfView = FieldOfView;
@@ -276,8 +289,21 @@ namespace TDU2.Map.Vehicles
             _ui.SetVariable("/:WhatSpot", "noSpot");
             _ui.SetVariable("/:WhatSpotType", "none");
             _ui.SetValue("/:IsTutorial", 0);
-            _ui.SetValue("/:IsTargetOK", false);
+            _ui.SetValue("/:IsTargetOK", contestCup < 0);   // A auf freier Fläche öffnet im Film das Mini-Menü (Teleport/GPS/Lesezeichen)
             _ui.SetValue("/:IsTeleportOK", true);
+            _ui.SetValue("/:IsTargetPresent", false);
+            _ui.SetValue("/:IsSpotFavorite", false);
+            // Filterleiste (/presets öffnet sich im Film selbst): Reiter + Sperren wie vom Spiel gesetzt (ohne numIcFilter zeigte der Titel "..")
+            _ui.SetValue("/:numIcFilter", _filter);
+            foreach (var lk in new[] { "LockPresetSolo", "LockPresetMulti", "LockPresetAvSpots", "LockPresetVeSpots", "LockPresetPlayers", "LockPresetMySpots" })
+                _ui.SetValue("/:" + lk, false);
+            _miniMenu = false; _menuWorld = null;
+            _gpsMarkerShown = false; _ui.SetVisible("/target", false);
+            // Kartencursor, Geister-Cursor und GPS-Ziel liegen unter der Maus: deren Knöpfe nicht als "Maus über Knopf" werten
+            // (sonst wechselte der Cursor jedes Bild zwischen Film- und Windows-Zeiger = Flackern, und Klicks liefen doppelt)
+            _ui.MouseIgnore.Add("/curseur"); _ui.MouseIgnore.Add("/curseur_ghost"); _ui.MouseIgnore.Add("/target");
+            _cibleOff = null; _cursorOverSpot = false;
+            _ui.SetValue("/:CanAddMySpot", TDU2Bookmarks.CanAdd);
             _ui.SetVariable("/:lockGotoStatus", "none");
             _ui.SetVariable("/:money", Online.TDU2Session.LoggedIn ? Online.TDU2Session.Save.money.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("de-DE")) + " $" : "999 999 999 $");
             _ui.SetVariable("/:cur_upgrade", "level0");
@@ -478,7 +504,37 @@ namespace TDU2.Map.Vehicles
             return e;
         }
 
-        void DrawRoads()
+        /// <summary>Maus über der Filterleiste bzw. Infoleiste des Films (Bildschirmkoordinaten wie Input.mousePosition)?</summary>
+        bool OverFilmBar(Vector3 mouse)
+        {
+            if (_ui == null) return false;
+            var g = new Vector2(mouse.x, Screen.height - mouse.y);
+            // feste Lage im Film (16:9): Filterleiste oben links, Auto/Geld oben rechts, Tastenleiste unten
+            float w = Screen.width, h = Screen.height;
+            if ((g.x < w * 0.45f && g.y < h * 0.2f) || (g.x > w * 0.62f && g.y < h * 0.18f) || g.y > h * 0.87f) return true;
+            return false;
+        }
+
+        /// <summary>Kartengelände statt Spielwelt? (Zoomstufe und alle Kacheln fertig)</summary>
+        bool UseMapTerrain()
+        {
+            var st = Manager?.Streamer;
+            return MapTerrainFromZoom > 0 && _zoom >= MapTerrainFromZoom && st != null && st.MapTerrainReady;
+        }
+
+        /// <summary>Kartenkacheln + Meer nur in die Kartenkamera zeichnen.</summary>
+        void DrawMapTerrain()
+        {
+            var st = Manager?.Streamer; var root = st?.MapRoot;
+            if (root == null) return;
+            var m = root.localToWorldMatrix;
+            foreach (var t in st.MapTiles)
+                if (t.Mesh != null && t.Material != null)
+                    Graphics.DrawMesh(t.Mesh, m * Matrix4x4.Translate(t.Origin), t.Material, MapLayer, _cam, 0, null, false, false);
+            // kein Meer darüber: die Colormaps enthalten die Meeresfarben (Türkis/Tiefblau) selbst, wie die Original-Karte
+        }
+
+        void DrawRoads(int layer = 0)
         {
             if (!ShowRoads || _cam == null) return;
             var mm = Manager?.Minimap; var root = Manager?.Streamer?.MapRoot;
@@ -487,21 +543,26 @@ namespace TDU2.Map.Vehicles
             if (mat == null) return;
             var (mesh, origin) = RoadMesh();
             if (mesh == null) return;
-            Graphics.DrawMesh(mesh, Matrix4x4.Translate(root.position - origin), mat, 0, _cam, 0, null, false, false);
+            Graphics.DrawMesh(mesh, Matrix4x4.Translate(root.position - origin), mat, layer, _cam, 0, null, false, false);
         }
 
         void RenderMap()
         {
             if (_cam == null) return;
-            HideSectorObjects(FastMapRendering && _zoom >= HideSectorObjectsFromZoom);
-            if (!RenderOnDemand) { DrawRoads(); return; }
+            bool mapTerrain = UseMapTerrain();
+            _cam.cullingMask = mapTerrain ? 1 << MapLayer : _worldMask;
+            int layer = mapTerrain ? MapLayer : 0;
+            HideSectorObjects(!mapTerrain && FastMapRendering && _zoom >= HideSectorObjectsFromZoom);
+            if (!RenderOnDemand) { if (mapTerrain) DrawMapTerrain(); DrawRoads(layer); return; }
             EnsureTarget();
+            if (mapTerrain != _rtMapTerrain) { _rtMapTerrain = mapTerrain; _rtDirty = true; }
             var t = _cam.transform;
             bool moved = (t.position - _rtPos).sqrMagnitude > 0.01f || Quaternion.Angle(t.rotation, _rtRot) > 0.01f || Mathf.Abs(_curWidth - _rtWidth) > 0.01f;
             if (!moved && !_rtDirty && Time.unscaledTime < _rtNext) return;
             _rtPos = t.position; _rtRot = t.rotation; _rtWidth = _curWidth; _rtDirty = false;
             _rtNext = Time.unscaledTime + Mathf.Max(0.1f, RefreshSeconds);
-            DrawRoads();
+            if (mapTerrain) DrawMapTerrain();
+            DrawRoads(layer);
             _cam.Render();
         }
 
@@ -557,6 +618,44 @@ namespace TDU2.Map.Vehicles
             if (_ui != null) _ui.SetValue("/:IsContest", false);
             var ps = _pendingStart; _pendingStart = (-1, -1);
             if (ps.cup >= 0 && Champs != null) Champs.StartFromMap(ps.cup, ps.race);
+            // Teleport zu Händler/Haus/Club …: wie im Spiel gleich hinein (nach dem Schließen, Spiel läuft wieder)
+            var pe = _pendingEnter; _pendingEnter = null;
+            if (pe != null) StartCoroutine(EnterWhenReady(pe));
+        }
+
+        /// <summary>
+        /// Teleport in ein Interieur: erst an die Einfahrt, warten bis die Welt dort steht (sonst lägen grobe LOD-Gelände-/Gebäude-
+        /// teile und ihre Kollider mitten im Raum), dann hinein – alles hinter dem Ladebildschirm.
+        /// </summary>
+        System.Collections.IEnumerator EnterWhenReady(Spot s)
+        {
+            var it = Interiors; var st = Manager?.Streamer;
+            TeleportOutside(s);
+            if (it == null || st == null || it.Inside) yield break;
+            bool done = false;
+            TDU2LoadingScreen.Show("Teleport " + s.Code, () => done && (!it.Inside || it.SceneReady), 0.8f, false, Manager.BnkDir);
+            float until = Time.unscaledTime + 20f;
+            yield return null;
+            while (Time.unscaledTime < until && !st.ReadyAround(st.MapRoot.TransformPoint(s.Position), 400f)) yield return null;
+            var car = Manager.Current != null ? Manager.Current.Car : null;
+            if (!it.Inside && it.EnterSpot(s, car)) Debug.Log("[TDU2] Karte: ins Interieur " + s.Code);
+            done = true;
+        }
+
+        Spot _pendingEnter;
+        TDU2Interiors _interiors;
+        TDU2Interiors Interiors
+        {
+            get
+            {
+                if (_interiors == null && Manager != null) _interiors = Manager.GetComponentInChildren<TDU2Interiors>();
+#if UNITY_2023_1_OR_NEWER
+                if (_interiors == null) _interiors = FindFirstObjectByType<TDU2Interiors>();
+#else
+                if (_interiors == null) _interiors = FindObjectOfType<TDU2Interiors>();
+#endif
+                return _interiors;
+            }
         }
 
         void OnDisable() { if (_open) { _closing = true; Finish(); } }
@@ -565,7 +664,13 @@ namespace TDU2.Map.Vehicles
         {
             string c = (cmd ?? "").Trim().ToLowerInvariant();
             if (TDU2FrontendSounds.Command(c)) return;   // sndp:* = Menü-Sound
-            if (LogCommands) Debug.Log("[TDU2] Karte FSCommand: " + c);
+            if (LogCommands) Debug.Log("[TDU2] Karten-Film -> " + c);
+            if (c.StartsWith("bmap:fltr:icf"))
+            {
+                // Reiter der Filterleiste gewechselt (presets.sendCmdIc): nur noch Spots dieser Gruppe zeigen
+                if (int.TryParse(c.Substring(13), out int f)) { _filter = Mathf.Clamp(f, 0, 5); _hover = -1; if (_selected >= 0) { _selected = -1; HideTooltip(); } }
+                return;
+            }
             switch (c)
             {
                 case "zoin": SetZoom(_zoom - 1); break;   // setZoom("in")  -> Spiel verkleinert WhatZoom
@@ -583,7 +688,8 @@ namespace TDU2.Map.Vehicles
                     break;
                 case "bmap:ttip:mecl":                    // Menü des Tooltips zu
                     break;
-                case "gotp":                              // Teleport an die Cursorposition
+                case "gotp":                              // Teleport an die Cursorposition (bzw. die des Mini-Menüs)
+                    if (_menuWorld.HasValue) _cursorWorld = _menuWorld;
                     TeleportToCursor(); BeginClosing(); break;
                 case "coin":                              // Wettbewerb der Meisterschaft betreten (A auf dem Meisterschafts-Spot)
                     {
@@ -618,9 +724,52 @@ namespace TDU2.Map.Vehicles
                     if (_selectedPlayer >= 0) TeleportToPlayer(_selectedPlayer);
                     else TeleportToSpot(_selected >= 0 ? _spots[_selected].spot : null);
                     BeginClosing(); break;
-                case "tpok":                              // Teleport möglich?
-                    _ui.SetValue("/:IsTeleportOK", true);
+                case "tpok":                              // Teleport möglich? (nur auf Straßen, wie im Spiel)
+                    _ui.SetValue("/:IsTeleportOK", OnRoad(out _));
                     break;
+                case "bmap:ttip:meop":                    // Mini-Menü offen (Eingabe gehört dem Film)
+                    _miniMenu = true; break;
+                case "inon":                              // Menü zu, Eingabe wieder an die Karte
+                    _miniMenu = false; break;
+                case "targ":                              // GPS-Ziel setzen bzw. entfernen
+                    ToggleGpsTarget(MenuPoint(), _menuTargetPresent, false);   // Sound spielt der Film (sndp:valid/dropflag)
+                    break;
+                case "bmrk:enbl":                         // Lesezeichen an der Cursorposition
+                    {
+                        var g = MenuPoint();
+                        if (g.HasValue && TDU2Bookmarks.CanAdd)
+                        {
+                            // Höhe vom Gelände (Cursor liegt auf Meereshöhe), damit das Symbol beim Kippen der Karte an der Stelle bleibt
+                            var root = Manager.Streamer.MapRoot; var w = root.TransformPoint(g.Value);
+                            if (Physics.Raycast(new Vector3(w.x, w.y + 3000f, w.z), Vector3.down, out var hit, 6000f, ~0, QueryTriggerInteraction.Ignore)) g = root.InverseTransformPoint(hit.point);
+                            TDU2Bookmarks.Add(IslandName(), g.Value); BuildSpots();
+                            _ui.CallClip("/presets/ttip", "Open");   // Meldung "Lesezeichen hinzugefügt" (schließt sich selbst)
+                        }
+                        _ui.SetValue("/:CanAddMySpot", TDU2Bookmarks.CanAdd);
+                        break;
+                    }
+                case "bmrk:dsbl":                         // Lesezeichen entfernen
+                    {
+                        var ms = _selected >= 0 && _selected < _spots.Count ? _spots[_selected] : (_hover >= 0 && _hover < _spots.Count ? _spots[_hover] : null);
+                        if (ms != null && ms.bookmark >= 0) { TDU2Bookmarks.Remove(ms.bookmark); _selected = -1; HideTooltip(); BuildSpots(); }
+                        _ui.SetValue("/:CanAddMySpot", TDU2Bookmarks.CanAdd);
+                        break;
+                    }
+                case "fiou":
+                case "fiin":
+                case "fity":
+                case "stof":
+                case "ston":
+                case "mnok":   // Filterleiste: Animationsmeldungen, nichts zu tun
+                    break;
+                case "mysp:enbl":                         // Spot als Favorit
+                case "mysp:dsbl":
+                    {
+                        var ms = _selected >= 0 && _selected < _spots.Count ? _spots[_selected] : null;
+                        if (ms != null && ms.spot != null) TDU2Bookmarks.SetFavorite(ms.spot.Code, c == "mysp:enbl");
+                        _ui.SetValue("/:IsSpotFavorite", ms != null && TDU2Bookmarks.IsFavorite(ms.spot?.Code));
+                        break;
+                    }
             }
         }
 
@@ -639,9 +788,9 @@ namespace TDU2.Map.Vehicles
             float w = _curWidth;
             var north = North(); var east = East();
             Vector3 move = Vector3.zero;
-            if (_extended)
+            if (_extended || _miniMenu)
             {
-                // ausgeklappter Tooltip: Pfeile gehören dem Film (Blättern der Liste, Menüauswahl) statt der Kamera
+                // ausgeklappter Tooltip / Mini-Menü: Pfeile gehören dem Film (Blättern der Liste, Menüauswahl) statt der Kamera
                 if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) _ui.Input("Move", "left");
                 if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) _ui.Input("Move", "right");
                 if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) _ui.Input("Move", "up");
@@ -659,7 +808,7 @@ namespace TDU2.Map.Vehicles
 
             // Ziehen mit der linken Maustaste (Weltpunkt unter der Maus bleibt unter der Maus)
             var mp = Input.mousePosition;
-            if (Input.GetMouseButtonDown(0) && !(_extended && _ui.MouseOverButton)) { _dragging = true; _lastMouse = mp; }
+            if (Input.GetMouseButtonDown(0) && !((_extended || _miniMenu) && _ui.MouseOverButton)) { _dragging = true; _lastMouse = mp; }
             if (Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2)) { _dragging = true; _lastMouse = mp; }   // auch rechte/mittlere Taste
             if (!Input.GetMouseButton(0) && !Input.GetMouseButton(1) && !Input.GetMouseButton(2)) _dragging = false;
             if (_dragging && _cam != null)
@@ -681,17 +830,63 @@ namespace TDU2.Map.Vehicles
 
             // A wie im Spiel: auf einem Spot -> Tooltip mit Infos; auf freier Fläche -> Mini-Menü (Teleport). Klick ohne Ziehen.
             // Klick ohne Ziehen; über Knöpfen des ausgeklappten Tooltips gehört der Klick dem Film
-            bool click = Input.GetMouseButtonUp(0) && (mp - _downMouse).sqrMagnitude < 36f && !(_extended && _ui.MouseOverButton);
+            // Filterleiste oben links (und die Info-Leisten) gehören dem Film: dort kein Klick auf die Karte (öffnete sonst das Mini-Menü)
+            bool click = Input.GetMouseButtonUp(0) && (mp - _downMouse).sqrMagnitude < 36f && !((_extended || _miniMenu) && _ui.MouseOverButton) && !OverFilmBar(mp);
             if (Input.GetMouseButtonDown(0)) _downMouse = mp;
+            if (Input.GetMouseButtonDown(1)) _downMouseR = mp;
+            // Rechtsklick ohne Ziehen: GPS-Ziel direkt setzen/entfernen (auf einem Spot: am Spot)
+            if (Input.GetMouseButtonUp(1) && (mp - _downMouseR).sqrMagnitude < 36f && !_extended && !_miniMenu)
+            {
+                var gw = GroundPoint(mp);
+                if (_hover >= 0 && _hover < _spots.Count && !_spots[_hover].gps) ToggleGpsTarget(_spots[_hover].spot.Position);
+                else if (gw.HasValue) ToggleGpsTarget(Manager.Streamer.MapRoot.InverseTransformPoint(gw.Value));
+            }
+            // Mini-Menü offen: Klicks gehören dem Film (Knöpfe btn0..3 -> Clic/A); ein Linksklick daneben macht nichts
+            // (früher B = zu, das traf auch Klicks zwischen den Einträgen). Schließen: rechte Maustaste, Esc/Rücktaste.
+            if (_miniMenu && click) click = false;
+            if (_miniMenu && Input.GetMouseButtonUp(1) && (mp - _downMouseR).sqrMagnitude < 36f) _ui.Input("B");
+            if (Input.GetMouseButtonUp(0) && !click)
+                Debug.Log("[TDU2] Karte: Klick nicht für die Karte (gezogen " + ((mp - _downMouse).magnitude > 6f) + ", Filmleiste " + OverFilmBar(mp) + ", Menü " + (_extended || _miniMenu) + ")");
             if (click || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
             {
-                _cursorWorld = GroundPoint(mp);
-                if (_extended) _ui.Input("A");                 // Menü im Tooltip
+                Debug.Log("[TDU2] Karte: " + (click ? "Klick" : "Enter") + " – Spot " + (_hover >= 0 && _hover < _spots.Count ? _spots[_hover].label + " " + _spots[_hover].spot.Code : "-") + ", Mitspieler " + _hoverPlayer + ", Tooltip " + _extended + ", Mini-Menü " + _miniMenu);
+                // Klick gehört der Karte: der Film soll das Loslassen nicht mehr sehen (sonst traf es das gerade geöffnete
+                // Mini-Menü bzw. ein Tasten-Symbol darunter -> B -> Menü sofort wieder zu)
+                if (click) _ui.ConsumeClick();
+                if (!_miniMenu) _cursorWorld = GroundPoint(mp);
+                if (_extended || _miniMenu) _ui.Input("A");    // Menü im Tooltip / Mini-Menü
                 else if (_hoverPlayer >= 0) { _selectedPlayer = _hoverPlayer; _selected = -1; _ui.Input("A"); }   // Mitspieler: Infos
-                else if (_hover >= 0) { _selected = _hover; _selectedPlayer = -1; _ui.Input("A"); }   // Spot: Tooltip mit Infos (bmap:ttip:extd)
-                else if (OnRoad(out _)) { TeleportToCursor(); Close(); }       // freie Fläche: nur auf Straßen (wie im Spiel)
-                else Sound("wrong");
+                else if (_hover >= 0)
+                {
+                    // Spot: Tooltip mit Infos (bmap:ttip:extd); Lesezeichen: Mini-Menü "Lesezeichen entfernen" (Film)
+                    _selected = _hover; _selectedPlayer = -1;
+                    var ms = _spots[_hover];
+                    _menuWorld = Manager.Streamer.MapRoot.TransformPoint(ms.spot.Position);
+                    _menuTargetPresent = TDU2Gps.Instance != null && TDU2Gps.Instance.IsTargetNear(ms.spot.Position, 40f);
+                    _ui.SetValue("/:IsTargetPresent", _menuTargetPresent);
+                    _ui.SetValue("/:IsSpotFavorite", TDU2Bookmarks.IsFavorite(ms.spot.Code));
+                    _ui.SetValue("/:IsTeleportOK", true);
+                    _ui.Input("A");
+                }
+                else
+                {
+                    // freie Fläche: Mini-Menü des Films (Teleport nur auf Straßen, GPS-Ziel, Lesezeichen)
+                    _selected = -1; _selectedPlayer = -1;
+                    _menuWorld = _cursorWorld;
+                    _ui.SetVariable("/:WhatSpot", "noSpot");
+                    _ui.SetVariable("/:WhatSpotType", "none");
+                    _ui.SetValue("/:IsTeleportOK", OnRoad(out _));
+                    _menuTargetPresent = GpsTargetUnderMouse(mp);
+                    _ui.SetValue("/:IsTargetPresent", _menuTargetPresent);
+                    _ui.SetValue("/:IsTargetOK", _contestCup < 0);
+                    if (_contestCup >= 0) { if (OnRoad(out _)) { TeleportToCursor(); Close(); } else Sound("wrong"); }
+                    else _ui.Input("A");
+                }
             }
+            // Filterleiste: LB/RB bzw. Bild-Tasten am PC -> Tab / Umschalt+Tab (wie die Pfeile im Film, braucht _root.Input)
+            bool tabR = Input.GetKeyDown(KeyCode.JoystickButton5) || (Input.GetKeyDown(KeyCode.Tab) && !Input.GetKey(KeyCode.LeftShift) && !Input.GetKey(KeyCode.RightShift));
+            bool tabL = Input.GetKeyDown(KeyCode.JoystickButton4) || (Input.GetKeyDown(KeyCode.Tab) && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)));
+            if ((tabR || tabL) && _contestCup < 0 && !_extended && !_miniMenu) _ui.CallClip("/presets", "Move", tabR ? "right" : "left");
             if (Input.GetKeyDown(KeyCode.X)) _ui.Input("X");
             if (Input.GetKeyDown(KeyCode.Y)) _ui.Input("Y");
             // T = direkt an die Cursorposition teleportieren
@@ -805,6 +1000,12 @@ namespace TDU2.Map.Vehicles
                         if (label == null) continue;
                         _spots.Add(new MapSpot { spot = s, label = label, cup = cupByCode.TryGetValue(s.Code, out int ci) ? ci : -1 });
                     }
+                // Lesezeichen (nur auf der großen Karte, gespeichert je Spieler und Insel)
+                string isl = IslandName();
+                foreach (var b in TDU2Bookmarks.All)
+                    if (string.Equals(b.Island ?? "", isl, StringComparison.OrdinalIgnoreCase))
+                        _spots.Add(new MapSpot { spot = new Spot { Code = "#BOOKMARK_" + b.Id, Position = b.Pos, Position2 = b.Pos, Index = -1 }, label = "bookmark", bookmark = b.Id });
+                // GPS-Ziel: eigener Clip des Films (/target, siehe UpdateGpsMarker), kein Spot-Symbol
             }
             int extra = 0; foreach (var e in _spots) if (e.cup >= 0) extra++;
             Debug.Log("[TDU2] Karte: " + _spots.Count + " Spots mit Symbol" + (_contestCup >= 0 ? " (Wettbewerb)" : ", davon " + extra + " Meisterschaften"));
@@ -816,6 +1017,52 @@ namespace TDU2.Map.Vehicles
             foreach (var kv in _playerSlots) _ui.Detach("/pack", _pointDepth0 + MaxSpots + 1 + kv.Value);
             _playerSlots.Clear();
             _hover = -1; _hoverPlayer = -1; _selectedPlayer = -1;
+        }
+
+        /// <summary>Spot im gewählten Reiter der Filterleiste? (Wettbewerbsmodus: alle Rennen; GPS-Ziel immer)</summary>
+        bool FilterPass(MapSpot ms)
+        {
+            if (_contestCup >= 0 || ms.gps) return true;
+            if (ms.bookmark >= 0) return _filter == 5;
+            int cat = SpotCategory(ms);
+            switch (_filter)
+            {
+                case 0: return cat == 0;
+                case 2: return cat == 2;
+                case 3: return cat == 3;
+                case 5: return TDU2Bookmarks.IsFavorite(ms.spot?.Code);   // eigene Orte: Lesezeichen + Favoriten
+                default: return false;   // 1 Multiplayer-Herausforderungen (keine Spots), 4 Spieler (nur Spielersymbole)
+            }
+        }
+
+        /// <summary>0 Herausforderung (Rennen, Meisterschaften, Schule, Foto, gestohlene Autos …), 2 Ort für den Avatar, 3 Ort für Fahrzeuge.</summary>
+        static int SpotCategory(MapSpot ms)
+        {
+            if (ms.cup >= 0) return 0;
+            switch (ms.label)
+            {
+                case "home":
+                case "club":
+                case "estates":
+                case "clothes":
+                case "hair":
+                case "surgery":
+                case "casino":
+                case "gamblingHall":
+                case "airport":
+                case "watches":
+                case "forsale":
+                    return 2;
+                case "carDealer":
+                case "bikeDealer":
+                case "tuning":
+                case "carWash":
+                case "carPaint":
+                case "carRental":
+                case "auctionHall":
+                    return 3;
+                default: return 0;
+            }
         }
 
         void ApplyLod(bool force)
@@ -856,23 +1103,29 @@ namespace TDU2.Map.Vehicles
             var cl = _ui.GuiToLocal("/", mouse);
             if (cl.HasValue) _ui.SetPosition("/curseur", cl.Value);
             // Über Tooltip/Menüs liegt der Kartencursor des Films darunter -> dort den Mauszeiger von Windows zeigen (immer obenauf)
-            bool sysCursor = _extended || _ui.MouseOverButton;
+            bool sysCursor = _extended || _miniMenu || _ui.MouseOverButton;
             if (sysCursor != _sysCursor)
             {
                 _sysCursor = sysCursor;
                 Cursor.visible = sysCursor;
                 _ui.SetVisible("/curseur", !sysCursor);
             }
-            // Sperr-Symbol am Cursor (/curseur/info_offroad) wie im Spiel nur abseits von Straßen und Spots
+            // Sperr-Symbol am Cursor: /curseur/cible "off" = rotes Verbotszeichen (abseits von Straßen und Spots), "on" = leer.
+            // Nur bei Änderung umschalten (sonst startet das Bild jedes Mal neu).
             if (Time.frameCount % 4 == 0)
             {
 #if ENABLE_LEGACY_INPUT_MANAGER
                 _cursorWorld = GroundPoint(Input.mousePosition);
 #endif
-                bool offroad = _hover < 0 && !OnRoad(out _);
-                _ui.SetVisible("/curseur/info_offroad", offroad);
+                if (!_miniMenu)
+                {
+                    bool offroad = _hover < 0 && _hoverPlayer < 0 && !OnRoad(out _);
+                    if (_cibleOff != offroad) { _cibleOff = offroad; _ui.GotoLabel("/curseur/cible", offroad ? "off" : "on", false); }
+                }
                 _ui.SetValue("/:IsRoadLocked", false);
             }
+
+            UpdateGpsMarker();
 
             // Spots: sichtbare, nächste zum Kartenmittelpunkt zuerst
             if (_pointChar == 0) return;
@@ -882,7 +1135,9 @@ namespace TDU2.Map.Vehicles
             {
                 var g = ToGui(root.TransformPoint(_spots[i].spot.Position));
                 if (!g.HasValue || g.Value.x < -40 || g.Value.y < -40 || g.Value.x > Screen.width + 40 || g.Value.y > Screen.height + 40) continue;
-                list.Add(((g.Value - center).sqrMagnitude, i, g.Value));
+                if (!FilterPass(_spots[i])) continue;
+                // Lesezeichen immer zuerst (sonst fielen sie bei weit herausgezoomter Karte hinter MaxSpots weg)
+                list.Add((_spots[i].bookmark >= 0 ? -1f : (g.Value - center).sqrMagnitude, i, g.Value));
             }
             list.Sort((a, b) => a.d.CompareTo(b.d));
             int n = Mathf.Min(list.Count, MaxSpots);
@@ -899,7 +1154,9 @@ namespace TDU2.Map.Vehicles
                 var d = _ui.AttachSprite("/pack", _pointChar, name, _pointDepth0 + slot);
                 if (d == null) continue;
                 string label = _spots[idx].label;
-                string key = label + "|" + idx;
+                var gpsI = TDU2Gps.Instance;
+                bool tgt = gpsI != null && gpsI.HasTarget && (_spots[idx].gps || gpsI.IsTargetNear(_spots[idx].spot.Position, 40f));
+                string key = label + "|" + idx + (tgt ? "|T" : "");
                 if (!_slotLabel.TryGetValue(slot, out var cur) || cur != key)
                 {
                     _ui.GotoLabel("/pack/" + name + "/spot", label, false);
@@ -915,7 +1172,9 @@ namespace TDU2.Map.Vehicles
                     }
                     if (label == "carDealer") ApplyDealerLogo("/pack/" + name + "/spot", _spots[idx].spot.Code);
                     else _ui.SetClipTexture("/pack/" + name + "/spot/ic/logo/lure", null);
-                    _ui.SetVisible("/pack/" + name + "/fleche", false);   // Pfeil gehört zur GPS-Zielanzeige, nicht zu jedem Spot
+                    // GPS-Ziel: Fähnchen (spot/target "open") und Pfeil wie im Spiel, sonst aus
+                    if (tgt) _ui.CallClip("/pack/" + name, "setTargetStatus", true);
+                    _ui.SetVisible("/pack/" + name + "/fleche", tgt);
                     _slotLabel[slot] = key;
                 }
                 var lp = _ui.GuiToLocal("/pack", gui);
@@ -923,13 +1182,16 @@ namespace TDU2.Map.Vehicles
                 d.Matrix.A = SpotScale; d.Matrix.D = SpotScale; d.Matrix.B = 0f; d.Matrix.C = 0f; d.ScriptMatrix = true;
                 d.Visible = true;
                 float dm = (gui - mouse).sqrMagnitude;
-                if (dm < best) { best = dm; hover = idx; }
+                if (dm < best && !_spots[idx].gps) { best = dm; hover = idx; }   // GPS-Ziel selbst: Mini-Menü der freien Fläche
             }
             int hoverPlayer = UpdatePlayerBlips(mouse, ref best);
             if (hoverPlayer >= 0) hover = -1;
-            if ((hover != _hover || hoverPlayer != _hoverPlayer) && !_extended)
+            if ((hover != _hover || hoverPlayer != _hoverPlayer) && !_extended && !_miniMenu)
             {
                 _hover = hover; _hoverPlayer = hoverPlayer;
+                // Cursor-Ring wie im Spiel: über einem Spot zusammenziehen (spotOver), sonst zurück (spotOut)
+                bool over = hover >= 0 || hoverPlayer >= 0;
+                if (over != _cursorOverSpot) { _cursorOverSpot = over; _ui.CallClip("/curseur", over ? "spotOver" : "spotOut"); }
                 var gd = Online.TDU2GameData.Instance;
                 if (hoverPlayer >= 0 && gd != null && gd.Players.TryGetValue(hoverPlayer, out var pl)) { ShowPlayerTooltip(pl); return; }
                 // Spiel: _root.WhatSpot = Spot unter dem Cursor ("noSpot" sonst), WhatSpotType "spot" bzw. "contest" (Meisterschaft/
@@ -1014,7 +1276,10 @@ namespace TDU2.Map.Vehicles
 
         void TeleportToPlayer(int id)
         {
+            // Beitreten wie über die Spielerliste (verlässt auch ein Interieur; Fehler im Chat)
             var gd = Online.TDU2GameData.Instance;
+            var party = Online.TDU2Party.Instance ?? (gd != null ? Online.TDU2Party.Ensure(gd.gameObject) : null);
+            if (party != null) { party.Join(id); return; }
             if (gd == null || !gd.Players.TryGetValue(id, out var p) || !p.HasPos) return;
             var root = Manager.Streamer.MapRoot;
             var fwd = root.TransformVector(p.GameForward); fwd.y = 0f;
@@ -1089,6 +1354,14 @@ namespace TDU2.Map.Vehicles
         void TeleportToSpot(Spot s)
         {
             if (s == null) { TeleportToCursor(); return; }
+            // Spot mit Interieur (Händler, Haus, Club, Laden …): nach dem Schließen der Karte direkt hinein
+            if (s.Index >= 0 && !string.IsNullOrEmpty(s.Code) && !s.Code.StartsWith("#") && Interiors != null && !Interiors.Inside)
+            { _pendingEnter = s; return; }
+            TeleportOutside(s);
+        }
+
+        void TeleportOutside(Spot s)
+        {
             var root = Manager.Streamer.MapRoot;
             // Einfahrt (Position2), sonst Spot-Position; Blick zum Spot
             bool p2 = s.Position2.sqrMagnitude > 1f && !float.IsNaN(s.Position2.x);
@@ -1101,9 +1374,10 @@ namespace TDU2.Map.Vehicles
         {
             var veh = Manager?.Current;
             if (veh == null) return;
-            world.y = Manager.GroundHeight(world) + 0.5f;
             var f = dir ?? Vector3.ProjectOnPlane(veh.transform.forward, Vector3.up);
-            veh.ResetVehicle(world, Quaternion.LookRotation(f.sqrMagnitude > 1e-3f ? f.normalized : Vector3.forward, Vector3.up));
+            f.y = 0f;
+            // Zielhöhe aus den Spieldaten (Straßenpunkt/Spot/Mitspieler): das Auto wartet dort, bis der Boden geladen ist
+            Manager.TeleportSafe(world, Quaternion.LookRotation(f.sqrMagnitude > 1e-3f ? f.normalized : Vector3.forward, Vector3.up));
             _target = world; _target.y = 0f;
         }
 
@@ -1195,9 +1469,9 @@ namespace TDU2.Map.Vehicles
             var s = ms.spot; var label = ms.label;
             _ui.SetClipTexture("/tool_tip/infos/picture/lure_map", SpotPicture(s));
             if (ms.cup >= 0) { SetContestVars(ms.cup); return; }
-            if (label != "carDealer" && label != "bikeDealer") return;
-            var db = Manager?.Database; var shop = db?.ShopFor(s.Code);
-            var cars = new List<CarPhysics>();
+            if (label != "carDealer" && label != "bikeDealer" && label != "home") return;
+            var db = Manager?.Database; var shop = label == "home" ? null : db?.ShopFor(s.Code);
+            var cars = label == "home" ? HouseCars(s.Code) : new List<CarPhysics>();
             if (shop != null) foreach (int id in shop.CarIds) if (id != 0 && db.ById.TryGetValue(id, out var c)) cars.Add(c);
             const string txt = "/tool_tip/infos/txt";
             _ui.SetVariable(txt + ":list_title", (_texts != null && _texts.TryGetValue("m_Vehicles_", out var v) ? v : "Fahrzeuge"));
@@ -1241,12 +1515,79 @@ namespace TDU2.Map.Vehicles
             return SpotsFile.CategoryFromCode(code).Replace("?", "").Trim();
         }
 
+        // ------------------------------------------------------------------ GPS-Ziel / Lesezeichen
+        bool _gpsMarkerShown; Vector3 _gpsMarkerFor;
+
+        /// <summary>
+        /// GPS-Ziel auf der Karte: Clip /target des Films (map.vmf, Tiefe 10, Labels default/open/loop – blendet sich bei
+        /// "open" ein und läuft dann in "loop"); im Wettbewerbs-Vorschau blendet der Film ihn selbst aus.
+        /// </summary>
+        void UpdateGpsMarker()
+        {
+            var gps = TDU2Gps.Instance;
+            var root = Manager?.Streamer?.MapRoot;
+            bool show = gps != null && gps.HasTarget && root != null && _contestCup < 0;
+            Vector2? gui = show ? ToGui(root.TransformPoint(gps.TargetGame)) : null;
+            var lp = gui.HasValue ? _ui.GuiToLocal("/", gui.Value) : null;
+            show &= lp.HasValue;
+            if (show)
+            {
+                if (!_gpsMarkerShown || _gpsMarkerFor != gps.TargetGame) { _ui.GotoLabel("/target", "open", true); _gpsMarkerFor = gps.TargetGame; }
+                _ui.SetPosition("/target", lp.Value);
+            }
+            if (show != _gpsMarkerShown || !show) _ui.SetVisible("/target", show);
+            _gpsMarkerShown = show;
+        }
+        string IslandName() => Manager?.Streamer?.Index?.IslandName ?? "";
+
+        /// <summary>Punkt des Mini-Menüs bzw. gewählten Spots in Spielkoordinaten.</summary>
+        Vector3? MenuPoint()
+        {
+            var root = Manager?.Streamer?.MapRoot;
+            if (root == null) return null;
+            if (_selected >= 0 && _selected < _spots.Count) return _spots[_selected].spot.Position;
+            var w = _menuWorld ?? _cursorWorld;
+            return w.HasValue ? root.InverseTransformPoint(w.Value) : (Vector3?)null;
+        }
+
+        /// <summary>GPS-Ziel unter dem Mauszeiger (Bildschirmabstand wie die Spot-Auswahl)?</summary>
+        bool GpsTargetUnderMouse(Vector3 mouseScreen)
+        {
+            var gps = TDU2Gps.Instance;
+            if (gps == null || !gps.HasTarget || Manager?.Streamer?.MapRoot == null) return false;
+            var g = ToGui(Manager.Streamer.MapRoot.TransformPoint(gps.TargetGame));
+            if (!g.HasValue) return false;
+            var m = new Vector2(mouseScreen.x, Screen.height - mouseScreen.y);
+            float r = 22f * (Screen.height / 720f);
+            return (g.Value - m).sqrMagnitude < r * r;
+        }
+
+        /// <summary>GPS-Ziel an diesem Punkt (Spielkoordinaten) setzen; liegt dort schon das Ziel: entfernen.</summary>
+        void ToggleGpsTarget(Vector3? game, bool? present = null, bool sound = true)
+        {
+            var gps = TDU2Gps.Instance;
+            if (gps == null || !game.HasValue) { if (sound) Sound("wrong"); return; }
+#if ENABLE_LEGACY_INPUT_MANAGER
+            bool under = _selected < 0 && GpsTargetUnderMouse(Input.mousePosition);
+#else
+            bool under = false;
+#endif
+            bool remove = present ?? (gps.HasTarget && (gps.IsTargetNear(game.Value, 40f) || under));
+            if (remove && gps.HasTarget) gps.ClearTarget();
+            else gps.SetTarget(game.Value);
+            _ui.SetValue("/:IsTargetPresent", gps.HasTarget);
+            if (sound) Sound(gps.HasTarget ? "dropflag" : "valid");
+            BuildSpots();
+        }
+
         bool _ttipOpen;
         void ShowTooltip(MapSpot ms)
         {
             var s = ms.spot; var label = ms.label;
             // Titel /:SpotName, Symbol /tool_tip/ic (gleiches Spot-Sprite wie auf der Karte)
             string name = TDU2Minimap.ExtraSpotNames.TryGetValue(s.Code, out var extraName) ? extraName : LocalizedSpotName(label, s.Code);
+            if (ms.bookmark >= 0) name = Txt("m_Bookmark", "Lesezeichen") + " " + ms.bookmark;
+            _ui.SetValue("/:IsSpotFavorite", TDU2Bookmarks.IsFavorite(s.Code));
             if (label == "carDealer") { var b = DealerBrands(s.Code); if (!string.IsNullOrEmpty(b)) name = b; }
             var ch = Champs;
             if (ms.cup >= 0 && ch != null)
@@ -1286,7 +1627,7 @@ namespace TDU2.Map.Vehicles
             int medal = rsT != null && rsT.State == 2 ? rsT.Place : 0;
             _ui.GotoLabel("/tool_tip/ic/rank", medal == 1 ? "gold" : medal == 2 ? "silver" : medal == 3 ? "bronze" : "default", false);
             SetSpotVars(ms);
-            _ui.SetClipTexture("/tool_tip/infos/picture/lure_map", SpotPicture(s));   // auch null (kein altes Bild stehen lassen)
+            _ui.SetClipTexture("/tool_tip/infos/picture/lure_map", ms.bookmark >= 0 || ms.gps ? null : SpotPicture(s));   // auch null (kein altes Bild stehen lassen)
             if (!_ttipOpen) { _ui.CallClip("/tool_tip", "Open"); _ttipOpen = true; }
         }
 
@@ -1309,6 +1650,38 @@ namespace TDU2.Map.Vehicles
                             foreach (var oc in save.ownedCars) if (string.Equals(oc, c.FileName, StringComparison.OrdinalIgnoreCase)) { owned++; break; }
                 _ui.SetVariable("/:nb_cars_bought", owned.ToString());
             }
+            else if (ms.label == "home")
+            {
+                // Haus: Garagenplätze, Stufe und die dort abgestellten Autos (infos.CarsList(false) liest /:nb_cars, /:carN_car_name, carN_gp, carN_state)
+                var house = db?.HouseFor(ms.spot.Code);
+                var cars = HouseCars(ms.spot.Code);
+                int places = house != null && house.CarSlots > 0 ? house.CarSlots : cars.Count;
+                _ui.SetVariable("/:nb_cars", cars.Count.ToString());
+                _ui.SetVariable("/:nb_garage_places", places > 0 ? places.ToString() : "");
+                if (house != null && house.Level > 0) _ui.SetValue("/:HouseLevel", house.Level);
+                for (int i = 0; i < 12; i++)
+                {
+                    var c = i < cars.Count ? cars[i] : null;
+                    _ui.SetVariable("/:car" + i + "_car_name", c != null ? ((c.Brand ?? "") + " " + c.ModelName).Trim() : "");
+                    _ui.SetVariable("/:car" + i + "_gp", c != null ? GroupLabel(c.Raw != null ? c.Raw.I("_vehiclecategory") : 0) : "");
+                    _ui.SetValue("/:car" + i + "_state", false);
+                }
+            }
+        }
+
+        /// <summary>Autos in der Garage eines Hauses – wie beim Betreten der Garage (TDU2Interiors): das gefahrene Auto zuerst,
+        /// dann die eigenen Autos aus dem Spielstand, höchstens so viele wie das Haus Stellplätze hat.</summary>
+        List<CarPhysics> HouseCars(string code)
+        {
+            var r = new List<CarPhysics>();
+            if (Manager == null) return r;
+            var cur = Manager.Current?.Car;
+            var owned = Online.TDU2Session.OwnedCars;
+            if (cur != null) foreach (var n in owned) if (string.Equals(n, cur.FileName, StringComparison.OrdinalIgnoreCase)) { r.Add(cur); break; }
+            foreach (var n in owned) { var c = Manager.FindCar(n); if (c != null && !r.Contains(c)) r.Add(c); }
+            var house = Manager.Database?.HouseFor(code);
+            if (house != null && house.CarSlots > 0 && r.Count > house.CarSlots) r.RemoveRange(house.CarSlots, r.Count - house.CarSlots);
+            return r;
         }
 
         void HideTooltip()

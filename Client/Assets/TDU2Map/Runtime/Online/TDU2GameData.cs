@@ -25,8 +25,15 @@ namespace TDU2.Map.Online
         public Vector3 GamePos;         // Spielkoordinaten (Insel)
         public Vector3 GameForward = Vector3.forward;
         public float LastUpdate;        // Time.unscaledTime der letzten Position
+        public int RideWith, Passenger; // Mitfahrt: fährt bei … mit / hat … als Beifahrer (Server-Spielernummern)
         public DateTime LastSeen;       // für "Zuletzt gesehen"
         public CarPhysics Car;          // aufgelöst aus der Datenbank (CarId)
+        public string Avatar = "";      // Aussehen (AvatarConfig.Encode) aus der Server-Spielerliste
+        public string Mood = "", MoodTxt = "";   // MyTDULife: Smiley + Stimmungstext (Spielerliste)
+        public int PhotoVer;                     // MyTDULife: Version des Avatar-Fotos (0 = keins)
+        public MyLifeData Life;                  // MyTDULife komplett (op "profile"), null = noch nicht geladen
+        public Texture2D Photo;                  // Avatar-Foto (aus Life.photo)
+        public int PhotoTexVer = -1;
         public string CarName => Car == null ? "" : ((Car.Brand ?? "") + " " + Car.ModelName).Trim();
     }
 
@@ -202,8 +209,67 @@ namespace TDU2.Map.Online
 
         public void BindManager(TDU2VehicleManager m) { _manager = m; }
 
+        // ------------------------------------------------------------------ MyTDULife anderer Spieler (Spielerkarte)
+        readonly Dictionary<int, (Task<NetResponse> task, PlayerInfo p, List<Action<PlayerInfo>> done)> _lifeReq = new Dictionary<int, (Task<NetResponse>, PlayerInfo, List<Action<PlayerInfo>>)>();
+
+        /// <summary>
+        /// MyTDULife (Stimmung, Profil, Avatar-Foto) eines Spielers holen; done läuft im Hauptthread, sobald p.Life/p.Photo da sind
+        /// (sofort, wenn schon aktuell). Offline-Spieler (Id 0) werden über den Namen gesucht.
+        /// </summary>
+        public void FetchLife(PlayerInfo p, Action<PlayerInfo> done)
+        {
+            if (p == null) return;
+            if (p.Life != null && p.PhotoTexVer == p.PhotoVer && p.PhotoVer >= 0 && (p.PhotoVer == 0 || p.Photo != null)) { done?.Invoke(p); return; }
+            if (!TDU2Session.LoggedIn || TDU2Session.Client == null) return;
+            int key = p.Id != 0 ? p.Id : -Math.Abs((p.Nick ?? "").GetHashCode() | 1);
+            if (_lifeReq.TryGetValue(key, out var pend)) { if (done != null) pend.done.Add(done); return; }
+            // nicht dauernd neu fragen (Spielerliste aktualisiert jede Sekunde): je Spieler und Foto-Version höchstens alle 15 s
+            if (_lifeTried.TryGetValue(key, out var tried) && tried.ver == p.PhotoVer && Time.unscaledTime - tried.at < 15f) return;
+            _lifeTried[key] = (p.PhotoVer, Time.unscaledTime);
+            var t = TDU2Session.Client.Send(new NetRequest { op = "profile", session = TDU2Session.SessionId, target = p.Id, nick = p.Id == 0 ? p.Nick : "" });
+            _lifeReq[key] = (t, p, done != null ? new List<Action<PlayerInfo>> { done } : new List<Action<PlayerInfo>>());
+        }
+
+        readonly Dictionary<int, (int ver, float at)> _lifeTried = new Dictionary<int, (int, float)>();
+
+        void PollLife()
+        {
+            if (_lifeReq.Count == 0) return;
+            List<int> fin = null;
+            foreach (var kv in _lifeReq) if (kv.Value.task.IsCompleted) (fin ??= new List<int>()).Add(kv.Key);
+            if (fin == null) return;
+            foreach (int k in fin)
+            {
+                var (task, p, done) = _lifeReq[k];
+                _lifeReq.Remove(k);
+                var r = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
+                if (r == null || !r.ok || r.life == null) { Debug.Log("[TDU2] MyTDULife von " + p.Nick + ": " + (r?.error ?? "keine Antwort")); continue; }
+                p.Life = r.life;
+                p.Mood = r.life.mood ?? ""; p.MoodTxt = r.life.moodText ?? ""; p.PhotoVer = r.life.photoVer;
+                if (p.Photo != null) { Destroy(p.Photo); p.Photo = null; }
+                p.Photo = DecodePhoto(r.life.photo);
+                p.PhotoTexVer = r.life.photoVer;
+                foreach (var d in done) { try { d(p); } catch (Exception ex) { Debug.LogException(ex); } }
+            }
+        }
+
+        /// <summary>Avatar-Foto (Base64-JPG) -> Textur; null bei leer/fehlerhaft.</summary>
+        public static Texture2D DecodePhoto(string b64)
+        {
+            if (string.IsNullOrEmpty(b64)) return null;
+            try
+            {
+                var tex = new Texture2D(2, 2, TextureFormat.RGB24, false) { name = "MyTDULife Foto", wrapMode = TextureWrapMode.Clamp };
+                if (tex.LoadImage(Convert.FromBase64String(b64))) return tex;
+                Destroy(tex);
+            }
+            catch (Exception ex) { Debug.LogWarning("[TDU2] Foto: " + ex.Message); }
+            return null;
+        }
+
         void Update()
         {
+            PollLife();
             if (_manager == null)
             {
 #if UNITY_2023_1_OR_NEWER
@@ -237,7 +303,7 @@ namespace TDU2.Map.Online
             if (ok && r.playerId == 0) { TDU2Session.SaveAsync(); ok = false; }   // Sitzung verloren (Server neu gestartet?) -> mit Token neu anmelden
             if (!ok) _failCount++; else _failCount = 0;
             bool online = ok || (_failCount < 2 && Online);   // einen Aussetzer tolerieren
-            if (online && r != null && r.ok) { ApplyPlayers(r); PlayerCount = IslandPlayerCount(r.online); TDU2Session.Online = r.online; TDU2Session.ApplyRadio(r); }
+            if (online && r != null && r.ok) { ApplyPlayers(r); TDU2Party.Ensure(gameObject).OnStatus(r); PlayerCount = IslandPlayerCount(r.online); TDU2Session.Online = r.online; TDU2Session.ApplyRadio(r); }
             if (online != Online)
             {
                 Online = online;
@@ -265,6 +331,9 @@ namespace TDU2.Map.Online
                 p.Nick = e.nick; p.Money = e.money; p.NbCars = e.nbCars; p.Online = true; p.Nationality = e.nationality;
                 if (e.carId != 0) { p.CarId = e.carId; p.Color = e.color; }
                 p.Island = e.island;
+                p.RideWith = e.rideWith; p.Passenger = e.passenger;
+                if (!string.IsNullOrEmpty(e.avatar)) p.Avatar = e.avatar;
+                p.Mood = e.mood ?? ""; p.MoodTxt = e.moodTxt ?? ""; p.PhotoVer = e.photoVer;
                 p.InCar = e.inCar && p.SameIsland;
                 if (!p.SameIsland) p.HasPos = false;   // andere Insel: keine Position (Karte/Minimap)
                 else if (!p.HasPos || Time.unscaledTime - p.LastUpdate > 3f) { p.GamePos = new Vector3(e.px, p.GamePos.y, e.pz); p.HasPos = e.inCar || p.HasPos; }
@@ -363,17 +432,18 @@ namespace TDU2.Map.Online
                 case "current_players": return new List<PlayerInfo>(Players.Values);
                 case "friends": //return new List<PlayerInfo>(Friends);
                 case "recent_players":
-                {
-                    EnsureRecentLoaded();
-                    var db = _manager?.Database;
-                    foreach (var p in Recent)
                     {
-                        if (p.Car == null && db != null && db.ById.TryGetValue(p.CarId, out var c)) p.Car = c;
-                        p.Online = false;
-                        foreach (var o in Players.Values) if (string.Equals(o.Nick, p.Nick, StringComparison.OrdinalIgnoreCase)) p.Online = true;
+                        EnsureRecentLoaded();
+                        var db = _manager?.Database;
+                        foreach (var p in Recent)
+                        {
+                            if (p.Car == null && db != null && db.ById.TryGetValue(p.CarId, out var c)) p.Car = c;
+                            p.Online = false;
+                            // gespeicherte Einträge haben keine Sitzungsnummer: online -> die aktuelle übernehmen (Einladen/Beitreten brauchen sie)
+                            foreach (var o in Players.Values) if (string.Equals(o.Nick, p.Nick, StringComparison.OrdinalIgnoreCase)) { p.Online = true; p.Id = o.Id; }
+                        }
+                        return new List<PlayerInfo>(Recent);
                     }
-                    return new List<PlayerInfo>(Recent);
-                }
                 case "club_members": return new List<PlayerInfo>(Club);
             }
             return new List<PlayerInfo>();
@@ -477,6 +547,8 @@ namespace TDU2.Map.Online
 
         // ------------------------------------------------------------------ general.bnk: Verbindung verloren / Spieler online / Speichern
         VmfPlayer _general;
+        /// <summary>Globales Overlay general.bnk (Chat, Online-Meldungen, Spiel-Einladung pop_gameInvite); null = nicht geladen.</summary>
+        public VmfPlayer General => _general;
         bool _generalTried;
         float _evtCloseAt = -1f, _saveCloseAt = -1f;
         bool _decoOpen;
@@ -581,6 +653,8 @@ namespace TDU2.Map.Online
         string _logMode;
 
         /// <summary>true, solange der Chat die Tastatur hat (andere Komponenten ignorieren dann Esc/Enter usw.).</summary>
+        /// <summary>Ein Film-Textfeld hat die Tastatur (z.B. MyTDULife-Stimmungstext): der Chat öffnet sich dann nicht.</summary>
+        public static bool ExternalTextInput;
         public static bool ChatTyping => Instance != null && (Instance._chatOpen || Time.frameCount <= Instance._chatBlockFrame);
 
         void UpdateChat()
@@ -604,7 +678,7 @@ namespace TDU2.Map.Online
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (!_chatOpen)
             {
-                bool free = EnableChat && TDU2Session.LoggedIn && !TDU2Login.Active && !TDU2BigMap.IsOpen && (pm == null || !pm.IsOpen) && Time.frameCount > _chatBlockFrame;
+                bool free = EnableChat && !ExternalTextInput && TDU2Session.LoggedIn && !TDU2Login.Active && !TDU2BigMap.IsOpen && (pm == null || !pm.IsOpen) && Time.frameCount > _chatBlockFrame;
                 if (free && TDU2Controls.Pressed("chat")) OpenChat();
                 return;
             }

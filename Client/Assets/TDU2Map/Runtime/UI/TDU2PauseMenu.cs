@@ -48,10 +48,10 @@ namespace TDU2.Map.Vehicles
 
         // Menüpunkte, die hier funktionieren (alles andere ist im Film gesperrt dargestellt)
         static readonly string[] Unlocked = { "LockResume", "LockOptions", "LockExitGame", "LockQuit", "LockControls", "LockVideo", "LockDisplay",
-            "LockAudio", "LockGameSettings", "LockDevice", "LockMouse", "LockWheel", "LockLanguage", "LockSave", "LockPlayers" };
-        static readonly string[] Locked = { "LockSnapshot", "LockChangePosition", "LockInviteParty", "LockManageParty", "LockGameProgress",
+            "LockAudio", "LockGameSettings", "LockDevice", "LockMouse", "LockWheel", "LockLanguage", "LockSave", "LockPlayers", "LockJoin", "LockGameProgress", "LockInvite" };
+        static readonly string[] Locked = { "LockSnapshot", "LockChangePosition", "LockInviteParty", "LockManageParty",
             "LockRestart", "LockEditor", "LockBookmarks", "LockProfiles", "LockNewGame", "LockContinueGame", "LockAchiev", "LockRankings",
-            "LockOnline", "LockSocial", "LockStatus", "LockJoin", "LockInvite" };
+            "LockOnline", "LockSocial", "LockStatus" };
 
         void Update()
         {
@@ -70,6 +70,7 @@ namespace TDU2.Map.Vehicles
             // Gehört ESC gerade dem Interieur (eigenes Menü, Sticker-Shop), nicht öffnen.
             bool menuKey = Input.GetKeyDown(MenuKey) || (inside && Input.GetKeyDown(MenuKeyInterior));
             if (!_open && inside && ti.EscOwned) menuKey = false;
+            if (!_open && TDU2AccessoryMenu.OwnsEscape) menuKey = false;   // ESC schließt das Zubehörmenü (Verdeck/Fenster/Blinker)
             if (TDU2BigMap.IsOpen) { if (menuKey && !_open) Debug.Log("[TDU2] Pausemenü gesperrt: große Karte offen"); return; }   // große Karte offen: ESC gehört ihr
             if (!_open && Racing.RacingSchoolMenu.BlocksPauseMenu) { if (menuKey) Debug.Log("[TDU2] Pausemenü gesperrt: " + Racing.RacingSchoolMenu.BlockReason()); return; }   // Rennschul-Menü/Ergebnis offen: ESC gehört dem Film
             if (_dumpAt > 0f && Time.unscaledTime >= _dumpAt) { _dumpAt = -1f; Dump("nach dem Öffnen"); }
@@ -84,6 +85,7 @@ namespace TDU2.Map.Vehicles
                 return;
             }
             if (_ui == null) return;
+            UpdateOwnPhoto();
             UpdateMapMarker();
             UpdatePlayerLists();
             UpdateClock();
@@ -235,6 +237,7 @@ namespace TDU2.Map.Vehicles
             _ui.SetValue("/:IsInOptions", false);
             _ui.SetValue("/:ListPlayerCardOpened", false);
             _ui.SetValue("/:Input", true);
+            _ui.ForceVisible("/pause_menu/data_extd/objective", false);
             foreach (var n in Unlocked) _ui.SetValue("/:" + n, false);
             foreach (var n in Locked) _ui.SetValue("/:" + n, true);
             if (_raceMode) { _ui.SetValue("/:LockRestart", false); _ui.SetValue("/:LockQuit", false); }
@@ -460,6 +463,7 @@ namespace TDU2.Map.Vehicles
             }      // Bestätigungsdialog (Spiel zeigt ihn, Film wartet auf Antwort)
             if (HandleControlsCommand(c)) return;                     // Steuerung (Tastenbelegung)
             if (c == "pcrd:open") { OpenPlayerCard(); return; }       // Spielerkarte: Daten liefern
+            if (HandlePartyCommand(c)) return;                        // Beitreten / Einladen (Spielerkarte)
             if (_options != null && _options.Handle(_ui, c)) return;   // Optionsseiten
             switch (c)
             {
@@ -574,8 +578,17 @@ namespace TDU2.Map.Vehicles
                 int r = l.Top + i - 1;
                 if (r < 0 || r >= players.Count) continue;
                 string line = (op == "/" ? "" : op) + "/line" + i;
+
+                _ui.ForceVisible($"/players/players_list/line{i}/content/forbidden", false);
                 _ui.GotoLabel(line + "/content/state", players[r].Online ? "online" : "offline", false);
+
+
                 if (players[r].Nationality > 0) _ui.SetFrame(line + "/content/nationality", players[r].Nationality);   // Flagge = Bild Ländernummer
+                // MyTDULife-Foto des Spielers (kommt per op "profile" nach, Version aus der Spielerliste)
+                var pl = players[r];
+                _ui.SetClipTexture(line + "/content/photo/lure", pl.Photo);
+                if (pl.PhotoVer > 0 && (pl.Photo == null || pl.PhotoTexVer != pl.PhotoVer))
+                    Online.TDU2GameData.Ensure().FetchLife(pl, _ => { if (_listPlayers.ContainsKey(l)) ApplyPlayerLineStates(l); });
             }
         }
 
@@ -601,6 +614,55 @@ namespace TDU2.Map.Vehicles
             if (l != null && _listPlayers.TryGetValue(l, out var players) && l.Selected >= 0 && l.Selected < players.Count) _cardPlayer = players[l.Selected];
         }
 
+        // ------------------------------------------------------------------ Spielerkarte: Kreise (Level/Fortschritt)
+        /// <summary>Werte der Spielerkarte (Kreise "Wettbewerb/Sozial/Entdeckung/Sammlung" und Globales Level).</summary>
+        public struct PlayerCardStats
+        {
+            public int GlobalLevel;            // Zahl in der Mitte (listGlobalLevel)
+            public float GlobalProgress;       // Ring um das Globale Level, 0..100 (listGlobalPoints -> maskLevel)
+            public int GlobalLevelPoints;      // listGlobalLvlPoints
+            public float Racing;               // Wettbewerb 0..100 (listRacingPoints)
+            public float Social;               // Sozial 0..100 (listSocialPoints)
+            public float Discovery;            // Entdeckung 0..100 (listCruisingPoints)
+            public float Collection;           // Sammlung 0..100 (listCollectionPoints)
+            public string RacingLevelText;     // z.B. "3/20" (listRacingLevelCount)
+            public string CollectionLevelText; // z.B. "12/50" (listCollectionLevelCount)
+            public int Houses;                 // listNbHouses
+            public string Mood;                // Smiley-Label (listMood), null = unverändert
+            public static PlayerCardStats Default => new PlayerCardStats { GlobalLevel = 1, RacingLevelText = "0", CollectionLevelText = "0" };
+        }
+
+        /// <summary>
+        /// Liefert die Werte für die Spielerkarte eines Spielers (später z.B. aus dem Server-Spielstand). null = Standard (Level 1, leer).
+        /// Beispiel: TDU2PauseMenu.CardStatsProvider = p => new TDU2PauseMenu.PlayerCardStats { GlobalLevel = 5, Racing = 40, ... };
+        /// </summary>
+        public static Func<Online.PlayerInfo, PlayerCardStats> CardStatsProvider;
+
+        /// <summary>Werte in die Spielerkarte schreiben; ist die Karte offen, wird sie neu gezeichnet (setPlayerCard des Films).</summary>
+        public void SetPlayerCardValues(PlayerCardStats s) => SetPlayerCardValues(s, true);
+
+        void SetPlayerCardValues(PlayerCardStats s, bool redraw)
+        {
+            if (_ui == null) return;
+            _ui.SetValue("/:listGlobalLevel", Math.Max(1, s.GlobalLevel));
+            _ui.SetValue("/:listGlobalPoints", Mathf.Clamp(s.GlobalProgress, 0f, 100f));
+            _ui.SetValue("/:listGlobalLvlPoints", s.GlobalLevelPoints);
+            _ui.SetVariable("/:GlobalLevelCount", Math.Max(1, s.GlobalLevel).ToString());
+            _ui.SetValue("/:listRacingPoints", Mathf.Clamp(s.Racing, 0f, 100f));
+            _ui.SetValue("/:listSocialPoints", Mathf.Clamp(s.Social, 0f, 100f));
+            _ui.SetValue("/:listCruisingPoints", Mathf.Clamp(s.Discovery, 0f, 100f));
+            _ui.SetValue("/:listCollectionPoints", Mathf.Clamp(s.Collection, 0f, 100f));
+            _ui.SetVariable("/:listRacingLevelCount", s.RacingLevelText ?? "0");
+            _ui.SetVariable("/:listCollectionLevelCount", s.CollectionLevelText ?? "0");
+            _ui.SetVariable("/:listNbHouses", s.Houses.ToString());
+            if (!string.IsNullOrEmpty(s.Mood)) _ui.SetVariable("/:listMood", s.Mood);
+            // offene Karte neu füllen
+            string card = _ui.GetVariable("/:PlayerCardPath");
+            if (string.IsNullOrEmpty(card)) card = "/players/player_card";
+            var ci = redraw ? _ui.Find(card)?.Sprite : null;
+            if (ci != null && _ui.IsShown(ci)) _ui.CallClip(card, "setPlayerCard");
+        }
+
         void OpenPlayerCard()
         {
             var p = _cardPlayer;
@@ -610,18 +672,138 @@ namespace TDU2.Map.Vehicles
             _ui.SetVariable("/:listMoney", p != null ? p.Money.ToString("N0", de) + " $" : "");
             _ui.SetVariable("/:listNbCars", (p?.NbCars ?? 0).ToString());
             _ui.SetVariable("/:listNbHouses", "0");
-            _ui.SetVariable("/:listMoodTxt", p != null ? p.CarName : "");
+            // MyTDULife: Smiley, Stimmungstext und Avatar-Foto (Foto/Profil kommen per op "profile" nach)
+            _ui.SetVariable("/:listMood", p != null && !string.IsNullOrEmpty(p.Mood) ? p.Mood : "neutral");
+            _ui.SetVariable("/:listMoodTxt", p != null ? (p.MoodTxt ?? "") : "");
+            ApplyCardPhoto(p);
+            if (p != null) Online.TDU2GameData.Ensure().FetchLife(p, OnCardLife);
             _ui.SetValue("/:listIsConnected", p != null && p.Online);
-            _ui.SetValue("/:listGlobalLevel", 1);
-            _ui.SetValue("/:listGlobalPoints", 0);
-            _ui.SetValue("/:listGlobalLvlPoints", 0);
-            _ui.SetVariable("/:GlobalLevelCount", "1");
-            foreach (var n in new[] { "listRacingPoints", "listSocialPoints", "listCruisingPoints", "listCollectionPoints" }) _ui.SetValue("/:" + n, 0);
-            _ui.SetVariable("/:listRacingLevelCount", "0");
-            _ui.SetVariable("/:listCollectionLevelCount", "0");
+            var stats = PlayerCardStats.Default;
+            try { if (CardStatsProvider != null && p != null) stats = CardStatsProvider(p); } catch (Exception ex) { Debug.LogException(ex); }
+            SetPlayerCardValues(stats, false);   // die Karte liest die Werte selbst, sobald IsCardLoaded gesetzt ist
             string card = _ui.GetVariable("/:PlayerCardPath");
             if (string.IsNullOrEmpty(card)) card = "/players/player_card";
             _ui.SetValue(card + ":IsCardLoaded", true);
+            // Der Lader der Karte fragt "_root.Clip.IsCardLoaded" ab (Clip = Verweis auf das offene Menü, nicht unbedingt PlayerCardPath)
+            _ui.SetValue("_root.Clip.IsCardLoaded", true);
+        }
+
+        // ------------------------------------------------------------------ Eigenes MyTDULife-Foto (Ausweis im Pausemenü / Spielfortschritt)
+        static readonly string[] OwnPhotoClips = { "/pause_menu/data_extd/idcard/avatar_photo/lure", "/gameprogress_menu/transition_menu/content_menu/main_menu/pbox/idcard/avatar_photo/lure" };
+        Texture2D _ownPhoto; int _ownPhotoVer = -1;
+
+        void UpdateOwnPhoto()
+        {
+            var life = Online.TDU2Session.Save?.myLife;
+            int ver = life != null && !string.IsNullOrEmpty(life.photo) ? life.photoVer : 0;
+            if (ver == _ownPhotoVer) return;
+            _ownPhotoVer = ver;
+            if (_ownPhoto != null) { Destroy(_ownPhoto); _ownPhoto = null; }
+            if (ver > 0) _ownPhoto = Online.TDU2GameData.DecodePhoto(life.photo);
+            foreach (var c in OwnPhotoClips) _ui.SetClipTexture(c, _ownPhoto);
+        }
+
+        string CardPath
+        {
+            get
+            {
+                string card = _ui != null ? _ui.GetVariable("/:PlayerCardPath") : null;
+                return string.IsNullOrEmpty(card) ? "/players/player_card" : card;
+            }
+        }
+
+        /// <summary>Avatar-Foto des Spielers in die Karte (content/photo/lure); ohne Foto leer.</summary>
+        void ApplyCardPhoto(Online.PlayerInfo p)
+        {
+            if (_ui == null) return;
+            _ui.SetClipTexture(CardPath + "/content/photo/lure", p != null ? p.Photo : null);
+        }
+
+        /// <summary>MyTDULife ist angekommen: offene Karte desselben Spielers aktualisieren.</summary>
+        void OnCardLife(Online.PlayerInfo p)
+        {
+            if (_ui == null || p == null || p != _cardPlayer) return;
+            _ui.SetVariable("/:listMood", !string.IsNullOrEmpty(p.Mood) ? p.Mood : "neutral");
+            _ui.SetVariable("/:listMoodTxt", p.MoodTxt ?? "");
+            ApplyCardPhoto(p);
+            var ci = _ui.Find(CardPath)?.Sprite;
+            if (ci != null && _ui.IsShown(ci)) _ui.CallClip(CardPath, "setPlayerCard");
+        }
+
+        // ------------------------------------------------------------------ Beitreten / Einladen (Spielerkarte, TDU2Party)
+        // Karte: "pcrd:pjoi" (Beitreten) bzw. join_player.joinPlayer() -> "join:wait" (Ladeanzeige wartet auf _root.CanJoinPlayer)
+        // -> "pjoi"; Fehler: _root.JoinError + timeOutLoading() (Dialog player_join_fail). "pcrd:pinv" = als Beifahrer einladen.
+        static Online.TDU2Party Party
+        {
+            get
+            {
+                if (Online.TDU2Party.Instance != null) return Online.TDU2Party.Instance;
+                var gd = Online.TDU2GameData.Instance;
+                return gd != null ? Online.TDU2Party.Ensure(gd.gameObject) : null;
+            }
+        }
+
+        /// <summary>
+        /// Spieler der Karte als aktueller Online-Eintrag (Zuletzt-gesehen-/Freundes-Einträge sind gespeichert und haben keine
+        /// bzw. eine alte Sitzungsnummer -> über den Namen auflösen). null = nicht online.
+        /// </summary>
+        Online.PlayerInfo LiveCardPlayer()
+        {
+            var p = _cardPlayer;
+            var gd = Online.TDU2GameData.Instance;
+            if (gd == null) return null;
+            string nick = p?.Nick;
+            if (string.IsNullOrEmpty(nick)) nick = _ui.GetVariable("/:listAvatarName");
+            if (string.IsNullOrEmpty(nick)) return null;
+            foreach (var o in gd.Players.Values)
+                if (string.Equals(o.Nick, nick, StringComparison.OrdinalIgnoreCase)) return o;
+            return null;
+        }
+
+        void PartyNote(string text)
+        {
+            _log.Add($"{Time.unscaledTime:0.00} " + text);
+            Debug.Log("[TDU2] Spielerkarte: " + text);
+            Online.TDU2GameData.Instance?.AddChatLine("TDU2", text, 0);
+        }
+
+        bool HandlePartyCommand(string c)
+        {
+            var p = c == "join:wait" || c == "pjoi" || c == "pcrd:pjoi" || c == "pcrd:pinv" ? LiveCardPlayer() : _cardPlayer;
+            switch (c)
+            {
+                case "join:wait":
+                    {
+                        string err = "Spieler nicht gefunden.";
+                        bool ok = p != null && p.Id != 0 && Party != null && Party.CanJoin(p.Id, out err);
+                        _log.Add($"{Time.unscaledTime:0.00} Beitreten {p?.Nick ?? "-"}: " + (ok ? "ok" : err));
+                        if (ok) _ui.SetValue("/:CanJoinPlayer", true);
+                        else
+                        {
+                            _ui.SetVariable("/:JoinError", err);
+                            var owners = _ui.FunctionOwners("timeOutLoading");
+                            if (owners.Count == 0 || !_ui.CallClip(owners[owners.Count - 1], "timeOutLoading")) _ui.SetValue("/:Input", true);
+                        }
+                        return true;
+                    }
+                case "join:canc":
+                    return true;
+                case "pjoi":
+                case "pcrd:pjoi":
+                    if (p != null && p.Id != 0 && Party != null)
+                    {
+                        int id = p.Id;
+                        Close();
+                        Party.Join(id);
+                    }
+                    return true;
+                case "pcrd:pinv":
+                    if (p == null || p.Id == 0) PartyNote((_cardPlayer?.Nick ?? "Spieler") + " ist nicht online – Einladung nicht möglich.");
+                    else if (p.Id == Online.TDU2Session.PlayerId) PartyNote("Du kannst dich nicht selbst einladen.");
+                    else if (Party != null) Party.Invite(p.Id);
+                    return true;
+            }
+            return false;
         }
 
         void FillControls(VmfPlayer.FlashList l)
@@ -666,6 +848,7 @@ namespace TDU2.Map.Vehicles
 
         bool HandleControlsCommand(string c)
         {
+            DebugManager.Debug("Sendet FSCommand: " + c);
             switch (c)
             {
                 case "opts:cont:vadt":            // Y: speichern

@@ -36,7 +36,12 @@ namespace TDU2.Map.World
                 {
                     if (set.Meshes.ContainsKey(lod.ObjKey)) continue;
                     try { set.Meshes[lod.ObjKey] = set.Geo.BuildMesh(lod.ObjKey); }
-                    catch (Exception ex) { log?.Add($"Mesh {Bin.KeyToString(lod.ObjKey)}: {ex.Message}"); set.Meshes[lod.ObjKey] = null; }
+                    catch (Exception ex)
+                    {
+                        log?.Add($"Mesh {Bin.KeyToString(lod.ObjKey)}: {ex.Message}");
+                        DebugManager.Error($"Mesh {Bin.KeyToString(lod.ObjKey)}: {ex.Message}");
+                        set.Meshes[lod.ObjKey] = null;
+                    }
                 }
             }
             return set;
@@ -60,22 +65,18 @@ namespace TDU2.Map.World
         public string Path;
         public BankKind Kind;
         public BnkArchive Bank;
-
         // Terrain (<name>.3dd/.3dg/.2dm, Colormap <name>-c.2db, Splat/Shadow <name>-s.2db)
         public Scene3DD TerrainScene;
         public Material2DM TerrainMaterials;
         public HeightGrid Heights;
         public ulong ColorMapKey, SplatMapKey;
         public MaterialDef TerrainMaterial;
-
         // Objekte (<name>-o.3dd/.3dg/.2dm) bzw. bei Exteriors alle Szenen der Bank
         public ObjectSet Objects;
         public readonly List<ObjectSet> ExtraObjects = new List<ObjectSet>();
-
         // Platzierungen / Gras (nur Sektoren)
         public PmiFile Vegetation, Placements, Actors, Rails;   // -V, -O, -A, -S (Leitplanken)
         public GrassMap Grass;
-
         public readonly LocalTextureSet Textures = new LocalTextureSet();
         public readonly List<string> Log = new List<string>();
 
@@ -166,7 +167,11 @@ namespace TDU2.Map.World
             {
                 if (LoadByEntities(m)) return;
             }
-            catch (Exception ex) { m.Log.Add("entities.xmb: " + ex.Message); }
+            catch (Exception ex)
+            {
+                m.Log.Add("entities.xmb: " + ex.Message);
+                DebugManager.Error("entities.xmb: " + ex.Message);
+            }
 
             var byStem = new Dictionary<string, BnkEntry[]>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in bank.Entries)

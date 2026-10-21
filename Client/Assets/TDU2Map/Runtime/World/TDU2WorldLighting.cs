@@ -17,9 +17,9 @@ namespace TDU2.Map.World
         public Color SunDiffuse = new Color(1.30f, 1.24f, 1.12f, 1f);
         public Color Ambient = new Color(0.46f, 0.49f, 0.56f, 1f);
         [Tooltip("Gesamthelligkeit")]
-        [Range(0.3f, 1.5f)] public float Exposure = 0.5f;
+        [Range(0.3f, 1.5f)] public float Exposure = Renderconfig.Exposure;
         [Tooltip("Ambient-Anteil (1 = Original)")]
-        [Range(0f, 2f)] public float AmbientScale = 1f;
+        [Range(0f, 2f)] public float AmbientScale = Renderconfig.AmbientScale;
 
         Light _sun;
         bool _applied;

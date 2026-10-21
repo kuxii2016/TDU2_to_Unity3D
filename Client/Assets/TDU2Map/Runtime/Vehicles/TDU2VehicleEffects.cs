@@ -27,6 +27,8 @@ namespace TDU2.Map.Vehicles
         public Color DustColor = new Color(0.62f, 0.52f, 0.40f, 0.35f);
         DustCloud _dust;
         bool[] _lastOff;
+        /// <summary>Glühende Bremsscheiben (null = Auto ohne Scheibenmaterial); Wärme geht auch an die Mitspieler.</summary>
+        public TDU2BrakeGlow Glow { get; private set; }
 
         GameObject _shadow;
         Material _shadowMat;
@@ -60,11 +62,42 @@ namespace TDU2.Map.Vehicles
             int n = v != null ? v.Wheels.Length : 0;
             _lastPos = new Vector3[n]; _lastValid = new bool[n]; _lastIndex = new int[n]; _lastOff = new bool[n];
             if (Dust) _dust = CreateDust();
+            Glow = TDU2BrakeGlow.Create(model);
             if (Skidmarks && _skid == null)
             {
                 var sh = Shader.Find("TDU2/Skidmark");
                 if (sh != null) _skid = new SkidBuffer(MaxSkidQuads, new Material(sh) { name = "Skidmarks", mainTexture = SkidTexture() });
             }
+        }
+
+        /// <summary>
+        /// Fester Bodenschatten für stehende Autos (Garage, Händler): Schattentextur des Autos bzw. weicher Fleck unter der
+        /// Karosserie, flach auf <paramref name="floorY"/> (Welt). Kind des Autos, verschwindet mit ihm.
+        /// </summary>
+        public static GameObject AddStaticShadow(Transform car, CarModel model, CarAssets assets, float floorY, Vector3? centerWorld = null, float strength = 0.6f)
+        {
+            var sh = Shader.Find("TDU2/CarShadow");
+            if (sh == null || car == null) return null;
+            var b = model != null ? model.BodyBounds : new Bounds(Vector3.up * 0.6f, new Vector3(1.9f, 1.2f, 4.5f));
+            var mat = new Material(sh) { name = "CarGroundShadow (stehend)" };
+            var tex = assets?.FindTexture("shadow");
+            mat.mainTexture = tex != null ? tex : BlobTexture();
+            mat.SetFloat("_Strength", strength);
+            var go = new GameObject("GroundShadow");
+            go.transform.SetParent(car, false);
+            // Mitte: zwischen den Rädern (Welt), sonst Mitte der Karosserie
+            var c = centerWorld ?? car.TransformPoint(new Vector3(b.center.x, 0f, b.center.z));
+            go.transform.position = new Vector3(c.x, floorY + 0.015f, c.z);
+            var fwd = car.forward; fwd.y = 0f; if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.forward;
+            go.transform.rotation = Quaternion.LookRotation(fwd.normalized, Vector3.up);
+            var ls = car.lossyScale;
+            go.transform.localScale = new Vector3(b.size.x * 1.25f / Mathf.Max(1e-3f, Mathf.Abs(ls.x)), 1f, b.size.z * 1.12f / Mathf.Max(1e-3f, Mathf.Abs(ls.z)));
+            go.AddComponent<MeshFilter>().sharedMesh = Quad();
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = mat;
+            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+            return go;
         }
 
         static Mesh _quad;
@@ -125,6 +158,7 @@ namespace TDU2.Map.Vehicles
             UpdateShadow();
             UpdateSkids();
             UpdateDust();
+            Glow?.Simulate(Vehicle, Time.deltaTime);
         }
 
         /// <summary>

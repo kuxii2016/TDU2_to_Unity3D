@@ -18,6 +18,8 @@ namespace TDU2.Map.Vehicles
         /// <summary>Mitspieler-Auto: ohne TDU2Vehicle, Werte kommen aus ExtRpm/ExtKmh/ExtTorque; Klang räumlich (3D).</summary>
         public bool External;
         public float ExtRpm, ExtKmh, ExtTorque;
+        /// <summary>Motor läuft (aus: alle Dauergeräusche blenden aus, Hupe/Einzelgeräusche gehen weiter – Händler, Motor abgestellt).</summary>
+        public bool EngineOn = true;
         public float MinDistance = 6f, MaxDistance = 160f;
 
         sealed class Voice
@@ -154,7 +156,8 @@ namespace TDU2.Map.Vehicles
                 }
                 if (!hasPitch) pitch = 1f;
                 v.Source.pitch = Mathf.Clamp(pitch, 0.05f, 3f);
-                v.Volume = Mathf.Lerp(v.Volume, Mathf.Clamp01(vol * MasterVolume * (InteriorView ? InteriorEngineFactor : 1f)), Time.deltaTime * 20f);
+                float want = EngineOn ? Mathf.Clamp01(vol * MasterVolume * (InteriorView ? InteriorEngineFactor : 1f)) : 0f;
+                v.Volume = Mathf.Lerp(v.Volume, want, Time.deltaTime * (EngineOn ? 20f : 6f));
                 v.Source.volume = v.Volume;
             }
         }

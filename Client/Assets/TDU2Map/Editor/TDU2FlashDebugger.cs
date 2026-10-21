@@ -17,6 +17,9 @@ namespace TDU2.Map.EditorTools
     ///   Funktionen– alle ActionScript-Funktionen, mit Argumenten aufrufbar
     ///   FSCommands– Protokoll der Befehle des Films an das Spiel
     ///   Eingabe   – Move/A/B/X/Y wie das Spiel an den Film schicken
+    ///   Pfade/Code– zu jedem Objekt der fertige Pfad und Code-Zeilen zum Kopieren (ui.SetOffset(...), ui.SetText(...) …);
+    ///               Korrekturen (Versatz, Skalierung, Text, Sichtbarkeit, Deckkraft) live ändern und als Zeile in
+    ///               Assets/TDU2Map/Resources/TDU2FlashPatches.txt speichern – das Spiel wendet sie bei jedem Laden des Films an.
     /// "Film laden…" öffnet zusätzlich eine beliebige Frontend-Bank (hud.bnk, main.bnk …) im Spielbild.
     /// </summary>
     public sealed class TDU2FlashDebugger : EditorWindow
@@ -28,7 +31,7 @@ namespace TDU2.Map.EditorTools
         int _tab;
         static readonly string[] Tabs = { "Baum", "Variablen", "Funktionen", "FSCommands", "Eingabe" };
         string _filter = "";
-        bool _onlyVisible = true, _onlyClips;
+        bool _onlyVisible = true, _onlyClips, _showPaths;
         Vector2 _scrollTree, _scrollDetail, _scrollList;
         readonly HashSet<string> _open = new HashSet<string> { "/" };
         VmfPlayer.DisplayObject _sel;
@@ -141,6 +144,7 @@ namespace TDU2.Map.EditorTools
                 _filter = EditorGUILayout.TextField("Filter (Name)", _filter);
                 _onlyVisible = EditorGUILayout.ToggleLeft("nur sichtbare", _onlyVisible, GUILayout.Width(100));
                 _onlyClips = EditorGUILayout.ToggleLeft("nur Clips", _onlyClips, GUILayout.Width(80));
+                _showPaths = EditorGUILayout.ToggleLeft(new GUIContent("Pfade", "Pfad jedes Objekts als markierbares Feld im Baum"), _showPaths, GUILayout.Width(60));
             }
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -203,6 +207,11 @@ namespace TDU2.Map.EditorTools
                     if (!d.Visible) GUI.color = new Color(1, 1, 1, 0.45f);
                     if (GUILayout.Button(NodeText(d, name), style)) { _sel = d; _selPath = p; _player.Highlight = d; }
                     GUI.color = c;
+                    if (_showPaths)
+                    {
+                        EditorGUILayout.SelectableLabel(p, EditorStyles.textField, GUILayout.Height(16), GUILayout.MinWidth(80));
+                        if (GUILayout.Button(new GUIContent("⧉", "Pfad kopieren"), EditorStyles.miniButton, GUILayout.Width(22))) Copy(p);
+                    }
                 }
                 if (d.Sprite != null && (_open.Contains(p) || (filtered && childMatch))) DrawNode(d.Sprite, p, depth + 1);
             }
@@ -243,7 +252,8 @@ namespace TDU2.Map.EditorTools
         {
             var d = _sel;
             if (d == null) { EditorGUILayout.HelpBox("Objekt im Baum anklicken – es wird im Spielbild rot umrahmt.", MessageType.None); return; }
-            EditorGUILayout.SelectableLabel(_selPath, EditorStyles.boldLabel, GUILayout.Height(18));
+            CopyBox("Pfad", _selPath);
+            CopyBox("Film", _player.FilmName);
             EditorGUILayout.LabelField("Tiefe / Charakter", $"{d.Depth}  /  #{d.CharId}{(d.ClipDepth > 0 ? "  (Maske bis " + d.ClipDepth + ")" : "")}");
             d.Visible = EditorGUILayout.Toggle("_visible", d.Visible);
             var pos = EditorGUILayout.Vector2Field("_x / _y", new Vector2(d.Matrix.Tx, d.Matrix.Ty));
@@ -270,6 +280,9 @@ namespace TDU2.Map.EditorTools
                 }
                 else EditorGUILayout.LabelField("Text", cur);
             }
+
+            PatchPanel(d);
+            CodePanel(d);
 
             if (d.Sprite != null)
             {
@@ -384,6 +397,8 @@ namespace TDU2.Map.EditorTools
                 if (sp >= 0) GUILayout.Label(shown.Substring(sp + 2), EditorStyles.miniLabel, GUILayout.Width(44));
                 if (GUILayout.Button(new GUIContent("?", "Welche Funktionen lesen diese Variable?"), EditorStyles.miniButton, GUILayout.Width(20)))
                 { _usageVar = key; _usage = _player.DebugFunctionsUsing(key); }
+                if (GUILayout.Button(new GUIContent("⧉", "Code kopieren: ui.SetText(\"" + key + "\", …)"), EditorStyles.miniButton, GUILayout.Width(22)))
+                    Copy(VarCode(key, raw));
             }
         }
 
@@ -405,6 +420,11 @@ namespace TDU2.Map.EditorTools
             using (new EditorGUILayout.HorizontalScope())
             {
                 EditorGUILayout.SelectableLabel($"{label}({pars})", GUILayout.Height(16), GUILayout.MinWidth(160));
+                if (GUILayout.Button(new GUIContent("⧉", "Code kopieren: ui.CallClip(…)"), EditorStyles.miniButton, GUILayout.Width(22)))
+                {
+                    _callArgs.TryGetValue(key, out var ca);
+                    Copy(FnCode(key, ca));
+                }
                 _callArgs.TryGetValue(key, out var a);
                 a = EditorGUILayout.TextField(a ?? "", GUILayout.Width(120));
                 _callArgs[key] = a;
@@ -481,6 +501,205 @@ namespace TDU2.Map.EditorTools
         {
             bool ok = _player.Input(fn, args);
             _status = ok ? $"{fn}({string.Join(", ", args)}) verarbeitet" : $"{fn}: keine passende Funktion im Film";
+        }
+
+        // ------------------------------------------------------------------ Pfade, Code, Korrekturen
+        void Copy(string text)
+        {
+            EditorGUIUtility.systemCopyBuffer = text ?? "";
+            _status = "Kopiert: " + Short(text ?? "", 120);
+        }
+
+        /// <summary>Markierbares Feld mit Kopier-Knopf.</summary>
+        void CopyBox(string label, string text)
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.PrefixLabel(label);
+                EditorGUILayout.SelectableLabel(text ?? "", EditorStyles.textField, GUILayout.Height(18));
+                if (GUILayout.Button("Kopieren", GUILayout.Width(70))) Copy(text);
+            }
+        }
+
+        static string Q(string s) => "\"" + (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n") + "\"";
+        static string Fl(float v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "f";
+        static string Num(float v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+        static string VarCode(string key, string value)
+        {
+            if (double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _)) return $"ui.SetNumber({Q(key)}, {value});";
+            if (value == "true" || value == "false") return $"ui.SetBool({Q(key)}, {value});";
+            return $"ui.SetText({Q(key)}, {Q(value)});";
+        }
+
+        static string FnCode(string key, string args)
+        {
+            int c = key.LastIndexOf(':');
+            string path = c > 0 ? key.Substring(0, c) : "/", fn = c >= 0 ? key.Substring(c + 1) : key;
+            string a = "";
+            if (!string.IsNullOrWhiteSpace(args))
+                foreach (var part in args.Split(','))
+                {
+                    var t = part.Trim();
+                    bool num = double.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _);
+                    a += ", " + (num ? t : t == "true" || t == "false" ? t : Q(t));
+                }
+            return $"ui.CallClip({Q(path)}, {Q(fn)}{a});";
+        }
+
+        /// <summary>Korrekturen live ändern und als Zeile in TDU2FlashPatches.txt speichern.</summary>
+        void PatchPanel(VmfPlayer.DisplayObject d)
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Korrektur (bleibt erhalten, wenn gespeichert)", EditorStyles.boldLabel);
+            string film = _player.FilmName;
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                var off = EditorGUILayout.Vector2Field("Versatz (px)", d.Offset);
+                if (off != d.Offset) d.Offset = off;
+                if (GUILayout.Button("Speichern", GUILayout.Width(80))) SavePatch(film, _selPath, "offset", $"{Num(d.Offset.x)} {Num(d.Offset.y)}");
+            }
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("←", GUILayout.Width(28))) d.Offset += new Vector2(Event.current.shift ? -10f : -1f, 0f);
+                if (GUILayout.Button("→", GUILayout.Width(28))) d.Offset += new Vector2(Event.current.shift ? 10f : 1f, 0f);
+                if (GUILayout.Button("↑", GUILayout.Width(28))) d.Offset += new Vector2(0f, Event.current.shift ? -10f : -1f);
+                if (GUILayout.Button("↓", GUILayout.Width(28))) d.Offset += new Vector2(0f, Event.current.shift ? 10f : 1f);
+                EditorGUILayout.LabelField("1 px (Shift: 10 px)", EditorStyles.miniLabel);
+            }
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                var sc = EditorGUILayout.Vector2Field("Skalierung (Faktor)", d.ScaleMul);
+                if (sc != d.ScaleMul) d.ScaleMul = sc;
+                if (GUILayout.Button("Speichern", GUILayout.Width(80))) SavePatch(film, _selPath, "scale", $"{Num(d.ScaleMul.x)} {Num(d.ScaleMul.y)}");
+            }
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Sichtbar / Deckkraft", GUILayout.Width(EditorGUIUtility.labelWidth - 4));
+                if (GUILayout.Button("sichtbar speichern", GUILayout.Width(120))) SavePatch(film, _selPath, "visible", d.Visible ? "1" : "0");
+                if (GUILayout.Button("Deckkraft speichern", GUILayout.Width(130))) SavePatch(film, _selPath, "alpha", Num(d.Cx.Mul.w));
+            }
+            if (_player.Movie.Chars.TryGetValue(d.CharId, out var ch) && ch is VmfMovie.EditText)
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    string cur = d.TextOverride ?? "";
+                    string nt = EditorGUILayout.TextField(new GUIContent("Eigener Text", "Leer = wieder Variable/Starttext"), cur);
+                    if (nt != cur) d.TextOverride = nt.Length == 0 ? null : nt;
+                    if (GUILayout.Button("Speichern", GUILayout.Width(80)) && d.TextOverride != null) SavePatch(film, _selPath, "text", d.TextOverride.Replace("\n", "\\n"));
+                }
+            }
+            // gespeicherte Korrekturen dieses Objekts
+            var mine = VmfPlayer.AllPatches.Where(p => string.Equals(p.Path, _selPath, StringComparison.OrdinalIgnoreCase)
+                                                    && (p.Film == "*" || string.Equals(p.Film, film, StringComparison.OrdinalIgnoreCase))).ToList();
+            foreach (var p in mine)
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.SelectableLabel(p.ToString(), EditorStyles.textField, GUILayout.Height(16));
+                    if (GUILayout.Button("Entfernen", GUILayout.Width(80))) { RemovePatch(p); ResetObject(d, p.Command); }
+                }
+            if (GUILayout.Button("Patch-Datei öffnen", EditorStyles.miniButton, GUILayout.Width(130)))
+            {
+                EnsurePatchFile();
+                EditorUtility.OpenWithDefaultApp(VmfPlayer.PatchFileEditor);
+            }
+        }
+
+        static void ResetObject(VmfPlayer.DisplayObject d, string cmd)
+        {
+            switch (cmd)
+            {
+                case "offset": d.Offset = Vector2.zero; break;
+                case "scale": d.ScaleMul = Vector2.one; break;
+                case "text": d.TextOverride = null; break;
+                case "pos": d.Position = null; break;
+            }
+        }
+
+        static void EnsurePatchFile()
+        {
+            string f = VmfPlayer.PatchFileEditor;
+            if (File.Exists(f)) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(f));
+            File.WriteAllText(f,
+                "# TDU2 Flash-Korrekturen: film | pfad | befehl | werte\r\n" +
+                "# befehle: offset dx dy | pos x y | scale sx sy | alpha a | visible 0/1 | text ...   (film * = alle Filme)\r\n");
+        }
+
+        void SavePatch(string film, string path, string cmd, string value)
+        {
+            EnsurePatchFile();
+            string f = VmfPlayer.PatchFileEditor;
+            var lines = File.ReadAllLines(f).ToList();
+            string newLine = $"{film} | {path} | {cmd} | {value}";
+            bool replaced = false;
+            for (int i = 0; i < lines.Count; i++)
+            {
+                var p = VmfPlayer.ParsePatches(lines[i]);
+                if (p.Count == 1 && string.Equals(p[0].Film, film, StringComparison.OrdinalIgnoreCase) && string.Equals(p[0].Path, path, StringComparison.OrdinalIgnoreCase) && p[0].Command == cmd)
+                { lines[i] = newLine; replaced = true; }
+            }
+            if (!replaced) lines.Add(newLine);
+            File.WriteAllText(f, string.Join("\r\n", lines) + "\r\n");
+            AfterPatchWrite();
+            _status = "Gespeichert: " + newLine;
+        }
+
+        void RemovePatch(VmfPlayer.Patch patch)
+        {
+            string f = VmfPlayer.PatchFileEditor;
+            if (!File.Exists(f)) return;
+            var lines = File.ReadAllLines(f).Where(l =>
+            {
+                var p = VmfPlayer.ParsePatches(l);
+                return !(p.Count == 1 && p[0].Film == patch.Film && p[0].Path == patch.Path && p[0].Command == patch.Command);
+            }).ToList();
+            File.WriteAllText(f, string.Join("\r\n", lines) + "\r\n");
+            AfterPatchWrite();
+            _status = "Entfernt: " + patch;
+        }
+
+        static void AfterPatchWrite()
+        {
+            VmfPlayer.ReloadPatches();
+            string rel = "Assets/TDU2Map/Resources/" + VmfPlayer.PatchResource + ".txt";
+            AssetDatabase.ImportAsset(rel);
+        }
+
+        /// <summary>Fertige Code-Zeilen für das gewählte Objekt.</summary>
+        void CodePanel(VmfPlayer.DisplayObject d)
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Code (ui = VmfPlayer des Films)", EditorStyles.boldLabel);
+            string p = Q(_selPath);
+            var lines = new List<string>
+            {
+                $"ui.SetOffset({p}, new Vector2({Fl(d.Offset.x)}, {Fl(d.Offset.y)}));",
+                $"ui.SetPosition({p}, new Vector2({Fl(d.Matrix.Tx + d.Offset.x)}, {Fl(d.Matrix.Ty + d.Offset.y)}));",
+                $"ui.SetScale({p}, new Vector2({Fl(d.ScaleMul.x)}, {Fl(d.ScaleMul.y)}));",
+                $"ui.SetAlpha({p}, {Fl(d.Cx.Mul.w)});",
+                d.Visible ? $"ui.Show({p});" : $"ui.Hide({p});",
+                $"ui.ForceVisible({p}, {(d.Visible ? "true" : "false")});",
+            };
+            if (_player.Movie.Chars.TryGetValue(d.CharId, out var ch) && ch is VmfMovie.EditText et)
+            {
+                string cur = _player.DebugText(d) ?? "";
+                if (!string.IsNullOrEmpty(et.Variable)) lines.Add($"ui.SetText({Q(VmfPlayer.ResolveVar(d.Parent, et.Variable))}, {Q(cur)});");
+                lines.Add($"ui.SetObjectText({p}, {Q(cur)});");
+            }
+            if (d.Sprite != null)
+            {
+                var lab = CurrentLabel(d.Sprite);
+                if (lab != null) { lines.Add($"ui.SetLabel({p}, {Q(lab)});"); lines.Add($"ui.PlayLabel({p}, {Q(lab)});"); }
+                lines.Add($"ui.SetFrame({p}, {d.Sprite.Frame + 1});");
+            }
+            lines.Add($"{_player.FilmName} | {_selPath} | offset | {Num(d.Offset.x)} {Num(d.Offset.y)}");
+            foreach (var l in lines)
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.SelectableLabel(l, EditorStyles.textField, GUILayout.Height(16));
+                    if (GUILayout.Button("⧉", EditorStyles.miniButton, GUILayout.Width(22))) Copy(l);
+                }
         }
 
         // ------------------------------------------------------------------ Laden / Speichern

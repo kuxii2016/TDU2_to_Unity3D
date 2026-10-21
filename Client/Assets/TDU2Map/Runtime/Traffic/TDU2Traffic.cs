@@ -159,6 +159,7 @@ namespace TDU2.Map.Traffic
             var res = new LoadResult { Types = new List<TypeInfo>(), Paints = new List<Color>(), Density = new float[13] };
             var net = IaNetwork.LoadFromBank(idx.IslandBank);
             res.Lanes = new TrafficLanes(net);
+
             var log = net.ToString();
 
             // Mischung aus aiconfig.cpr

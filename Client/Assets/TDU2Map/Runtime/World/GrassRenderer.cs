@@ -23,7 +23,6 @@ namespace TDU2.Map.World
         public Texture GroundTex, SplatTex;
         public float ShadowStrength = 0.6f;
         MaterialPropertyBlock _mpb;
-
         public float Radius = 120f;
         public float ChunkSize = 32f;
         public float Spacing = 1.2f;
@@ -32,7 +31,6 @@ namespace TDU2.Map.World
         public float SizeScale = 1f;
         public int MaxChunksPerFrame = 6;
         public float SectorSize = WorldLayout.SectorSize;
-
         readonly Dictionary<Vector2Int, GameObject> _chunks = new Dictionary<Vector2Int, GameObject>();
         readonly List<Vector2Int> _tmpRemove = new List<Vector2Int>();
         float _nextCheck;
@@ -166,7 +164,12 @@ namespace TDU2.Map.World
                 _mpb.Clear();
                 _mpb.SetTexture("_GroundTex", GroundTex);
                 _mpb.SetFloat("_GroundOn", 1f);
-                if (SplatTex != null) { _mpb.SetTexture("_SplatTex", SplatTex); _mpb.SetFloat("_UseSplat", 1f); _mpb.SetFloat("_ShadowStrength", ShadowStrength); }
+                if (SplatTex != null)
+                {
+                    _mpb.SetTexture("_SplatTex", SplatTex);
+                    _mpb.SetFloat("_UseSplat", 1f);
+                    _mpb.SetFloat("_ShadowStrength", ShadowStrength);
+                }
                 mr.SetPropertyBlock(_mpb);
             }
             return go;
@@ -191,7 +194,6 @@ namespace TDU2.Map.World
                 int b = pos.Count;
                 pos.Add(p - dir); pos.Add(p + dir); pos.Add(p - dir + Vector3.up * height); pos.Add(p + dir + Vector3.up * height);
                 for (int k = 0; k < 4; k++) { nrm.Add(Vector3.up); col.Add(new Color32(shade, shade, shade, 255)); }
-                // D3D-Bildzeile 0 liegt in Unity bei v=0 -> Spitze (Bild oben) = v 0, Fuß = v 1
                 uv.Add(new Vector2(u0, 1)); uv.Add(new Vector2(u1, 1)); uv.Add(new Vector2(u0, 0)); uv.Add(new Vector2(u1, 0));
                 tris.Add(b); tris.Add(b + 2); tris.Add(b + 1);
                 tris.Add(b + 1); tris.Add(b + 2); tris.Add(b + 3);

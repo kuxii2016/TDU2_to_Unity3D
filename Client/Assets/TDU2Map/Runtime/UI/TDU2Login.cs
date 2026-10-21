@@ -30,6 +30,9 @@ namespace TDU2.Map.Vehicles
         float AutosaveSeconds => TDU2GameData.Instance != null ? TDU2GameData.Instance.AutosaveSeconds : 30f;   // Online Manager
         [Tooltip("FSCommands des Login/Profilmenüs in die Konsole schreiben")]
         public bool LogCommands = false;
+        [Tooltip("Neue Konten wie im Spiel nach GamePC.cpr starten: Insel (AddLevel), im Standard-Haus (DefaultHouse), " +
+                 "Auto DefaultCarConfig + Garage DefaultGarageConfig, Geld DefaultMoney. Aus = Startauto beim Händler wählen (Server starterCars).")]
+        public bool GamePcStart = true;
 
         /// <summary>true, solange Anmeldung/Start läuft – Pausemenü, Karte und Fahrtasten sind dann gesperrt.</summary>
         public static bool Active { get; private set; }
@@ -96,6 +99,7 @@ namespace TDU2.Map.Vehicles
                     break;
                 case St.Init:
                     EnsureIntro();
+                    TDU2FrontendMusic.Play(Manager.BnkDir, "LOGIN");   // sounds.ini: SetMusic "LOGIN" "login.wav"
                     if (_intro != null) { _st = St.PressStart; Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
                     else if (_introTried && Ready) OpenProfiles();
                     break;
@@ -184,7 +188,7 @@ namespace TDU2.Map.Vehicles
                 _intro.SetValue("/:IsCasinoStandAlone", false);
                 _intro.SetValue("/:NAT_msg", false);
                 _intro.Load(bank);
-                _intro.FSCommand += (c, a) => { if (LogCommands) Debug.Log("[TDU2] log_in2 FSCommand " + c + " " + a); };
+                _intro.FSCommand += (c, a) => { if (LogCommands) Debug.Log("[TDU2] log_in2 FSCommand " + c + " " + a); TDU2FrontendSounds.Command(c); };
             }
             catch (Exception ex)
             {
@@ -276,6 +280,7 @@ namespace TDU2.Map.Vehicles
             if (!Active) return;
             string c = (cmd ?? "").Trim().ToLowerInvariant();
             if (LogCommands) Debug.Log("[TDU2] Login FSCommand " + cmd + " " + args);
+            if (TDU2FrontendSounds.Command(c)) return;   // Menü-Sounds (fe_snd.bnk: move/valid/back …)
             switch (c)
             {
                 case "popn": FillProfiles(); break;
@@ -488,20 +493,55 @@ namespace TDU2.Map.Vehicles
             var req = _editPassOnly ? new NetRequest { op = "login", nick = nick, password = pw, nationality = gd.NationalityId } : new NetRequest { op = "register", nick = nick, password = pw, email = email, nationality = gd.NationalityId };
             Request(req, r =>
             {
+                if (!r.ok && !_editPassOnly && r.error == "nick_taken")
+                {
+                    // Konto gibt es schon (z.B. Profil auf diesem PC verloren): mit Name + Passwort anmelden, das lokale Profil
+                    // (Merk-Token) wird neu angelegt, der Spielstand kommt wie immer vom Server
+                    ShowPopupMessage(German ? "Konto \"" + nick + "\" gefunden – melde an ..." : "Account \"" + nick + "\" found – logging in ...");
+                    Request(new NetRequest { op = "login", nick = nick, password = pw, nationality = gd.NationalityId }, r2 =>
+                    {
+                        if (!r2.ok)
+                        {
+                            ShowPopupMessage(r2.error == "bad_password"
+                                ? (German ? "Den Namen gibt es schon – Passwort stimmt nicht" : "Name already exists – wrong password")
+                                : TDU2Session.ErrorText(r2.error, German));
+                            _focus = _fields.Count - 1; _text["/:password"] = ""; RenderFields();
+                            return;
+                        }
+                        Debug.Log("[TDU2] Login: bestehendes Konto " + r2.nick + " wiederhergestellt (lokales Profil neu angelegt)");
+                        FinishPopupLogin(r2);
+                    });
+                    return;
+                }
                 if (!r.ok) { ShowPopupMessage(TDU2Session.ErrorText(r.error, German)); return; }
-                RememberProfile(r.nick, r.token);
-                _text["/:password"] = "";
-                ShowPopupMessage(null);
-                Ui.SetValue(NewProfilePath + ":IsValidNewProfile", true);
-                Ui.GotoLabel(NewProfilePath, "close", true);
-                CloseMenus(true, r);
+                FinishPopupLogin(r);
             });
         }
+
+        void FinishPopupLogin(NetResponse r)
+        {
+            RememberProfile(r.nick, r.token);
+            _text["/:password"] = "";
+            ShowPopupMessage(null);
+            Ui.SetValue(NewProfilePath + ":IsValidNewProfile", true);
+            Ui.GotoLabel(NewProfilePath, "close", true);
+            CloseMenus(true, r);
+        }
+
+        float _cancelAt = -10f;
 
         void CancelNewProfile()
         {
             var ui = Ui;
-            if (_profiles.Count == 0 && !_editPassOnly) { QuitGame(); return; }   // ohne Profil: "Beenden" wie im Film (back_display quit)
+            if (_profiles.Count == 0 && !_editPassOnly)
+            {
+                // ohne Profil gibt es nichts zurück – erst ein zweites Abbrechen beendet das Spiel (wie "Beenden" im Film)
+                if (Time.unscaledTime - _cancelAt < 2f) { QuitGame(); return; }
+                _cancelAt = Time.unscaledTime;
+                ShowPopupMessage(German ? "Neues Konto anlegen oder mit bestehendem Konto anmelden (Name + Passwort). Nochmal Abbrechen = Beenden."
+                                        : "Create an account or log in with an existing one (name + password). Cancel again = quit.");
+                return;
+            }
             _text["/:password"] = "";
             ShowPopupMessage(null);
             ui.SetValue("/:EditPassOnly", false);
@@ -547,6 +587,7 @@ namespace TDU2.Map.Vehicles
 
         void StartGame(NetResponse r)
         {
+            TDU2FrontendMusic.Stop();
             TDU2Session.Begin(r);
             ApplyOdometers();
             var save = TDU2Session.Save;
@@ -575,7 +616,20 @@ namespace TDU2.Map.Vehicles
                 car = Manager.FindCar(save.currentCar);
                 if (car == null) foreach (var n in save.ownedCars) { car = Manager.FindCar(n); if (car != null) break; }
             }
-            var spot = FindSpot(string.IsNullOrEmpty(r.startSpot) ? "ESTOL_B" : r.startSpot);
+            // Startpunkt wie im Spiel (GamePC.cpr): neues Konto auf der Startinsel (AddLevel) im Standard-Haus (DefaultHouse)
+            var gp = GamePcStart ? TDU2GamePC.Load(Manager.BnkDir) : null;
+            if (gp != null && !save.starterChosen && !TDU2IslandTravel.Pending && !string.IsNullOrEmpty(gp.StartIsland)
+                && !island.StartsWith(gp.StartIsland, StringComparison.OrdinalIgnoreCase) && TDU2IslandTravel.CanTravelTo(gp.StartIsland, Manager.BnkDir))
+            {
+                Debug.Log("[TDU2] Neues Konto: Startinsel laut GamePC.cpr ist " + TDU2IslandTravel.DisplayName(gp.StartIsland));
+                save.hasPosition = false;
+                TDU2IslandTravel.Go(gp.StartIsland, false);
+                return;
+            }
+            var home = gp?.FindHouse(Manager.Streamer?.Spots?.Spots);
+            if (gp != null && home == null && gp.Houses.Count > 0) Debug.LogWarning("[TDU2] GamePC.cpr: Standard-Haus " + string.Join("/", gp.Houses) + " liegt nicht auf " + island);
+            var dealer = FindSpot(string.IsNullOrEmpty(r.startSpot) ? "ESTOL_B" : r.startSpot);
+            var spot = home ?? dealer;
             if (TDU2IslandTravel.Arriving)
             {
                 // Ankunft nach dem Flug: Flughafen der Insel (Spot EAIR*) bzw. Landeplatz (ELAND*), mit dem mitgenommenen Auto davor
@@ -590,6 +644,31 @@ namespace TDU2.Map.Vehicles
             {
                 Debug.LogWarning($"[TDU2] Spielstand: Position ({save.px:F0}, {save.pz:F0}) liegt nicht auf {island} – starte am Spot");
                 save.hasPosition = false;
+            }
+
+            // Zuletzt im Interieur (Haus, Garage, Laden …): dort weitermachen wie im Spiel, nicht auf der Straße davor
+            if (car != null && !TDU2IslandTravel.Arriving && !string.IsNullOrEmpty(save.interior))
+            {
+                var parts = save.interior.Split('|');
+                Spot last = null;
+                var all = Manager.Streamer?.Spots?.Spots;
+                if (all != null)
+                    foreach (var s in all)
+                        if (string.Equals(s.Code, parts[0], StringComparison.OrdinalIgnoreCase)) { last = s; break; }
+                var interiors = Manager.GetComponent<TDU2Interiors>();
+                if (last != null && interiors != null)
+                {
+                    var inCar = car;
+                    string stem = parts.Length > 1 ? parts[1] : "";
+                    var at = last.Position2.sqrMagnitude > 1f ? last.Position2 : last.Position;
+                    Debug.Log("[TDU2] Spielstand: weiter im Interieur " + last.Code + (stem.Length > 0 ? " (" + stem + ")" : ""));
+                    BeginSpawn(at, new Vector3(Mathf.Sin(last.Heading2), 0f, Mathf.Cos(last.Heading2)), true, (p, q) =>
+                    {
+                        if (!interiors.EnterSpotRoom(last, stem, inCar)) SpawnCar(inCar, p, q);
+                    });
+                    return;
+                }
+                save.interior = "";
             }
 
             // Casino-Insel: wie im Spiel steht man nach dem Flug (und beim Fortsetzen) in der Casino-Halle, nicht draußen
@@ -627,7 +706,11 @@ namespace TDU2.Map.Vehicles
                 return;
             }
 
-            // neues Konto: Gebrauchtwagenhändler mit den Startautos
+            // neues Konto wie im Spiel (GamePC.cpr): Auto + Garagenautos, Startgeld, Beginn im Standard-Haus
+            if (gp != null && StartFromGamePc(gp, home, dealer)) return;
+
+            // sonst: Gebrauchtwagenhändler mit den Startautos
+            spot = dealer;
             var starters = new List<CarPhysics>();
             foreach (var n in r.starterCars ?? new List<string>()) { var c = Manager.FindCar(n); if (c != null && !starters.Contains(c)) starters.Add(c); }
             if (starters.Count == 0) { var c = Manager.FindCar(Manager.StartCar) ?? Manager.Available[0]; starters.Add(c); }
@@ -645,6 +728,70 @@ namespace TDU2.Map.Vehicles
                 _st = St.Playing;
                 inter.EnterStarterDealer(spot, starters, OnStarterChosen);
             });
+        }
+
+        /// <summary>
+        /// Neues Konto nach GamePC.cpr: DefaultCarConfig = aktuelles Auto, DefaultGarageConfig (_id_car) = weitere eigene Autos,
+        /// DefaultMoney = Startgeld; man beginnt im Wohnbereich des DefaultHouse (Ausgang über die Garage mit dem Auto),
+        /// ohne Haus an DEFAULTSTARTPOSITION bzw. am Händler-Spot. false = keine Autos gefunden (dann Händler-Auswahl).
+        /// </summary>
+        bool StartFromGamePc(TDU2GamePC gp, Spot home, Spot fallback)
+        {
+            var save = TDU2Session.Save;
+            if (save == null) return false;
+            var cars = new List<CarPhysics>();
+            var main = FindCarConfig(gp.DefaultCar);
+            if (main != null) cars.Add(main);
+            foreach (int id in gp.GarageCars)
+            {
+                var c = Manager.Available.Find(x => x.Id == id);
+                if (c != null && !cars.Contains(c)) cars.Add(c);
+            }
+            if (cars.Count == 0)
+            {
+                Debug.LogWarning("[TDU2] GamePC.cpr: weder DefaultCarConfig (" + string.Join(" ", gp.DefaultCar) + ") noch DefaultGarageConfig gefunden – Startauto beim Händler");
+                return false;
+            }
+            if (gp.DefaultMoney > 0) save.money = gp.DefaultMoney;
+            for (int i = 1; i < cars.Count; i++) TDU2Session.AddOwned(cars[i].FileName);
+            var car = cars[0];
+            OnStarterChosen(car);
+            Debug.Log($"[TDU2] Neues Konto (GamePC.cpr): {car.FileName}" + (cars.Count > 1 ? " + Garage " + string.Join(", ", cars.GetRange(1, cars.Count - 1).ConvertAll(c => c.FileName)) : "") +
+                      $", {save.money} Geld, Start " + (home != null ? "im Haus " + string.Join("/", gp.Houses) : gp.HasStartPosition ? "an " + gp.StartPosition : "am Spot"));
+
+            var interiors = Manager.GetComponent<TDU2Interiors>();
+            if (home != null)
+            {
+                var at = home.Position2.sqrMagnitude > 1f ? home.Position2 : home.Position;
+                BeginSpawn(at, new Vector3(Mathf.Sin(home.Heading2), 0f, Mathf.Cos(home.Heading2)), true, (p, q) =>
+                {
+                    if (interiors == null || !interiors.EnterSpot(home, car)) SpawnCar(car, p, q);
+                });
+                return true;
+            }
+            if (gp.HasStartPosition) { BeginSpawn(gp.StartPosition, Vector3.forward, false, (p, q) => SpawnCar(car, p, q)); return true; }
+            if (fallback != null)
+                BeginSpawn(fallback.Position2.sqrMagnitude > 1f ? fallback.Position2 : fallback.Position, new Vector3(Mathf.Sin(fallback.Heading2), 0f, Mathf.Cos(fallback.Heading2)), true, (p, q) => SpawnCar(car, p, q));
+            else
+                BeginSpawn(Manager.Streamer.ViewerGamePosition, Vector3.forward, false, (p, q) => SpawnCar(car, p, q));
+            return true;
+        }
+
+        /// <summary>DefaultCarConfig "Ferrari" "F430" "Scuderia" -> Auto (Dateiname Modell_Version, sonst Modell-/Versionsname).</summary>
+        CarPhysics FindCarConfig(string[] cfg)
+        {
+            if (cfg == null || cfg.Length < 2) return null;
+            string model = cfg[1].Trim(), version = cfg.Length > 2 ? cfg[2].Trim() : "";
+            string file = (model + (version.Length > 0 ? "_" + version : "")).Replace(' ', '_');
+            var c = Manager.FindCar(file);
+            if (c != null) return c;
+            if (version.Length > 0)
+                foreach (var x in Manager.Available)
+                {
+                    string mn = x.ModelName ?? "";
+                    if (mn.IndexOf(model, StringComparison.OrdinalIgnoreCase) >= 0 && mn.IndexOf(version, StringComparison.OrdinalIgnoreCase) >= 0) return x;
+                }
+            return Manager.FindCar(model);
         }
 
         /// <summary>Liegt eine Spielposition auf der geladenen Insel? (nächster Spot höchstens 15 km entfernt)</summary>
@@ -768,7 +915,8 @@ namespace TDU2.Map.Vehicles
             var root = Manager.Streamer?.MapRoot;
             // während einer Rennschul-Prüfung (Prüfungsauto, private Strecke) Auto und Position nicht speichern
             bool schoolCar = veh != null && Racing.RacingSchoolMenu.IsSchoolCar(veh.Car);
-            if (veh != null && veh.Car != null && root != null && (inter == null || !inter.Inside) && !schoolCar)
+            // Testfahrt beim Händler: Leihwagen und Position nicht speichern
+            if (veh != null && veh.Car != null && root != null && (inter == null || !inter.Inside) && !schoolCar && !TDU2Interiors.TestDriveActive)
             {
                 save.currentCar = veh.Car.FileName;
                 var g = root.InverseTransformPoint(veh.transform.position);
@@ -778,6 +926,12 @@ namespace TDU2.Map.Vehicles
                 save.hasPosition = true;
                 save.island = Manager.Streamer?.Index?.IslandName ?? save.island;
             }
+            // Interieur merken (nicht als Gast und nicht im Casino – dort beginnt man ohnehin in der Halle)
+            if (inter != null && inter.Inside && inter.CurrentSpot != null && inter.GuestHost == 0
+                && !(inter.CurrentSpot.Code ?? "").StartsWith("ECAS", StringComparison.OrdinalIgnoreCase))
+                save.interior = inter.CurrentSpot.Code + "|" + inter.CurrentBankStem;
+            else if (inter == null || !inter.Inside)
+                save.interior = "";
             CollectOdometers(save);
         }
 

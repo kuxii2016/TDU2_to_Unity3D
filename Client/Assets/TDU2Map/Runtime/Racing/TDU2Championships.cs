@@ -1500,7 +1500,7 @@ namespace TDU2.Map.Racing
                 if (on) { _trafficWas = tr.EnableTraffic; tr.EnableTraffic = false; }
                 else tr.EnableTraffic = _trafficWas;
             }
-            TDU2.Map.Online.TDU2Multiplayer.Hidden = on;
+            TDU2.Map.Online.TDU2Multiplayer.Hidden = on && TDU2.Map.Online.TDU2OnlineSettings.HidePlayersInCups;
         }
 
         // ------------------------------------------------------------------ Oberfläche

@@ -62,7 +62,8 @@ namespace TDU2.Map.World
             idx.BnkDir = Directory.GetParent(islands)?.FullName;
             idx.LevelDir = Path.Combine(idx.IslandDir, "level");
             idx.FxDir = Path.Combine(idx.IslandDir, "fx");
-            if (!Directory.Exists(idx.LevelDir)) throw new DirectoryNotFoundException(idx.LevelDir);
+            if (!Directory.Exists(idx.LevelDir))
+                throw new DirectoryNotFoundException(idx.LevelDir);
 
             idx.IslandBank = FileOrNull(Path.Combine(idx.LevelDir, island + ".bnk"));
             idx.CommonWorldBank = FileOrNull(Path.Combine(idx.LevelDir, "commonworld.bnk"));
@@ -101,7 +102,6 @@ namespace TDU2.Map.World
 
         static string FileOrNull(string p) => File.Exists(p) ? p : null;
 
-        public override string ToString() =>
-            $"{IslandName}: {AreaBanks.Count} Areas ({AreasX}x{AreasZ}), {SectorBanks.Count} Sektoren";
+        public override string ToString() => $"{IslandName}: {AreaBanks.Count} Areas ({AreasX}x{AreasZ}), {SectorBanks.Count} Sektoren";
     }
 }

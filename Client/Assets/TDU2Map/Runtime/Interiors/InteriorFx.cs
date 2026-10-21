@@ -22,7 +22,7 @@ namespace TDU2.Map.Vehicles
         public sealed class LightDef { public Vector3 Pos; public Color Color; public float Intensity, Range; }
         sealed class Prepared { public List<UvaLink> Uva = new List<UvaLink>(); public List<LightDef> Lights = new List<LightDef>(); public Dictionary<string, TextureDef> Night = new Dictionary<string, TextureDef>(StringComparer.OrdinalIgnoreCase); public Dictionary<string, string> MatNight = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); public Dictionary<string, MatInfo> Mats = new Dictionary<string, MatInfo>(StringComparer.OrdinalIgnoreCase); public HashSet<string> Helpers = new HashSet<string>(StringComparer.OrdinalIgnoreCase); public HashSet<string> WaterMats = new HashSet<string>(StringComparer.OrdinalIgnoreCase); public TextureDef Cube; }
         /// <summary>Shader-Parameter eines Materials aus dem MAT.-Shaderblock (+768).</summary>
-        sealed class MatInfo { public bool Furniture; public Vector4 BaseColor = Vector4.one; }
+        sealed class MatInfo { public bool Furniture; public Vector4 BaseColor = Vector4.one; public float Bias; }
         static readonly ConcurrentDictionary<string, Prepared> _prep = new ConcurrentDictionary<string, Prepared>(StringComparer.OrdinalIgnoreCase);
         /// <summary>Innenraum-Lightmaps (lm_*) ohne Sonne/Schatten darstellen (das Licht ist eingebacken).</summary>
         public static bool UnlitLightmaps = true;
@@ -30,11 +30,13 @@ namespace TDU2.Map.Vehicles
         public static bool? NightLightmaps = null;
         public static float LightIntensity = 1.4f;
         /// <summary>Licht-Entities der Szene als Unity-Punktlichter (aus: im Spiel nur für Figuren, kostet Leistung).</summary>
-        public static bool AddSceneLights = false;
+        public static bool AddSceneLights = true;
         /// <summary>Bodenspiegelung wie im Original (TD_Furnitures gProjectiveMapSampler): zweite Kamera, gespiegelt an der Bodenebene.</summary>
         public static bool PlanarReflections = true;
         /// <summary>Auflösung des Spiegelbilds relativ zum Bildschirm.</summary>
         public static float ReflectionScale = 0.5f;
+        /// <summary>Mindest-Spiegelanteil spiegelnder Böden (setzt TDU2Interiors je Raum, z.B. Garage).</summary>
+        public static float MinFloorReflection = 0f;
 
         static readonly ConcurrentDictionary<string, List<UvaLink>> _links = new ConcurrentDictionary<string, List<UvaLink>>(StringComparer.OrdinalIgnoreCase);
         static readonly ulong SemDetail = Bin.KeyFromString("DETAIL"), SemDetail1 = Bin.KeyFromString("DETAIL1"), SemColor = Bin.KeyFromString("COLOR");
@@ -55,6 +57,7 @@ namespace TDU2.Map.Vehicles
         const ulong GuidFurnitures = 0xd5013ed0db79afafUL;  // TD_Furnitures.sob
         const ulong GuidWater = 0x0123000000000000UL;       // TD_Water.sob (Pools: COLOR/DETAIL sind Normalmaps, nicht darstellbar)
         const ulong KeyBaseColor = 0x4f4c4f4345534194UL;    // Key8("baseColor")
+        const ulong KeyBiasCoef = 0x46454f4353414988UL;     // Key8("biasCoef"): Fresnel-Grundwert der Spiegelung
 
         /// <summary>Im Lade-Thread: .uva der Bank lesen und den Materialien zuordnen.</summary>
         public static void Prepare(BnkArchive bank)
@@ -209,6 +212,8 @@ namespace TDU2.Map.Vehicles
                             if (sz <= 0 || sz > 64 || v + sz > d.Length) break;
                             if (Bin.U64(d, h + 16 * i) == KeyBaseColor && sz >= 16)
                                 info.BaseColor = new Vector4(BitConverter.ToSingle(d, v), BitConverter.ToSingle(d, v + 4), BitConverter.ToSingle(d, v + 8), BitConverter.ToSingle(d, v + 12));
+                            else if (Bin.U64(d, h + 16 * i) == KeyBiasCoef && sz >= 4)
+                                info.Bias = BitConverter.ToSingle(d, v);
                             v += sz;
                         }
                         prep.Mats[name] = info;
@@ -217,6 +222,112 @@ namespace TDU2.Map.Vehicles
             }
             catch (Exception ex) { Debug.LogWarning("[TDU2] Interieur-Materialparameter: " + ex.Message); }
             _prep[bank.FilePath] = prep;
+        }
+
+        /// <summary>
+        /// Häufigste Höhe (Welt, 5-cm-Klassen, gewichtet mit der Dreiecksfläche) der waagerechten, nach oben zeigenden Dreiecke
+        /// der Kandidaten; <paramref name="host"/> = Renderer mit dem größten Anteil daran.
+        /// </summary>
+        /// <summary>
+        /// Diagnose (Protokoll): alle Materialien des Interieurs mit Shader, Warteschlange (transparent/additiv), Haupttextur und
+        /// Auffälligkeiten (Wasser, Glas, Leuchten, UVs weit außerhalb 0..1, Meshes ohne Normalen) – um Darstellungsfehler ohne
+        /// Rückfrage zu finden.
+        /// </summary>
+        static void LogInventory(Transform root, Prepared prep)
+        {
+            try
+            {
+                var seen = new HashSet<Material>();
+                var sb = new System.Text.StringBuilder();
+                int n = 0, nTrans = 0, nOdd = 0;
+                foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+                {
+                    var mf = r.GetComponent<MeshFilter>(); var mesh = mf != null ? mf.sharedMesh : null;
+                    string meshInfo = "";
+                    if (mesh != null && mesh.isReadable)
+                    {
+                        var uv = new List<Vector2>(); mesh.GetUVs(0, uv);
+                        float mx = 0f; foreach (var u in uv) mx = Mathf.Max(mx, Mathf.Abs(u.x), Mathf.Abs(u.y));
+                        bool noN = mesh.normals == null || mesh.normals.Length == 0;
+                        if (mx > 50f || noN) { meshInfo = " MESH-AUFFÄLLIG(" + mesh.name + ": UV bis " + mx.ToString("0") + (noN ? ", keine Normalen" : "") + ", " + mesh.vertexCount + " V)"; nOdd++; }
+                    }
+                    foreach (var m in r.sharedMaterials)
+                    {
+                        if (m == null || (!seen.Add(m) && meshInfo.Length == 0)) continue;
+                        bool trans = m.renderQueue >= 2450;
+                        if (trans) nTrans++;
+                        string tag = m == MaterialFactory.Water || (m.name ?? "").Contains("Water") ? " WASSER" : IsGlass(m.name) ? " GLAS" : "";
+                        if (prep != null && prep.WaterMats.Contains(m.name ?? "")) tag += " (Pool)";
+                        if (!trans && tag.Length == 0 && meshInfo.Length == 0) continue;   // nur Auffälliges/Transparentes ausführlich
+                        if (n++ >= 300) continue;
+                        sb.Append("\n    ").Append(r.name).Append(" / ").Append(m.name).Append(" [").Append(m.shader != null ? m.shader.name : "-")
+                          .Append(", Queue ").Append(m.renderQueue).Append(", Tex ").Append(m.mainTexture != null ? m.mainTexture.name : "-")
+                          .Append(r.enabled ? "" : ", aus").Append(']').Append(tag).Append(meshInfo);
+                    }
+                }
+                Debug.Log("[TDU2] Material-Inventar " + root.name + ": " + seen.Count + " Materialien, " + nTrans + " transparent/additiv, " + nOdd + " auffällige Meshes" + sb);
+            }
+            catch (Exception ex) { Debug.LogWarning("[TDU2] Material-Inventar: " + ex.Message); }
+        }
+
+        /// <summary>Diagnose der letzten Bodensuche (Höhenklassen mit Fläche).</summary>
+        public static string LastPlaneInfo = "";
+
+        static bool FindFloorPlane(List<Renderer> cands, out Renderer host, out float y)
+        {
+            host = null; y = 0f;
+            var bins = new Dictionary<int, float>();
+            var per = new Dictionary<Renderer, Dictionary<int, float>>();
+            foreach (var r in cands)
+            {
+                Mesh mesh = null;
+                if (r is MeshRenderer) { var mf = r.GetComponent<MeshFilter>(); mesh = mf != null ? mf.sharedMesh : null; }
+                else if (r is SkinnedMeshRenderer sk) mesh = sk.sharedMesh;
+                if (mesh == null || !mesh.isReadable) continue;
+                var v = mesh.vertices; var tr = r.transform;
+                var mine = new Dictionary<int, float>();
+                for (int sm = 0; sm < mesh.subMeshCount; sm++)
+                {
+                    var t = mesh.GetTriangles(sm);
+                    for (int i = 0; i + 2 < t.Length; i += 3)
+                    {
+                        Vector3 a = tr.TransformPoint(v[t[i]]), b = tr.TransformPoint(v[t[i + 1]]), c = tr.TransformPoint(v[t[i + 2]]);
+                        var n = Vector3.Cross(b - a, c - a);
+                        float area2 = n.magnitude;
+                        if (area2 < 1e-6f) continue;
+                        if (Mathf.Abs(n.y) / area2 < 0.97f) continue;   // nur waagerecht (beide Windungen: Spiegelung der Szene)
+                        float yy = (a.y + b.y + c.y) / 3f;
+                        int k = Mathf.RoundToInt(yy / 0.05f);
+                        bins.TryGetValue(k, out float w); bins[k] = w + area2 * 0.5f;
+                        mine.TryGetValue(k, out float w2); mine[k] = w2 + area2 * 0.5f;
+                    }
+                }
+                per[r] = mine;
+            }
+            int best = 0; float bw = 0f;
+            foreach (var kv in bins) if (kv.Value > bw) { bw = kv.Value; best = kv.Key; }
+            if (bw < 4f) { LastPlaneInfo = "keine waagerechte Fläche >= 4 m²"; return false; }   // unter 4 m² waagerechter Fläche: kein Boden
+            // Boden = die UNTERSTE große waagerechte Ebene (Decken, Galerien, Dachflächen sind gleich groß oder größer und lagen
+            // sonst oft vorn -> Spiegelung auf der Decke statt dem Boden)
+            int lowest = best;
+            foreach (var kv in bins) if (kv.Value >= bw * 0.3f && kv.Key < lowest) lowest = kv.Key;
+            var top = new List<KeyValuePair<int, float>>(bins); top.Sort((p, q) => q.Value.CompareTo(p.Value));
+            var sbp = new System.Text.StringBuilder();
+            for (int i = 0; i < top.Count && i < 6; i++) sbp.Append(i == 0 ? "" : ", ").Append((top[i].Key * 0.05f).ToString("0.00")).Append(" m: ").Append(top[i].Value.ToString("0")).Append(" m²");
+            LastPlaneInfo = "Ebenen (Welt-Y): " + sbp + " -> größte " + (best * 0.05f).ToString("0.00") + ", gewählt unterste " + (lowest * 0.05f).ToString("0.00");
+            best = lowest;
+            float hw = 0f;
+            foreach (var kv in per)
+            {
+                float w = 0f;
+                for (int d = -1; d <= 1; d++) if (kv.Value.TryGetValue(best + d, out float x)) w += x;
+                if (w > hw) { hw = w; host = kv.Key; }
+            }
+            // genaue Höhe: flächengewichtetes Mittel der Nachbarklassen
+            float sw = 0f, sy = 0f;
+            for (int d = -1; d <= 1; d++) if (bins.TryGetValue(best + d, out float x)) { sw += x; sy += x * (best + d) * 0.05f; }
+            y = sw > 0f ? sy / sw : best * 0.05f;
+            return host != null;
         }
 
         /// <summary>Im Hauptthread nach dem Aufbau: Animationen starten, Glas transparent machen.</summary>
@@ -246,7 +357,8 @@ namespace TDU2.Map.Vehicles
             var done = new HashSet<Material>();
             var glassCache = new Dictionary<Material, Material>();
             int nUva = 0, nGlass = 0, nRefl = 0;
-            Renderer mirrorFloor = null; float mirrorArea = 0f;
+            Renderer mirrorFloor = null;
+            var mirrorCands = new List<Renderer>();
             int nHelper = 0;
             foreach (var r in root.GetComponentsInChildren<Renderer>(true))
             {
@@ -273,6 +385,8 @@ namespace TDU2.Map.Vehicles
                         {
                             _poolWater = new Material(ws) { name = "TDU2_PoolWater" };
                             if (_poolWater.HasProperty("_Color")) _poolWater.SetColor("_Color", PoolColor);
+                            // Meer-Shader nimmt die Farbe sonst vom Untergrund (fast unsichtbar) -> Pool: eigene Wasserfarbe mit Deckung
+                            if (_poolWater.HasProperty("_PoolTint")) _poolWater.SetColor("_PoolTint", PoolColor);
                             if (_poolWater.HasProperty("_Glossiness")) _poolWater.SetFloat("_Glossiness", 0.92f);
                         }
                         mats[i] = _poolWater; changed = true;
@@ -306,7 +420,10 @@ namespace TDU2.Map.Vehicles
                     if (prep != null && prep.Mats.TryGetValue(m.name ?? "", out var mi) && mi.Furniture)
                     {
                         if (m.HasProperty("_Color")) { var bc = m.GetColor("_Color"); m.SetColor("_Color", new Color(mi.BaseColor.x, mi.BaseColor.y, mi.BaseColor.z, bc.a)); }
-                        float mix = Mathf.Clamp01(1f - mi.BaseColor.w);
+                        // Spiegelanteil: 1 - baseColor.a; Garagenböden ("Reflection_Floor", Marmor …) haben dort fast 1, ihre Spiegelung
+                        // kommt aus dem Fresnel-Grundwert biasCoef (0.33) – der Boden glänzt im Spiel deutlich
+                        float mix = Mathf.Clamp01(Mathf.Max(1f - mi.BaseColor.w, mi.Bias * 0.8f));
+                        if (mix > 0.001f) mix = Mathf.Max(mix, MinFloorReflection);   // Garage: Boden spiegelt im Spiel deutlich
                         if (PlanarReflections && mix > 0.001f && m.HasProperty("_ReflMix")) { m.SetFloat("_ReflMix", mix); nRefl++; }
                     }
                     if (links == null || links.Count == 0) continue;
@@ -338,13 +455,63 @@ namespace TDU2.Map.Vehicles
                     foreach (var m in mats)
                         if (m != null && m.HasProperty("_ReflMix") && m.GetFloat("_ReflMix") > 0.001f)
                         {
-                            var b = r.bounds;
-                            float area = b.size.x * b.size.z;
-                            if (b.size.y < 0.5f && area > mirrorArea) { mirrorArea = area; mirrorFloor = r; }
+                            mirrorCands.Add(r);
                             break;
                         }
             }
-            if (mirrorFloor != null && mirrorFloor.GetComponent<InteriorMirror>() == null) mirrorFloor.gameObject.AddComponent<InteriorMirror>();
+            // Bodenebene: häufigste Höhe nach oben zeigender Flächen aller spiegelnden Meshes (Garagen: Boden mit Rampen, Sockeln,
+            // Rinnen – die Bounds sind dort zu hoch bzw. ein anderes Stück ist größer)
+            float planeY = 0f;
+            if (PlanarReflections && MinFloorReflection > 0.001f)
+            {
+                // Garage: im Spiel spiegelt der ganze Boden deutlich. Die Bodenfliesen sind dort oft kein Möbel-Material mit
+                // Spiegelanteil (nur Podeste o.ä. hatten einen) -> alle großen waagerechten Flächen als Kandidaten nehmen
+                foreach (var r in root.GetComponentsInChildren<Renderer>(false))
+                {
+                    if (!r.enabled || mirrorCands.Contains(r)) continue;
+                    var b = r.bounds;
+                    if (b.size.x * b.size.z < 40f) continue;
+                    bool has = false;
+                    foreach (var m in r.sharedMaterials) if (m != null && m.HasProperty("_ReflMix")) { has = true; break; }
+                    if (has) mirrorCands.Add(r);
+                }
+            }
+            if (mirrorCands.Count > 0 && FindFloorPlane(mirrorCands, out mirrorFloor, out planeY))
+            {
+                var im = mirrorFloor.GetComponent<InteriorMirror>();
+                if (im == null) im = mirrorFloor.gameObject.AddComponent<InteriorMirror>();
+                im.PlaneY = planeY;
+                Debug.Log("[TDU2] Bodenspiegelung " + root.name + ": " + mirrorCands.Count + " Kandidaten, Host " + mirrorFloor.name + ", Ebene y=" + planeY.ToString("0.00") +
+                          " (Raum-Ursprung y=" + root.position.y.ToString("0.00") + "), Mindestanteil " + MinFloorReflection.ToString("0.00") + "; " + LastPlaneInfo);
+                if (MinFloorReflection > 0.001f)
+                {
+                    // alles, was auf Bodenhöhe liegt, spiegelt (der Shader begrenzt die Spiegelung selbst auf die Bodenebene)
+                    foreach (var r in root.GetComponentsInChildren<Renderer>(false))
+                    {
+                        var b = r.bounds;
+                        if (b.min.y > planeY + 0.1f || b.max.y < planeY - 0.1f) continue;
+                        foreach (var m in r.sharedMaterials)
+                            if (m != null && m.HasProperty("_ReflMix") && m.GetFloat("_ReflMix") < MinFloorReflection) { m.SetFloat("_ReflMix", MinFloorReflection); nRefl++; }
+                    }
+                }
+                // Diagnose: welche Bodenmaterialien spiegeln, welche können es nicht (anderer Shader)
+                var sbm = new System.Text.StringBuilder(); int nNo = 0;
+                foreach (var r in root.GetComponentsInChildren<Renderer>(false))
+                {
+                    var b = r.bounds;
+                    if (b.min.y > planeY + 0.1f || b.max.y < planeY - 0.1f) continue;
+                    foreach (var m in r.sharedMaterials)
+                    {
+                        if (m == null) continue;
+                        bool can = m.HasProperty("_ReflMix");
+                        if (!can) nNo++;
+                        if (sbm.Length < 1500) sbm.Append(" | ").Append(r.name).Append('/').Append(m.name).Append(" [").Append(m.shader != null ? m.shader.name : "-").Append(can ? ", Refl " + m.GetFloat("_ReflMix").ToString("0.00") : ", KEIN Spiegel").Append(']');
+                    }
+                }
+                Debug.Log("[TDU2] Bodenspiegelung Materialien auf Bodenhöhe (" + nNo + " ohne Spiegel-Shader):" + sbm);
+            }
+            else if (PlanarReflections)
+                Debug.Log("[TDU2] Bodenspiegelung " + root.name + ": keine Bodenebene (" + mirrorCands.Count + " Kandidaten; " + LastPlaneInfo + ")");
             // Umgebungs-Cubemap des Interieurs (REFLECTION-Ebene, z.B. cubecar) als Reflection Probe: Autos spiegeln den Raum statt des Himmels
             bool probe = false;
             if (prep != null && prep.Cube != null)
@@ -365,7 +532,8 @@ namespace TDU2.Map.Vehicles
                     rp.size = (haveB ? wb.size : new Vector3(60f, 20f, 60f)) + Vector3.one * 4f;
                     rp.importance = 100;
                     rp.blendDistance = 1f;
-                    rp.boxProjection = false;
+                    rp.boxProjection = true;   // Spiegelung passend zur Raumlage (sonst "schwimmt" der Raum unnatürlich im Lack)
+                    rp.intensity = 0.7f;
                     probe = true;
                 }
             }
@@ -386,6 +554,7 @@ namespace TDU2.Map.Vehicles
                     li.renderMode = LightRenderMode.Auto;
                     nLights++;
                 }
+            LogInventory(root, prep);
             Debug.Log("[TDU2] Interieur " + root.name + ": " + nUva + " Textur-Animation(en), " + nGlass + " Glas, " + nLm + " Lightmap-Material(ien)" + (night ? " (Nacht)" : "") + ", " + nRefl + " Spiegel-Material(ien)" + (mirrorFloor != null ? " (Boden " + mirrorFloor.name + ")" : "") + ", " + nHelper + " Hilfskörper ausgeblendet, Cubemap " + (probe ? prep.Cube.Name : "-") + ", " + nLights + " Licht(er)");
         }
 
@@ -528,19 +697,72 @@ namespace TDU2.Map.Vehicles
             Renderer _r;
             Camera _cam;
             RenderTexture _rt;
-            static readonly int IdTex = Shader.PropertyToID("_TDU2PlanarRefl"), IdOn = Shader.PropertyToID("_TDU2PlanarOn");
+            static readonly int IdTex = Shader.PropertyToID("_TDU2PlanarRefl"), IdOn = Shader.PropertyToID("_TDU2PlanarOn"), IdY = Shader.PropertyToID("_TDU2PlanarY");
+
+            Camera _src;
+            int _srcFrame = -1;
+            int _renders; float _nextLog;
+            /// <summary>Höhe der Spiegelebene (Welt beim Aufbau; NaN = Oberkante der Bounds). Intern relativ zum Renderer gespeichert,
+            /// damit der Gleitkomma-Ursprung (Verschieben der Welt) sie mitnimmt.</summary>
+            public float PlaneY { get => _hasPlane ? transform.TransformPoint(new Vector3(0f, _planeLocalY, 0f)).y : float.NaN; set { _hasPlane = !float.IsNaN(value); if (_hasPlane) _planeLocalY = transform.InverseTransformPoint(new Vector3(transform.position.x, value, transform.position.z)).y; } }
+            bool _hasPlane; float _planeLocalY;
 
             void Awake() { _r = GetComponent<Renderer>(); }
 
-            void OnWillRenderObject()
+            // Gerendert wird nur für die Spielkamera (Camera.main) vor ihrem Culling – unabhängig davon, ob gerade die Boden-Fläche
+            // mit dem InteriorMirror sichtbar ist (sonst bliebe ein altes Bild stehen, das "mit der Kamera wandert"). Alle anderen
+            // Kameras (UI, Vorschau, Szene-Ansicht, Render-Texturen) sehen keine Spiegelung, statt das Bild einer fremden Kamera.
+            void OnEnable()
             {
-                if (_rendering || !enabled || _r == null || !PlanarReflections) return;
-                var src = Camera.current;
-                if (src == null || src == _cam || src.cameraType == CameraType.Reflection || src.cameraType == CameraType.Preview) return;
+                Camera.onPreCull += PreCull;
+                Camera.onPreRender += PreRender;
+            }
+
+            void OnDisable()
+            {
+                Camera.onPreCull -= PreCull;
+                Camera.onPreRender -= PreRender;
+                Shader.SetGlobalFloat(IdOn, 0f);
+            }
+
+            bool IsGameCamera(Camera c)
+            {
+                if (c == null || c == _cam || c.cameraType != CameraType.Game || c.targetTexture != null) return false;
+                var main = Camera.main;
+                return main == null || c == main;
+            }
+
+            bool _rejectLogged;
+
+            void PreCull(Camera c)
+            {
+                if (!_rendering && c != null && c == Camera.main && !IsGameCamera(c) && !_rejectLogged)
+                {
+                    _rejectLogged = true;
+                    Debug.Log("[TDU2] Bodenspiegelung: Hauptkamera " + c.name + " wird NICHT gespiegelt (Typ " + c.cameraType + ", Zieltextur " + (c.targetTexture != null ? c.targetTexture.name : "-") + ")");
+                }
+                if (_rendering || !isActiveAndEnabled || _r == null || !PlanarReflections || !IsGameCamera(c)) return;
                 _rendering = true;
-                try { Render(src); }
+                try
+                {
+                    Render(c); _src = c; _srcFrame = Time.frameCount;
+                    _renders++;
+                    if (Time.unscaledTime >= _nextLog)
+                    {
+                        _nextLog = Time.unscaledTime + 10f;
+                        Debug.Log("[TDU2] Bodenspiegelung läuft: " + name + ", Kamera " + c.name + ", Ebene y=" + PlaneY.ToString("0.00") + ", Bild " + (_rt != null ? _rt.width + "x" + _rt.height : "-") +
+                                  ", " + _renders + " Spiegelbilder seit Start, Kamera-y " + c.transform.position.y.ToString("0.00"));
+                    }
+                }
                 catch (Exception ex) { Debug.LogWarning("[TDU2] Bodenspiegelung: " + ex.Message); enabled = false; }
                 finally { _rendering = false; }
+            }
+
+            void PreRender(Camera c)
+            {
+                if (_rendering || c == _cam) return;
+                bool on = PlanarReflections && c == _src && _srcFrame == Time.frameCount && _rt != null;
+                Shader.SetGlobalFloat(IdOn, on ? 1f : 0f);
             }
 
             void Render(Camera src)
@@ -567,7 +789,7 @@ namespace TDU2.Map.Vehicles
 
                 // Ebene: Oberkante des Bodens (Gleitkomma-Ursprung -> jedes Bild neu)
                 var b = _r.bounds;
-                var pos = new Vector3(0f, b.max.y, 0f);
+                var pos = new Vector3(0f, _hasPlane ? PlaneY : b.max.y, 0f);
                 var normal = Vector3.up;
                 float d = -Vector3.Dot(normal, pos);
                 var plane = new Vector4(normal.x, normal.y, normal.z, d);
@@ -592,6 +814,7 @@ namespace TDU2.Map.Vehicles
                     QualitySettings.shadows = oldShadows;
                 }
                 Shader.SetGlobalTexture(IdTex, _rt);
+                Shader.SetGlobalFloat(IdY, pos.y);
                 Shader.SetGlobalFloat(IdOn, 1f);
             }
 
@@ -612,8 +835,6 @@ namespace TDU2.Map.Vehicles
                 m.m30 = 0f; m.m31 = 0f; m.m32 = 0f; m.m33 = 1f;
                 return m;
             }
-
-            void OnDisable() { Shader.SetGlobalFloat(IdOn, 0f); }
 
             void OnDestroy()
             {

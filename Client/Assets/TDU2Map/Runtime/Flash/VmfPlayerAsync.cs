@@ -31,8 +31,46 @@ namespace TDU2.Map.Flash
         const long MaxPendingBytes = 96L * 1024 * 1024;
         /// <summary>Beim Einblenden höchstens so lange (s) warten, bis alle sichtbaren Shapes fertig sind, statt den Aufbau zu zeigen.</summary>
         public static float FirstShowHoldSeconds = 2f;
+        /// <summary>
+        /// Atomares Einblenden: ein Clip, der neu erscheint (Fenster, Seite, Popup), wird erst gezeigt, wenn alle seine Shapes
+        /// scharf gerastert sind – höchstens so lange (s) angehalten. Seine Zeitleiste steht so lange, die Öffnen-Animation
+        /// läuft danach vollständig ab. 0 = aus (alter Stil: Shapes erscheinen einzeln, sobald sie fertig sind).
+        /// </summary>
+        public static float RevealHoldSeconds = 1.2f;
         bool _probe, _missing, _wasVisible;
         float _holdUntil;
+        int _drawSerial;
+        bool _revealHolding;
+
+        /// <summary>
+        /// Darf der Clip gezeichnet werden? Beim (Wieder-)Erscheinen einmal prüfen, ob alle Shapes darunter in voller Schärfe
+        /// vorliegen (fehlende werden dabei vorrangig angefordert); solange nicht, Clip auslassen und seine Zeitleiste anhalten.
+        /// </summary>
+        bool RevealReady(DisplayObject d, Matrix2D mw, ColorTransform cw, string dyn, Texture clipTex)
+        {
+            if (RevealHoldSeconds <= 0f || d.Sprite == null) return true;
+            float now = Time.unscaledTime;
+            bool appearing = d.SeenDraw != _drawSerial && d.SeenDraw != _drawSerial - 1;   // im letzten Zeichnen nicht dabei
+            d.SeenDraw = _drawSerial;
+            if (appearing) { d.Revealed = false; d.RevealSince = now; }
+            if (d.Revealed) return true;
+            // Prüfdurchgang ohne Zeichnen (rastert kleine Shapes sofort, große im Hintergrund)
+            var clip = _clip; var mask = _maskTex; var maskRect = _maskRect;
+            bool wasMissing = _missing;
+            _probe = true; _missing = false;
+            try { Draw(d.Sprite, mw, cw, dyn, clipTex); }
+            finally { _probe = false; }
+            bool missing = _missing;
+            _missing = wasMissing; _clip = clip; _maskTex = mask; _maskRect = maskRect;
+            if (!missing || now - d.RevealSince >= RevealHoldSeconds)
+            {
+                d.Revealed = true; d.FrozenUntil = 0f;
+                return true;
+            }
+            d.FrozenUntil = now + 0.15f;   // verlängert sich, solange der Clip gezeichnet werden will
+            _revealHolding = true;
+            return false;
+        }
 
         readonly object _rasterLock = new object();
         readonly LinkedList<(int id, int target, int gen)> _rasterJobs = new LinkedList<(int, int, int)>();
@@ -103,11 +141,15 @@ namespace TDU2.Map.Flash
             {
                 int target = StageBucket() + 1;
                 long budget = PrewarmBudgetMB * 1024L * 1024L / 4L, sum = 0;
+                // kleine Shapes zuerst (Rahmen, Symbole, Knöpfe – davon gibt es Hunderte): mit demselben Budget sind so viel
+                // mehr Fenster sofort vollständig; die wenigen großen Flächen kommen beim Einblenden schnell nach
+                var list = new List<(VmfMovie.Shape s, long px)>();
                 foreach (var c in Movie.Chars.Values)
+                    if (c is VmfMovie.Shape s && s.Paths.Count > 0) list.Add((s, EstimatePixels(s, target)));
+                list.Sort((a, b) => a.px.CompareTo(b.px));
+                foreach (var (s, px) in list)
                 {
-                    if (!(c is VmfMovie.Shape s) || s.Paths.Count == 0) continue;
-                    long px = EstimatePixels(s, target);
-                    if (sum + px > budget) continue;
+                    if (sum + px > budget) break;
                     sum += px;
                     RequestRaster(s.Id, target, false);
                 }
@@ -172,7 +214,7 @@ namespace TDU2.Map.Flash
             if (_rasterThread == null && _fontQueue == null) return;
             bool visible = Visible;
             float budget;
-            if (visible) budget = _holdUntil > 0f ? 14f : IntegrateBudgetVisibleMs;   // beim Einblenden schneller fertig werden
+            if (visible) budget = _holdUntil > 0f || _revealHolding ? 14f : IntegrateBudgetVisibleMs;   // beim Einblenden schneller fertig werden
             else
             {
                 if (_hiddenFrame != Time.frameCount) { _hiddenFrame = Time.frameCount; _hiddenMs = 0f; }

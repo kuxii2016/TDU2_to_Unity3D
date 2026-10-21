@@ -28,6 +28,14 @@ namespace TDU2.Map.Online
     /// Erweiterung Lackierung/Beklebung (Sticker-Shop, ältere Clients ignorieren sie): +81 u8 Version (1), +82 u32 Hash der
     /// codierten <see cref="CarLivery"/> (0 = keine), +86 u16 Gesamtlänge, +88 u16 Versatz, +90 u8 Länge, +91 Daten (≤ 96 Byte).
     /// Jedes Paket trägt das nächste Stück (Karussell) – nach ~1 s haben alle Mitspieler die Beklebung, Paketverlust egal.
+    /// Danach (optional) Verschmutzung: u8 0xD1, u8 Schmutz (0..255), u8 Kratzer (0..255), u8 Flags (1 = nass/Regen).
+    /// Danach (optional, nur im Interieur) Raum: u8 0xA1, u32 Raumkennung (TDU2Interiors.PresenceKey), f32 x,y,z (Füße im Raum
+    /// der Interieur-Szene), f32 Blickrichtung (Grad um Y), u8 Flags (1 = geht). Mitspieler im selben Raum erscheinen als
+    /// Spielfigur (Läden, Händler, Casino, Flughafen …; Häuser nur für die eigene Gruppe; in Einzelspieler-Rennen keiner).
+    /// Danach (optional, nur im Interieur) Ausstellungsauto, an dem man Türen/Fenster bedient (Händler, Garage – Gäste sehen es):
+    /// u8 0xA2, i32 Auto (DB-Id), u8 Zubehör-Bits (TDU2Accessories.Bits), u8 Flags (1 sitzt im Auto, 2 Motor an, 4 Hupe).
+    /// Danach (optional, nur im Auto) Ausstattung/Zustand: u8 0xE1, u8 Bremsscheiben-Wärme FL/FR/RL/RR (0..255), u8 Zubehör-Bits
+    /// (Türen/Fenster/Verdeck), i32 Felge (DBRims._hashcode), i32 Innenraum (DBInterior._hashcode) – Mitspieler laden dieselben Felgen.
     /// </summary>
     public sealed class TDU2Multiplayer : MonoBehaviour
     {
@@ -39,6 +47,14 @@ namespace TDU2.Map.Online
         public static bool Hidden;
         /// <summary>Mitspieler nicht anzeigen (z.B. im Sticker-Shop: nur das eigene Auto), man selbst bleibt verbunden.</summary>
         public static bool HideRemotes;
+        public static TDU2Multiplayer Instance { get; private set; }
+
+        /// <summary>Auto eines Mitspielers (null = noch nicht geladen/kein Auto) – Mitfahrt (TDU2Party).</summary>
+        public GameObject RemoteCar(int id) => _remotes.TryGetValue(id, out var r) ? r.Go : null;
+        public CarModel RemoteModel(int id) => _remotes.TryGetValue(id, out var r) && r.Go != null ? r.Model : null;
+        /// <summary>Lenkung eines Mitspielers −1 … +1.</summary>
+        public float RemoteSteer(int id) => _remotes.TryGetValue(id, out var r) ? Mathf.Clamp(r.Cur.Steer / 25f, -1f, 1f) : 0f;
+        public float RemoteKmh(int id) => _remotes.TryGetValue(id, out var r) ? r.Cur.Kmh : 0f;
         /// <summary>Eigene Insel als Code im Zustand (+80): 1 Ibiza, 2 Hawaii, 0 unbekannt.</summary>
         public static int LocalIsland { get; private set; }
 
@@ -79,7 +95,12 @@ namespace TDU2.Map.Online
             public TDU2VehicleAudio Audio;
             public Rigidbody Body;
             public Task<CarAssets> Load;
-            public int LoadCarId, LoadColor;
+            public int LoadCarId, LoadColor, LoadRim, LoadInterior;
+            // Ausstattung/Zustand (Erweiterung 0xE1): Felge, Innenraum, Bremsscheiben-Wärme, Türen/Fenster/Verdeck
+            public int Rim, Interior, AccBits; public readonly float[] Heat = new float[4]; public bool HasExtra;
+            public TDU2BrakeGlow Glow; public bool GlowTried;
+            // Ausstellungsauto im Raum (Erweiterung 0xA2)
+            public int RoomCar, RoomCarBits, RoomCarFlags, RoomCarApplied, RoomCarBitsApplied = -1;
             public readonly List<Snap> Snaps = new List<Snap>();
             public uint LastSeq;
             public float LastPacket;
@@ -96,6 +117,13 @@ namespace TDU2.Map.Online
             public uint LiveryHash; public CarLivery Livery;
             public uint BufHash; public byte[] Buf; public bool[] Got; public int GotCount;
             public uint AppliedHash = uint.MaxValue;
+            // Verschmutzung (TDU2CarDirt des Senders)
+            public float Dirt = -1f, Scratch; public bool Wet;
+            public TDU2CarDirt DirtView;
+            // Spielfigur im Interieur
+            public uint Room; public Vector3 RoomPos; public float RoomYaw; public bool RoomWalk; public float RoomPacket;
+            public Avatars.TDU2Avatar RoomAvatar; public string RoomCfg; public uint RoomShown;
+            public Vector3 RoomVis; public float RoomVisYaw, RoomT, RoomSpeed;
         }
 
         readonly Dictionary<int, Remote> _remotes = new Dictionary<int, Remote>();
@@ -108,8 +136,13 @@ namespace TDU2.Map.Online
         float _nextSend;
         uint _seq;
         Vector3 _lastPos; float _lastPosT; bool _hasLast;
+        Vector3 _roomLast; float _roomLastT; bool _hasRoomLast;
         const int LiveryChunk = 96, LiveryExt = 10;
-        readonly byte[] _out = new byte[7 + StateSize + LiveryExt + LiveryChunk];
+        readonly byte[] _out = new byte[7 + StateSize + LiveryExt + LiveryChunk + DirtExt + RoomExt + RoomCarExt + ExtraExt];
+        const int RoomCarExt = 7; const byte RoomCarTag = 0xA2;
+        const int ExtraExt = 14; const byte ExtraTag = 0xE1;
+        const int RoomExt = 22; const byte RoomTag = 0xA1;
+        const int DirtExt = 4; const byte DirtTag = 0xD1;
         int _livOffset;
         string _livCar; byte[] _livBlob; uint _livHash;
         readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
@@ -119,6 +152,7 @@ namespace TDU2.Map.Online
         {
             if (Manager == null) Manager = GetComponent<TDU2VehicleManager>();
             if (Manager == null) return;
+            Instance = this;
             LocalIsland = IslandCode(Manager.Streamer != null && Manager.Streamer.Index != null ? Manager.Streamer.Index.IslandName : null);
             EnsureSocket();
             Receive();
@@ -129,6 +163,65 @@ namespace TDU2.Map.Online
                 SendState();
             }
             UpdateRemotes();
+        }
+
+        void LateUpdate() { if (Manager != null) UpdateRoomAvatars(); }
+
+        // ------------------------------------------------------------------ Mitspieler als Spielfigur im Interieur
+        /// <summary>Kurze Glättung der Raumposition (m/s bis zum Ziel) und Laufanimationen.</summary>
+        [Tooltip("Mitspieler in Läden/Händlern/Casino/Flughafen als Spielfigur zeigen")]
+        public bool ShowRoomAvatars = true;
+
+        void UpdateRoomAvatars()
+        {
+            var inter = Manager.GetComponent<TDU2Interiors>();
+            uint myRoom = inter != null && inter.Inside && !Hidden && ShowRoomAvatars && TDU2OnlineSettings.ShowPlayersInInteriors ? inter.PresenceKey : 0;
+            var scene = myRoom != 0 ? inter.SceneRoot : null;
+            bool priv = myRoom != 0 && inter.IsPrivateRoom;
+            var party = TDU2Party.Instance;
+            foreach (var r in _remotes.Values)
+            {
+                bool want = scene != null && r.Room == myRoom && Time.unscaledTime - r.RoomPacket < 3f && Avatars.AvatarLibrary.Ready;
+                // Haus: nur Mitspieler aus der eigenen Gruppe (Einladung/Mitfahrer)
+                if (want && priv) want = party != null && party.InGroup(r.Id);
+                string cfg = want ? (Avatars.AvatarConfigs.RemoteCode(r.Id) ?? "") : null;
+                if (!want || r.RoomShown != myRoom || (r.RoomAvatar != null && r.RoomAvatar.transform.parent != scene) || cfg != r.RoomCfg)
+                    DestroyRoomAvatar(r);
+                if (!want) continue;
+                // Türen/Fenster am Ausstellungsauto, das der Mitspieler bedient (nur bei Änderung übernehmen)
+                if (r.RoomCar != 0 && (r.RoomCar != r.RoomCarApplied || r.RoomCarBits != r.RoomCarBitsApplied)
+                    && inter.ApplyRemoteCarState(r.RoomCar, r.RoomCarBits, r.RoomCarFlags))
+                { r.RoomCarApplied = r.RoomCar; r.RoomCarBitsApplied = r.RoomCarBits; }
+                if (r.RoomAvatar == null)
+                {
+                    r.RoomAvatar = Avatars.TDU2Avatar.Create(scene, Avatars.AvatarConfigs.ForPlayer(r.Id), "TDU2 Mitspieler " + r.Id);
+                    r.RoomCfg = cfg; r.RoomShown = myRoom;
+                    r.RoomVis = r.RoomPos; r.RoomVisYaw = r.RoomYaw; r.RoomT = 0f;
+                }
+                var a = r.RoomAvatar;
+                float dt = Time.deltaTime;
+                // weich zum Ziel (Pakete ~20/s), Sprünge > 3 m direkt
+                if ((r.RoomPos - r.RoomVis).sqrMagnitude > 9f) r.RoomVis = r.RoomPos;
+                else r.RoomVis = Vector3.Lerp(r.RoomVis, r.RoomPos, 1f - Mathf.Exp(-dt * 10f));
+                r.RoomVisYaw = Mathf.LerpAngle(r.RoomVisYaw, r.RoomYaw, 1f - Mathf.Exp(-dt * 8f));
+                a.transform.localPosition = r.RoomVis;
+                a.transform.localRotation = Quaternion.Euler(0f, r.RoomVisYaw, 0f);
+                if (!a.Ready) continue;
+                bool woman = a.Config != null && a.Config.Sex == 1;
+                var clip = Avatars.AvatarLibrary.Clip(r.RoomWalk ? (woman ? "co_walkt02-w" : "cd_walk-m") : (woman ? "co_stand-w" : "co_stand-m"))
+                           ?? Avatars.AvatarLibrary.Clip(woman ? "co_stand-w" : "co_stand-m");
+                r.RoomT += dt;
+                a.BeginPose();
+                // Laufen: ohne Wurzel-Versatz der Animation (Position kommt aus dem Netz)
+                if (clip != null) a.ApplyClip(clip, Mathf.Repeat(r.RoomT, Mathf.Max(0.05f, clip.Length)), 1f, !r.RoomWalk);
+                a.CommitPose();
+            }
+        }
+
+        static void DestroyRoomAvatar(Remote r)
+        {
+            if (r.RoomAvatar != null) Destroy(r.RoomAvatar.gameObject);
+            r.RoomAvatar = null; r.RoomCfg = null; r.RoomShown = 0;
         }
 
         // ------------------------------------------------------------------ Netz
@@ -242,7 +335,52 @@ namespace TDU2.Map.Online
             WriteU32(b, o + 76, (uint)(Now * 1000.0));
             b[o + 80] = (byte)LocalIsland;
             int len = o + StateSize;
-            len = WriteLivery(b, len, inCar ? veh.Car.FileName : null);
+            len = WriteLivery(b, len, inCar && TDU2OnlineSettings.SyncLiveries ? veh.Car.FileName : null);
+            // Verschmutzung des eigenen Autos
+            var dirt = inCar && TDU2OnlineSettings.SyncDirt ? veh.GetComponent<TDU2CarDirt>() : null;
+            b[len] = DirtTag;
+            b[len + 1] = (byte)Mathf.RoundToInt(Mathf.Clamp01(dirt != null ? dirt.Level : 0f) * 255f);
+            b[len + 2] = (byte)Mathf.RoundToInt(Mathf.Clamp01(dirt != null ? dirt.Scratches : 0f) * 255f);
+            b[len + 3] = (byte)(dirt != null && dirt.Raining ? 1 : 0);
+            len += DirtExt;
+            // Raum im Interieur (Spielfigur für Mitspieler)
+            if (!inCar && inter != null && inter.Inside && !Hidden)
+            {
+                uint key = inter.PresenceKey;
+                if (key != 0 && inter.LocalPresence(out var lp, out float yaw))
+                {
+                    float now2 = Time.time;
+                    bool walk = _hasRoomLast && now2 > _roomLastT && (lp - _roomLast).magnitude / (now2 - _roomLastT) > 0.4f;
+                    _roomLast = lp; _roomLastT = now2; _hasRoomLast = true;
+                    b[len] = RoomTag;
+                    WriteU32(b, len + 1, key);
+                    WriteV3(b, len + 5, lp);
+                    WriteF(b, len + 17, yaw);
+                    b[len + 21] = (byte)(walk ? 1 : 0);
+                    len += RoomExt;
+                    // Ausstellungsauto, an dem man Türen/Fenster bedient (Mitspieler im selben Raum sehen es)
+                    if (inter.LocalCarState(out int rc, out int rbits, out int rflags))
+                    {
+                        b[len] = RoomCarTag;
+                        WriteI32(b, len + 1, rc);
+                        b[len + 5] = (byte)rbits; b[len + 6] = (byte)rflags;
+                        len += RoomCarExt;
+                    }
+                }
+            }
+            else _hasRoomLast = false;
+            // eigenes Auto: Bremsscheiben-Wärme, Türen/Fenster/Verdeck, Felge und Innenraum
+            if (inCar)
+            {
+                var glow = Manager.BrakeGlow;
+                var acc = Manager.Accessories;
+                b[len] = ExtraTag;
+                for (int i = 0; i < 4; i++) b[len + 1 + i] = glow != null ? glow.HeatByte(i) : (byte)0;
+                b[len + 5] = (byte)(acc != null ? acc.Bits : 0);
+                WriteI32(b, len + 6, Manager.RimId);
+                WriteI32(b, len + 10, Manager.InteriorId);
+                len += ExtraExt;
+            }
             try { _udp.Send(b, len, _server); } catch (Exception) { }
         }
 
@@ -326,7 +464,42 @@ namespace TDU2.Map.Online
                 r.Offset = min; r.HasOffset = true;
                 r.Jitter = r.Jitter * 0.9 + (lag - min) * 0.1;
 
-                if (d.Length >= o + StateSize + LiveryExt) ReadLivery(r, d, o + StateSize);
+                if (d.Length >= o + StateSize + LiveryExt)
+                {
+                    ReadLivery(r, d, o + StateSize);
+                    // Verschmutzung hinter dem Lackierungs-Stück
+                    int de = d[o + StateSize] == 1 ? o + StateSize + LiveryExt + d[o + StateSize + 9] : -1;
+                    if (de > 0 && d.Length >= de + DirtExt && d[de] == DirtTag)
+                    {
+                        r.Dirt = d[de + 1] / 255f; r.Scratch = d[de + 2] / 255f; r.Wet = (d[de + 3] & 1) != 0;
+                        int ro = de + DirtExt;
+                        if (d.Length >= ro + RoomExt && d[ro] == RoomTag)
+                        {
+                            r.Room = BitConverter.ToUInt32(d, ro + 1);
+                            r.RoomPos = ReadV3(d, ro + 5);
+                            r.RoomYaw = BitConverter.ToSingle(d, ro + 17);
+                            r.RoomWalk = (d[ro + 21] & 1) != 0;
+                            r.RoomPacket = Time.unscaledTime;
+                            ro += RoomExt;
+                        }
+                        else r.Room = 0;
+                        if (d.Length >= ro + RoomCarExt && d[ro] == RoomCarTag)
+                        {
+                            r.RoomCar = BitConverter.ToInt32(d, ro + 1);
+                            r.RoomCarBits = d[ro + 5]; r.RoomCarFlags = d[ro + 6];
+                            ro += RoomCarExt;
+                        }
+                        else r.RoomCar = 0;
+                        if (d.Length >= ro + ExtraExt && d[ro] == ExtraTag)
+                        {
+                            for (int i = 0; i < 4; i++) r.Heat[i] = d[ro + 1 + i] / 255f;
+                            r.AccBits = d[ro + 5];
+                            r.Rim = BitConverter.ToInt32(d, ro + 6);
+                            r.Interior = BitConverter.ToInt32(d, ro + 10);
+                            r.HasExtra = true;
+                        }
+                    }
+                }
                 r.Snaps.Add(s);
                 if (r.Snaps.Count > 40) r.Snaps.RemoveRange(0, r.Snaps.Count - 40);
                 bool inCar = (s.Flags & 1) != 0 && carId != 0 && SameIsland(island);   // andere Insel: nicht zeigen
@@ -445,16 +618,24 @@ namespace TDU2.Map.Online
 
                 bool want = r.CarId > 0 && !Hidden && !HideRemotes;
                 if (!want) { if (r.Go != null) DestroyModel(r); r.HasVis = false; continue; }
-                bool modelOk = r.Go != null && r.Assets != null && r.Assets.Car.Id == r.CarId && r.LoadColor == r.Color;
+                bool modelOk = r.Go != null && r.Assets != null && r.Assets.Car.Id == r.CarId && r.LoadColor == r.Color
+                               && r.LoadRim == r.Rim && r.LoadInterior == r.Interior;
                 if (!modelOk && r.Load == null) StartLoad(r);
                 PollLoad(r);
                 if (r.Go == null) continue;
                 // Lackierung/Beklebung des Mitspielers (sobald vollständig empfangen)
-                if (r.Model != null && r.AppliedHash != r.LiveryHash)
+                if (r.Model != null && r.AppliedHash != r.LiveryHash && TDU2OnlineSettings.SyncLiveries)
                 {
                     r.AppliedHash = r.LiveryHash;
                     if (r.Livery != null) { TDU2StickerLibrary.Ensure(Manager.BnkDir); TDU2LiveryView.For(r.Model)?.Show(r.Livery); }
                     else { var v = r.Model.Visual != null ? r.Model.Visual.GetComponent<TDU2LiveryView>() : null; if (v != null) v.Show(null); }
+                }
+
+                // Verschmutzung des Mitspielers auf seine Lack-Materialien
+                if (r.Model != null && r.Dirt >= 0f && TDU2OnlineSettings.SyncDirt)
+                {
+                    if (r.DirtView == null) { r.DirtView = r.Go.GetComponent<TDU2CarDirt>() ?? r.Go.AddComponent<TDU2CarDirt>(); r.DirtView.Setup(null, r.Model); }
+                    r.DirtView.SetExternal(r.Dirt, r.Scratch, r.Wet);
                 }
 
                 if (!Sample(r, out var s)) continue;
@@ -518,6 +699,16 @@ namespace TDU2.Map.Online
                     r.Audio.SetHorn(audible && (s.Flags2 & 1) != 0);
                     if (!audible) foreach (var src in r.Go.GetComponents<AudioSource>()) src.volume = 0f;
                 }
+                // Bremsscheiben-Wärme und Türen/Fenster/Verdeck des Mitspielers
+                if (r.Model != null && r.HasExtra)
+                {
+                    if (!r.GlowTried) { r.GlowTried = true; r.Glow = TDU2BrakeGlow.Create(r.Model); }
+                    if (r.Glow != null) { for (int i = 0; i < 4; i++) r.Glow.SetHeat(i, r.Heat[i], dt); r.Glow.Apply(); }
+                    var acc = TDU2Accessories.For(r.Model, r.Lights);
+                    acc.Audio = r.Audio != null && r.Audio.enabled ? r.Audio : null;
+                    if (acc.Bits != r.AccBits) acc.ApplyBits(r.AccBits);
+                    acc.Update(Time.deltaTime);
+                }
             }
             foreach (var id in dead) { DestroyRemote(_remotes[id]); _remotes.Remove(id); }
         }
@@ -564,9 +755,9 @@ namespace TDU2.Map.Online
             var db = Manager.Database;
             if (db == null || string.IsNullOrEmpty(Manager.BnkDir) || !db.ById.TryGetValue(r.CarId, out var car)) return;
             car = Manager.FindCar(car.FileName) ?? car;
-            string bnk = Manager.BnkDir; int color = r.Color; bool snd = Sounds;
-            r.LoadCarId = r.CarId; r.LoadColor = color;
-            r.Load = Task.Run(() => CarAssets.Load(bnk, db, car, color, snd));
+            string bnk = Manager.BnkDir; int color = r.Color; bool snd = Sounds; int rim = r.Rim, intr = r.Interior;
+            r.LoadCarId = r.CarId; r.LoadColor = color; r.LoadRim = rim; r.LoadInterior = intr;
+            r.Load = Task.Run(() => CarAssets.Load(bnk, db, car, color, snd, rim, intr));
         }
 
         void PollLoad(Remote r)
@@ -574,7 +765,7 @@ namespace TDU2.Map.Online
             if (r.Load == null || !r.Load.IsCompleted) return;
             var t = r.Load; r.Load = null;
             if (t.IsFaulted) { Debug.LogWarning("[TDU2] Mitspieler-Auto: " + t.Exception?.GetBaseException().Message); return; }
-            if (r.LoadCarId != r.CarId || r.LoadColor != r.Color) { t.Result?.DestroyTextures(); return; }   // inzwischen gewechselt
+            if (r.LoadCarId != r.CarId || r.LoadColor != r.Color || r.LoadRim != r.Rim || r.LoadInterior != r.Interior) { t.Result?.DestroyTextures(); return; }   // inzwischen gewechselt
             DestroyModel(r);
             try { Build(r, t.Result); }
             catch (Exception ex) { Debug.LogWarning("[TDU2] Mitspieler-Auto aufbauen: " + ex.Message); t.Result?.DestroyTextures(); }
@@ -623,6 +814,10 @@ namespace TDU2.Map.Online
             r.Lights.External = true;
             r.Lights.Setup(null, r.Model);
 
+            // Fahrer: Avatar des Mitspielers mit seiner Kleidung (Server-Spielerliste), Lenkung aus dem Zustand
+            var drv = Avatars.TDU2CarAvatar.Attach(go, r.Model, Avatars.AvatarConfigs.ForPlayer(r.Id), false, () => r.Cur.Steer / 25f);
+            if (drv != null) { int pid = r.Id; drv.ConfigCode = () => Avatars.AvatarConfigs.RemoteCode(pid); }
+
             if (a.Sound != null)
             {
                 r.Audio = go.AddComponent<TDU2VehicleAudio>();
@@ -634,7 +829,8 @@ namespace TDU2.Map.Online
 
         void DestroyModel(Remote r)
         {
-            r.Model?.Destroy(); r.Model = null;
+            TDU2Accessories.Forget(r.Model);
+            r.Model?.Destroy(); r.Model = null; r.DirtView = null; r.Glow = null; r.GlowTried = false;
             r.Assets?.DestroyTextures(); r.Assets = null;
             if (r.Go != null) UnityUtil.SafeDestroy(r.Go);
             r.Go = null; r.Lights = null; r.Audio = null; r.Body = null; r.Wheels = null; r.HasVis = false;
@@ -643,6 +839,7 @@ namespace TDU2.Map.Online
         void DestroyRemote(Remote r)
         {
             DestroyModel(r);
+            DestroyRoomAvatar(r);
             if (r.Load != null) { var t = r.Load; r.Load = null; t.ContinueWith(x => { if (x.Status == TaskStatus.RanToCompletion) x.Result?.DestroyTextures(); }); }
         }
 

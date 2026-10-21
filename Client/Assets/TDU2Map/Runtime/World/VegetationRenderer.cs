@@ -136,64 +136,6 @@ namespace TDU2.Map.World
             _rootMatrix = new Matrix4x4(); // erzwingt Neuberechnung
         }
 
-        /// <summary>
-        /// Diagnose (nur Konsole, keine Einblendung): Instanz-Pflanzen sind nicht anklickbar (GPU-Instancing). Rechtsklick auf die
-        /// Komponente im Inspector -> "Pflanze in Bildmitte loggen": nimmt die Szenen-Kamera (Editor) bzw. die Spielkamera,
-        /// sucht in allen Sektoren die Objekte entlang des Strahls durch die Bildmitte und schreibt Name, Materialien und Shader.
-        /// </summary>
-        [ContextMenu("Pflanze in Bildmitte loggen")]
-        void LogCenter()
-        {
-            Camera cam = null;
-#if UNITY_EDITOR
-            var sv = UnityEditor.SceneView.lastActiveSceneView;
-            if (sv != null && sv.camera != null && UnityEditor.EditorWindow.focusedWindow == sv) cam = sv.camera;
-#endif
-            if (cam == null) cam = Camera.main;
-            if (cam == null) { Debug.Log("[TDU2] Pflanzen-Diagnose: keine Kamera"); return; }
-            var ray = cam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
-            var hits = new List<(float t, string text)>();
-            foreach (var vr in FindObjectsByType<VegetationRenderer>(FindObjectsSortMode.None)) vr.Pick(ray, hits);
-            hits.Sort((x, y) => x.t.CompareTo(y.t));
-            var sb = new System.Text.StringBuilder("[TDU2] Pflanzen in Bildmitte (" + (cam.name) + "):\n");
-            for (int i = 0; i < hits.Count && i < 6; i++) sb.Append(hits[i].text).Append('\n');
-            if (hits.Count == 0) sb.Append("(nichts getroffen)");
-            Debug.Log(sb.ToString());
-        }
-
-        void Pick(Ray ray, List<(float t, string text)> hits)
-        {
-            UpdateWorldMatrices();
-            foreach (var b in _batches)
-            {
-                if (b.Obj == null || b.Obj.Lods.Length == 0 || b.Obj.Lods[0].Mesh == null) continue;
-                var lb = b.Obj.Lods[0].Mesh.bounds;
-                for (int i = 0; i < b.WorldMatrix.Length; i++)
-                {
-                    var m = b.WorldMatrix[i];
-                    var c = m.MultiplyPoint3x4(lb.center);
-                    float sc = Mathf.Max(m.GetColumn(0).magnitude, Mathf.Max(m.GetColumn(1).magnitude, m.GetColumn(2).magnitude));
-                    float r = lb.extents.magnitude * sc * 0.8f;
-                    var oc = c - ray.origin;
-                    float t = Vector3.Dot(oc, ray.direction);
-                    if (t < 0f) continue;
-                    float d2 = (oc - ray.direction * t).sqrMagnitude;
-                    if (d2 > r * r) continue;
-                    var sb = new System.Text.StringBuilder();
-                    sb.Append($"  {t:0.0} m  {b.Obj.Name}  ({name})");
-                    for (int l = 0; l < b.Obj.Lods.Length; l++)
-                    {
-                        var lod = b.Obj.Lods[l];
-                        sb.Append($"\n     LOD{l} bis {lod.MaxDistance:0} m, Mesh {(lod.Mesh != null ? lod.Mesh.name : "-")}:");
-                        if (lod.Materials != null)
-                            foreach (var mat in lod.Materials)
-                                if (mat != null) sb.Append($" [{mat.name} | {(mat.shader != null ? mat.shader.name : "-")} | {(mat.mainTexture != null ? mat.mainTexture.name : "-")}]");
-                    }
-                    hits.Add((t, sb.ToString()));
-                }
-            }
-        }
-
         void UpdateWorldMatrices()
         {
             var rm = MapRoot != null ? MapRoot.localToWorldMatrix : Matrix4x4.identity;

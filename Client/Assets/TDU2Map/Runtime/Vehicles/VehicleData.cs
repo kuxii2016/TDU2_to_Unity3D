@@ -86,6 +86,77 @@ namespace TDU2.Map.Vehicles
         public float StabilityManagement;
         public bool IsBike;
 
+
+        public int CalculateDifficulty()
+        {
+            float score = 0f;
+
+            // 1. Leistung pro Tonne: viel Leistung macht das Auto anspruchsvoller.
+            float powerPerTon = PowerBhp / Math.Max(Mass / 1000f, 0.1f);
+
+            if (powerPerTon > 500f) score += 25f;
+            else if (powerPerTon > 400f) score += 20f;
+            else if (powerPerTon > 300f) score += 15f;
+            else if (powerPerTon > 200f) score += 10f;
+            else if (powerPerTon > 120f) score += 5f;
+
+            // 2. Antrieb: Die Werte müssen zu deinem TDU2-Enum passen.
+            // Beispielannahme: 1 = Front, 2 = Heck, 4 = Allrad.
+            switch (Drive)
+            {
+                case 1: // Frontantrieb
+                    score += 0f;
+                    break;
+
+                case 2: // Heckantrieb
+                    score += 10f;
+                    break;
+
+                case 4: // Allradantrieb
+                    score -= 5f;
+                    break;
+            }
+
+            // 3. Fahrhilfen
+            if (!Abs)
+                score += 7f;
+
+            if (!TractionControl)
+                score += 12f;
+
+            // 4. Reifenhaftung: Weniger Grip bedeutet schwierigere Kontrolle.
+            float averageGrip =
+                (MaxLatFrictionFront + MaxLatFrictionRear +
+                 MaxLongFrictionFront + MaxLongFrictionRear) / 4f;
+
+            if (averageGrip < 0.8f) score += 12f;
+            else if (averageGrip < 1.1f) score += 7f;
+            else if (averageGrip >= 1.8f) score -= 5f;
+
+            // 5. Radstand: kurze Fahrzeuge reagieren oft agiler.
+            if (Wheelbase < 2300f) score += 8f;
+            else if (Wheelbase < 2500f) score += 4f;
+            else if (Wheelbase > 3000f) score -= 3f;
+
+            // 6. Bremsverhalten: längerer Bremsweg erschwert die Kontrolle.
+            if (Braking100To0 > 150f) score += 8f;
+            else if (Braking100To0 > 130f) score += 4f;
+            else if (Braking100To0 < 95f) score -= 3f;
+
+            // 7. Nasshaftung
+            if (WetFrictionPercent < 50f) score += 8f;
+            else if (WetFrictionPercent < 70f) score += 4f;
+
+            // 8. Endgültige Einstufung von 1 bis 5.
+            if (score < 15f) return 1;
+            if (score < 30f) return 2;
+            if (score < 45f) return 3;
+            if (score < 60f) return 4;
+
+            return 5;
+        }
+
+
         public static CarPhysics From(XmbNode n)
         {
             float F(string k, float d = 0) => n.F(k, d);
@@ -203,7 +274,7 @@ namespace TDU2.Map.Vehicles
 
     public sealed class RimInfo
     {
-        public int Id;
+        public int Id, Price;
         public string Path, FileFront, FileRear, DisplayName;
         public float DiameterFront, DiameterRear, WidthFront, WidthRear, ProfileFront, ProfileRear;   // Zoll, mm, %
 
@@ -216,12 +287,13 @@ namespace TDU2.Map.Vehicles
     public sealed class CarColor
     {
         public string ColorId, ColorId2, Name, Callipers;
+        public int Price;
         public int[] Interiors = new int[15];
     }
 
     public sealed class InteriorInfo
     {
-        public int Id;
+        public int Id, Price;
         public string Name, Material;
         public string[] Colors = new string[3];
     }
@@ -261,6 +333,8 @@ namespace TDU2.Map.Vehicles
         public readonly Dictionary<int, List<CarColor>> Colors = new Dictionary<int, List<CarColor>>();
         public readonly Dictionary<int, InteriorInfo> Interiors = new Dictionary<int, InteriorInfo>();
         public readonly Dictionary<int, string> TirePhysics = new Dictionary<int, string>();
+        /// <summary>Wurzel von db_data.cpr (für weitere Tabellen, z.B. DBClothe der Avatare).</summary>
+        public XmbNode Root;
 
         public static string FindDatabase(string bnkDir)
         {
@@ -271,7 +345,7 @@ namespace TDU2.Map.Vehicles
         public static CarDatabase Load(string dbDataCpr)
         {
             var root = XmbFile.Parse(CprCrypto.Decrypt(File.ReadAllBytes(dbDataCpr)));
-            var db = new CarDatabase();
+            var db = new CarDatabase { Root = root };
 
             var phys = root.Get("DBCarPhysicsData");
             if (phys != null)
@@ -313,6 +387,7 @@ namespace TDU2.Map.Vehicles
                         FileFront = r.S("_rsc_file_name_front", ""),
                         FileRear = r.S("_rsc_file_name_rear", ""),
                         DisplayName = r.S("_displayname", ""),
+                        Price = r.I("_price"),
                         DiameterFront = r.F("_diameter_front", 18),
                         DiameterRear = r.F("_diameter_rear", 18),
                         WidthFront = r.F("_largeur_front", 225),
@@ -342,6 +417,7 @@ namespace TDU2.Map.Vehicles
                         ColorId2 = r.S("_color_id_2", ""),
                         Name = r.S("_color_name", ""),
                         Callipers = r.S("_callipers", ""),
+                        Price = r.I("_price"),
                     };
                     for (int i = 0; i < 15; i++) col.Interiors[i] = r.I("_interior_" + (i + 1), 1);
                     int car = r.I("_car");
@@ -353,7 +429,7 @@ namespace TDU2.Map.Vehicles
             if (ints != null)
                 foreach (var r in ints.Items)
                 {
-                    var ii = new InteriorInfo { Id = r.I("_hashcode"), Name = r.S("_interior_name", ""), Material = r.S("_material", "") };
+                    var ii = new InteriorInfo { Id = r.I("_hashcode"), Name = r.S("_interior_name", ""), Material = r.S("_material", ""), Price = r.I("_price") };
                     for (int i = 0; i < 3; i++) ii.Colors[i] = r.S("_interior_color_" + (i + 1), "");
                     db.Interiors[ii.Id] = ii;
                 }

@@ -90,7 +90,7 @@ namespace TDU2.Map.World
                 v[i] = c + new Vector3((i & 1) != 0 ? h.x : -h.x, (i & 2) != 0 ? h.y : -h.y, (i & 4) != 0 ? h.z : -h.z);
             m = new Mesh { name = "TDU2_ActorBox", hideFlags = HideFlags.DontSave };
             m.vertices = v;
-            m.triangles = new[] { 0,2,1, 1,2,3, 4,5,6, 5,7,6, 0,1,4, 1,5,4, 2,6,3, 3,6,7, 0,4,2, 2,4,6, 1,3,5, 3,7,5 };
+            m.triangles = new[] { 0, 2, 1, 1, 2, 3, 4, 5, 6, 5, 7, 6, 0, 1, 4, 1, 5, 4, 2, 6, 3, 3, 6, 7, 0, 4, 2, 2, 4, 6, 1, 3, 5, 3, 7, 5 };
             m.RecalculateBounds();
             _boxes[key] = m;
             return m;

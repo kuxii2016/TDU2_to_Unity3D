@@ -56,7 +56,7 @@ namespace TDU2.Map.Vehicles
         public bool AutoHold = true;
         public float AutoHoldSpeed = 0.6f;
         [Tooltip("Skalierung der Reibwerte aus der Datenbank (TDU2-Werte ~1.9-2.0 sind spielinterne Größen).")]
-        [Range(0.3f, 1.2f)] public float GripScale = 0.62f;
+        [Range(0.3f, 1.2f)] public float GripScale = 1.2f;//0.62f;
         public LayerMask GroundMask = ~(1 << 2);
         public Func<Vector3, (bool ok, float y)> GroundFallback;
 
@@ -236,7 +236,7 @@ namespace TDU2.Map.Vehicles
         // ------------------------------------------------------------------ Untergrund (Asphalt / Gras / Erde)
         [Header("Untergrund")]
         [Tooltip("Reibwert-Faktor auf Erde/Feldwegen bzw. Gras (Asphalt = 1)")]
-        [Range(0.3f, 1f)] public float DirtGrip = 0.72f, GrassGrip = 0.62f;
+        [Range(0.3f, 1f)] public float DirtGrip = 0.82f, GrassGrip = 0.72f;
         [Tooltip("Geländewagen (Allrad): Dämpfung OffRoad* statt NotOffRoad* aus Physics.cpr")]
         public bool OffRoadCar;
         /// <summary>Anteil der Räder mit Bodenkontakt je Untergrund (0 Asphalt, 1 Gras, 2 Erde) – für Sound/Effekte.</summary>

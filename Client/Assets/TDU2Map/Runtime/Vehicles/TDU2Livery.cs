@@ -88,9 +88,12 @@ namespace TDU2.Map.Vehicles
             if (b == null || b.Length < Head || b[0] != 1) return null;
             var l = new CarLivery
             {
-                HasPaint = (b[1] & 1) != 0, Bicolour = (b[1] & 2) != 0, ClearFactory = (b[1] & 4) != 0,
+                HasPaint = (b[1] & 1) != 0,
+                Bicolour = (b[1] & 2) != 0,
+                ClearFactory = (b[1] & 4) != 0,
                 Finish = b[2] <= 3 ? (PaintFinish)b[2] : PaintFinish.Original,
-                Paint = new Color32(b[3], b[4], b[5], 255), Paint2 = new Color32(b[6], b[7], b[8], 255),
+                Paint = new Color32(b[3], b[4], b[5], 255),
+                Paint2 = new Color32(b[6], b[7], b[8], 255),
             };
             int n = Math.Min((int)b[9], MaxStickers);
             for (int i = 0; i < n; i++)
@@ -99,10 +102,14 @@ namespace TDU2.Map.Vehicles
                 if (o + Per > b.Length) break;
                 l.Stickers.Add(new StickerPlacement
                 {
-                    Board = b[o], Index = b[o + 1],
-                    U = (b[o + 2] | (b[o + 3] << 8)) / 65535f, V = (b[o + 4] | (b[o + 5] << 8)) / 65535f,
-                    A = new Vector2(RI16(b, o + 6), RI16(b, o + 8)), B = new Vector2(RI16(b, o + 10), RI16(b, o + 12)),
-                    Tint = new Color32(b[o + 14], b[o + 15], b[o + 16], b[o + 17]), Flags = b[o + 18],
+                    Board = b[o],
+                    Index = b[o + 1],
+                    U = (b[o + 2] | (b[o + 3] << 8)) / 65535f,
+                    V = (b[o + 4] | (b[o + 5] << 8)) / 65535f,
+                    A = new Vector2(RI16(b, o + 6), RI16(b, o + 8)),
+                    B = new Vector2(RI16(b, o + 10), RI16(b, o + 12)),
+                    Tint = new Color32(b[o + 14], b[o + 15], b[o + 16], b[o + 17]),
+                    Flags = b[o + 18],
                 });
             }
             return l;
@@ -338,8 +345,12 @@ namespace TDU2.Map.Vehicles
                 {
                     var b = new Board
                     {
-                        Id = r.I("_hashcode"), BankFile = r.S("_bankfile", ""), Type = r.I("_type"), Mono = r.B("_monochrome"),
-                        Price = r.I("_price"), NameHc = r.U("_name_hc"),
+                        Id = r.I("_hashcode"),
+                        BankFile = r.S("_bankfile", ""),
+                        Type = r.I("_type"),
+                        Mono = r.B("_monochrome"),
+                        Price = r.I("_price"),
+                        NameHc = r.U("_name_hc"),
                     };
                     if (!r.B("_isvalid", true) || b.Id <= 0 || b.Id > 255 || string.IsNullOrEmpty(b.BankFile)) continue;
                     b.Path = CarDatabase.FindFile(dir, b.BankFile + ".bnk");
@@ -406,12 +417,12 @@ namespace TDU2.Map.Vehicles
                 try { lib = Material2DM.Parse(bank.Read(m)); } catch (Exception) { }
                 var mats = new SortedDictionary<int, ulong>();
                 if (lib != null)
-                foreach (var def in lib.Materials.Values)
-                {
-                    var n = def.Name ?? "";
-                    if (!n.StartsWith("MAT_", StringComparison.OrdinalIgnoreCase) || !int.TryParse(n.Substring(4), out int num)) continue;
-                    foreach (var l in def.Layers) if (l.TextureKey != 0 && byKey.ContainsKey(l.TextureKey)) { mats[num] = l.TextureKey; break; }
-                }
+                    foreach (var def in lib.Materials.Values)
+                    {
+                        var n = def.Name ?? "";
+                        if (!n.StartsWith("MAT_", StringComparison.OrdinalIgnoreCase) || !int.TryParse(n.Substring(4), out int num)) continue;
+                        foreach (var l in def.Layers) if (l.TextureKey != 0 && byKey.ContainsKey(l.TextureKey)) { mats[num] = l.TextureKey; break; }
+                    }
                 foreach (var kv in mats) result.Add(byKey[kv.Value]);
             }
             if (result.Count == 0)
@@ -477,9 +488,15 @@ namespace TDU2.Map.Vehicles
                 if (m == null) continue;
                 _orig.Add(new Orig
                 {
-                    M = m, Second = CarModel.IsPaint2(m), Color = m.HasProperty("_Color") ? m.GetColor("_Color") : Color.white,
-                    Metal = F(m, "_Metallic"), Gloss = F(m, "_Glossiness"), Coat = F(m, "_ClearCoat"), Flake = F(m, "_Flake"),
-                    UseSticker = F(m, "_UseSticker"), AlphaOnly = F(m, "_StickerAlphaOnly"),
+                    M = m,
+                    Second = CarModel.IsPaint2(m),
+                    Color = m.HasProperty("_Color") ? m.GetColor("_Color") : Color.white,
+                    Metal = F(m, "_Metallic"),
+                    Gloss = F(m, "_Glossiness"),
+                    Coat = F(m, "_ClearCoat"),
+                    Flake = F(m, "_Flake"),
+                    UseSticker = F(m, "_UseSticker"),
+                    AlphaOnly = F(m, "_StickerAlphaOnly"),
                     Sticker = m.HasProperty("_StickerTex") ? m.GetTexture("_StickerTex") : null,
                 });
                 if (_factory == null && F(m, "_UseSticker") > 0.5f && m.HasProperty("_StickerTex")) _factory = m.GetTexture("_StickerTex");

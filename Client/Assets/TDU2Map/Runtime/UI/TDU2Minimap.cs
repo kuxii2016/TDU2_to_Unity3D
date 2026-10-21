@@ -29,15 +29,15 @@ namespace TDU2.Map.Vehicles
         public TDU2MapStreamer Streamer;
         public bool ShowMinimap = true;
         [Tooltip("Durchmesser relativ zur Bildschirmhöhe")]
-        public float Size = 0.26f;
+        public float Size = 0.026f;
         public float Margin = 0.035f;
         [Tooltip("Sichtradius in Metern im Stand / bei hoher Geschwindigkeit")]
         public float RangeSlow = 170f, RangeFast = 420f;
         public Color Background = new Color(0.03f, 0.07f, 0.12f, 0.62f);
         // Farben wie GamePC.cpr [HudMap] (HIGHWAY 29 180 215, ROAD 0 255 255)
         public Color RoadMain = new Color32(29, 180, 215, 255);
-        public Color RoadTown = new Color32(0, 255, 255, 235);
-        public Color RoadDirt = new Color32(0, 255, 255, 200);
+        public Color RoadTown = new Color32(0, 233, 233, 255);
+        public Color RoadDirt = new Color32(181, 120, 2, 255);
         public Color Arrow = new Color(1f, 0.62f, 0.05f, 1f);
         public string Error { get; private set; }
         [Tooltip("Online-Blip der Minimap (/HUD/minimap/ic_status: connected/disconnected) – live änderbar")]
@@ -98,6 +98,9 @@ namespace TDU2.Map.Vehicles
         public void Bind(TDU2MapStreamer streamer, TDU2Vehicle vehicle)
         {
             Vehicle = vehicle; Streamer = streamer;
+            var gps = GetComponent<TDU2Gps>();
+            if (gps == null) gps = gameObject.AddComponent<TDU2Gps>();
+            gps.Minimap = this;
             LoadHud(streamer != null && streamer.Index != null ? streamer.Index.BnkDir : null);
             var bank = streamer != null && streamer.Index != null ? streamer.Index.IslandBank : null;
             if (bank == null || bank == _bank) return;
@@ -110,6 +113,14 @@ namespace TDU2.Map.Vehicles
                 try { _net = IaNetwork.LoadFromBank(bank); } catch (Exception) { _net = null; }
                 return segs;
             });
+        }
+
+        /// <summary>hud.bnk neu laden und wie beim Start einrichten (z.B. nach Experimenten im Flash-Debug: Labels/Bilder der Wurzel).</summary>
+        public void ReloadHud()
+        {
+            string dir = _bnkDir;
+            _hudBank = null;
+            LoadHud(dir);
         }
 
         void LoadHud(string bnkDir)
@@ -636,7 +647,18 @@ namespace TDU2.Map.Vehicles
                 _task = null;
             }
             bool show = ShowMinimap && Vehicle != null && Vehicle.isActiveAndEnabled;
-            if (_hud != null) _hud.Visible = show;
+            // Händler (im Ausstellungsauto): HUD-Film nur für Zubehörmenü/Restzeit sichtbar, Minimap und Einfahrt aus
+            bool overlay = HudOverlay && !show;
+            if (_hud != null)
+            {
+                _hud.Visible = show || overlay;
+                if (overlay != _overlayActive)
+                {
+                    _overlayActive = overlay;
+                    _hud.SetVisible("/HUD/minimap", !overlay);
+                    _hud.SetVisible("/HUD/enter", !overlay);
+                }
+            }
             if (_hud != null) UpdateOnlineDisplay();
             if (!show || _mesh == null || !EnsureMaterial()) return;
 
@@ -702,6 +724,7 @@ namespace TDU2.Map.Vehicles
             Graphics.DrawMesh(_mesh, Matrix4x4.Translate(new Vector3(shift.x, MapPlaneY, shift.z)), _roadMat, MapLayer, _mapCam, 0, null, false, false);
             EnsureRouteMesh();
             DrawRouteMesh();
+            DrawGpsRoute();
             _mapCam.Render();
         }
 
@@ -943,6 +966,14 @@ namespace TDU2.Map.Vehicles
         /// <summary>Zugriff auf den Original-HUD (hud.vmf) fǬr andere Komponenten, z.B. das Rennen-HUD.</summary>
         public VmfPlayer HudPlayer => _hud;
 
+        /// <summary>HUD-Film ohne Fahrzeug zeigen (nur Overlays wie das Zubehörmenü beim Händler; Minimap bleibt aus).</summary>
+        public static bool HudOverlay;
+        bool _overlayActive;
+        /// <summary>Straßennetz der Insel (ROAD_MAP/ROAD_DETAIL), null solange es lädt.</summary>
+        public IaNetwork Network => _net;
+        /// <summary>Sichtradius der Minimap (m).</summary>
+        public float ViewRange => _range;
+
         // ------------------------------------------------------------------ Rennstrecke auf der Minimap (RaceRoute)
 
         /// <summary>Rennstrecke anzeigen (Checkpoints der Prüfung); null = ausblenden.</summary>
@@ -981,6 +1012,16 @@ namespace TDU2.Map.Vehicles
             if (Streamer == null || Streamer.MapRoot == null) return;
             var m = Streamer.MapRoot.localToWorldMatrix * Matrix4x4.Translate(new Vector3(0f, MapPlaneY, 0f));
             Graphics.DrawMesh(_routeMesh, m, _roadMat, MapLayer, _mapCam, 0, null, false, false);
+        }
+
+        void DrawGpsRoute()
+        {
+            var gps = TDU2Gps.Instance;
+            if (gps == null || !gps.HasTarget || Streamer == null || Streamer.MapRoot == null) return;
+            var mesh = gps.RouteMesh(_range);
+            if (mesh == null || mesh.vertexCount == 0) return;
+            var m = Streamer.MapRoot.localToWorldMatrix * Matrix4x4.Translate(new Vector3(0f, MapPlaneY, 0f));
+            Graphics.DrawMesh(mesh, m, _roadMat, MapLayer, _mapCam, 0, null, false, false);
         }
 
         float Heading()

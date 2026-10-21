@@ -75,6 +75,7 @@ Shader "TDU2/Object"
         // Spiegelbild des Bodens (InteriorMirror), im Original gProjectiveMapSampler
         sampler2D _TDU2PlanarRefl;
         half _TDU2PlanarOn;
+        float _TDU2PlanarY;   // Höhe der Spiegelebene (Welt) – nur Flächen auf dieser Ebene spiegeln
 
         // Lambert mit "Wrap": die Farbatlanten der Gebäude enthalten bereits gebackenes Licht,
         // ein reines N·L macht sonnenabgewandte Fassaden zu dunkel.
@@ -150,13 +151,9 @@ Shader "TDU2/Object"
             o.Albedo = c.rgb * vc * sh * _Brightness;
             // Regen (TDU2Weather, rain_ground_wet): nasser Asphalt/Boden wird dunkler
             o.Albedo *= 1.0 - 0.35 * _TDU2Wet * _WetSurface;
-            if (_ReflMix > 0.001 && _TDU2PlanarOn > 0.5)
-            {
-                // TD_Furnitures: Oberfläche = lerp(Spiegelbild, Detail x baseColor x Detail2, baseColor.w), danach beleuchtet
-                float4 cp = mul(UNITY_MATRIX_VP, float4(IN.worldPos, 1.0));
-                float2 suv = (cp.xy * float2(1.0, _ProjectionParams.x) / cp.w) * 0.5 + 0.5;
-                o.Albedo = lerp(o.Albedo, tex2D(_TDU2PlanarRefl, suv).rgb, _ReflMix);
-            }
+            // Nur Flächen auf der Bodenebene: Wände/Theken mit _ReflMix würden sonst das Bodenspiegelbild über die
+            // Bildschirmposition zeigen ("wandert mit der Kamera")
+            // (Spiegelbild: am Ende als Eigenleuchten, siehe unten)
             // Interieur-Lightmaps: Licht ist eingebacken -> als Eigenleuchten statt Sonne/Ambient
             o.Emission = o.Albedo * _Unlit;
             o.Albedo *= (1.0 - _Unlit);
@@ -184,6 +181,18 @@ Shader "TDU2/Object"
                 // lit: im Original lerp(Ambient, Sonne, N.L x Echtzeitschatten) – drinnen fällt die Sonne weg -> fester Raumlicht-Anteil
                 o.Emission += o.Albedo * lerp(nl.rgb, _NightAmbient.rgb, _NightLmap.x) + nl.rgb * nl.a * _NightLmap.y;
                 o.Albedo *= _NightLmap.x * _NightLitScale;
+            }
+            if (_ReflMix > 0.001 && _TDU2PlanarOn > 0.5 && abs(IN.worldPos.y - _TDU2PlanarY) < 0.06)
+            {
+                // TD_Furnitures: Oberfläche = lerp(Spiegelbild, Detail x baseColor x Detail2, baseColor.w) mit Fresnel (biasCoef).
+                // Das Spiegelbild ist bereits fertig beleuchtet (Lightmaps der gespiegelten Szene) -> als Eigenleuchten, nicht
+                // noch einmal mit der Lightmap des Bodens multiplizieren (sonst ist es nachts fast schwarz)
+                float4 cp = mul(UNITY_MATRIX_VP, float4(IN.worldPos, 1.0));
+                float2 suv = (cp.xy * float2(1.0, _ProjectionParams.x) / cp.w) * 0.5 + 0.5;
+                half ndv = saturate(normalize(_WorldSpaceCameraPos - IN.worldPos).y);
+                half w = saturate(_ReflMix + (1.0 - _ReflMix) * pow(1.0 - ndv, 5.0)) * 0.85;
+                o.Albedo *= 1.0 - w;
+                o.Emission = o.Emission * (1.0 - w) + tex2D(_TDU2PlanarRefl, suv).rgb * w;
             }
             o.Alpha = c.a;
         }

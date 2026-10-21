@@ -17,6 +17,14 @@ namespace TDU2.Map.Flash
     ///   ui.SetBool("/:state_online", true)
     ///   ui.Frame(path) / ui.Label(path)          aktuelles Bild (1-basiert) / Label
     ///   ui.Exists(path), ui.LabelsOf(path)
+    /// Festhalten ("Pins", damit Zeitleiste/Skripte des Films eigene Werte nicht überschreiben):
+    ///   ui.PinText("/car_datas/datas_base:cur_power", "300 bhp")   Variable bleibt so (nach jedem Bild erneut gesetzt)
+    ///   ui.PinValue("/:IsCardLoaded", true)                        typisiert (Zahl/bool)
+    ///   ui.PinLabel("/car_datas/ca_name/group", "A2")              gotoAndStop(label), erneut wenn der Clip neu angelegt wird
+    ///   ui.PinFrame(path, 3)                                       dito mit Bildnummer (1-basiert)
+    ///   using (ui.PinScope()) { ui.SetVariable(...); ui.SetLabel(...); }   alles darin wird automatisch festgehalten
+    ///   ui.Unpin("/car_datas") / ui.UnpinAll()                      freigeben (Präfix von Variable bzw. Pfad)
+    /// Maus: ui.ConsumeClick() – den laufenden Klick verwerfen (eigene Klickbehandlung; der Film sieht das Loslassen nicht).
     /// Maus: HintClicked ("A"/"B"/"X"/"Y" – Klick auf die Tasten-Symbole a_/b_/x_/y_ der Menüs, ohne Abonnent = Input(...)),
     ///       TextFieldClicked (Variable des angeklickten Textfelds, z.B. "/:email").
     /// </summary>
@@ -50,12 +58,85 @@ namespace TDU2.Map.Flash
             foreach (var kv in _forcedVisible) { var d = Find(kv.Key); if (d != null) d.Visible = kv.Value; }
         }
 
+        // ------------------------------------------------------------------ Festhalten (Pins)
+        sealed class PinVar { public object Value; public bool Typed; }
+        sealed class PinPos { public string Label; public int Frame; public Instance Applied; }
+        readonly Dictionary<string, PinVar> _pinVars = new Dictionary<string, PinVar>(StringComparer.OrdinalIgnoreCase);
+        readonly Dictionary<string, PinPos> _pinPos = new Dictionary<string, PinPos>(StringComparer.OrdinalIgnoreCase);
+        int _pinScope;
+        bool _applyingPins;
+
+        /// <summary>Solange der Bereich offen ist, werden SetVariable/SetValue/SetLabel/SetFrame/GotoLabel(…, false) festgehalten.</summary>
+        public IDisposable PinScope() { _pinScope++; return new PinScopeEnd(this); }
+        sealed class PinScopeEnd : IDisposable
+        {
+            VmfPlayer _p; public PinScopeEnd(VmfPlayer p) { _p = p; }
+            public void Dispose() { if (_p != null) { _p._pinScope = Math.Max(0, _p._pinScope - 1); _p = null; } }
+        }
+        bool AutoPin => _pinScope > 0 && !_applyingPins;
+
+        public void PinText(string variable, string text) { _pinVars[variable] = new PinVar { Value = text ?? "", Typed = false }; _applyingPins = true; SetVariable(variable, text ?? ""); _applyingPins = false; }
+        public void PinValue(string variable, object value) { _pinVars[variable] = new PinVar { Value = value, Typed = true }; _applyingPins = true; SetValue(variable, value); _applyingPins = false; }
+        public bool PinLabel(string path, string label)
+        {
+            var pp = new PinPos { Label = label, Frame = -1 }; _pinPos[path] = pp;
+            _applyingPins = true; bool ok = GotoLabel(path, label, false); _applyingPins = false;
+            pp.Applied = InstanceOf(path); return ok;
+        }
+        public bool PinFrame(string path, int flashFrame)
+        {
+            var pp = new PinPos { Frame = flashFrame }; _pinPos[path] = pp;
+            _applyingPins = true; bool ok = SetFrame(path, flashFrame); _applyingPins = false;
+            pp.Applied = InstanceOf(path); return ok;
+        }
+
+        /// <summary>Festgehaltene Variablen/Pfade freigeben, die mit <paramref name="prefix"/> beginnen.</summary>
+        public void Unpin(string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix)) { UnpinAll(); return; }
+            foreach (var k in new List<string>(_pinVars.Keys)) if (k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) _pinVars.Remove(k);
+            foreach (var k in new List<string>(_pinPos.Keys)) if (k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) _pinPos.Remove(k);
+        }
+        public void UnpinAll() { _pinVars.Clear(); _pinPos.Clear(); }
+        public int PinCount => _pinVars.Count + _pinPos.Count;
+
+        /// <summary>Nach jedem Bild: festgehaltene Werte wiederherstellen (nur wenn der Film sie geändert hat).</summary>
+        void ApplyPins()
+        {
+            if (_pinVars.Count == 0 && _pinPos.Count == 0) return;
+            _applyingPins = true;
+            try
+            {
+                foreach (var kv in _pinVars)
+                {
+                    var pv = kv.Value;
+                    string want = pv.Value is bool b ? (b ? "true" : "false") : pv.Value is double dd ? dd.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                                : pv.Value is IFormattable f ? f.ToString(null, System.Globalization.CultureInfo.InvariantCulture) : pv.Value?.ToString() ?? "";
+                    if (string.Equals(GetVariable(kv.Key), want, StringComparison.Ordinal)) continue;
+                    if (pv.Typed) SetValue(kv.Key, pv.Value); else SetVariable(kv.Key, want);
+                }
+                foreach (var kv in _pinPos)
+                {
+                    var inst = InstanceOf(kv.Key);
+                    if (inst == null || ReferenceEquals(inst, kv.Value.Applied)) continue;   // nur neu angelegte Clips (Zeitleiste hat sie ersetzt)
+                    if (kv.Value.Label != null) GotoLabel(kv.Key, kv.Value.Label, false); else SetFrame(kv.Key, kv.Value.Frame);
+                    kv.Value.Applied = inst;
+                }
+            }
+            catch (Exception ex) { Debug.LogWarning("[TDU2] Flash-Pins: " + ex.Message); }
+            finally { _applyingPins = false; }
+        }
+
+        /// <summary>Laufenden Mausklick verwerfen: das Loslassen löst im Film nichts mehr aus (eigene Klickbehandlung).</summary>
+        public void ConsumeClick() { _mouseDown = false; _pressBtn = null; }
+
         // ------------------------------------------------------------------ Bilder / Labels
         Instance InstanceOf(string path) => string.IsNullOrEmpty(path) || path == "/" ? Root : Find(path)?.Sprite;
 
         /// <summary>gotoAndStop(Bild) mit Flash-Nummerierung (1 = erstes Bild).</summary>
         public bool SetFrame(string path, int flashFrame)
         {
+            if (AutoPin) return PinFrame(path, flashFrame);
             var inst = InstanceOf(path);
             if (inst == null) return false;
             inst.Playing = false;
@@ -73,7 +154,7 @@ namespace TDU2.Map.Flash
             return true;
         }
 
-        public bool SetLabel(string path, string label) => GotoLabel(path, label, false);
+        public bool SetLabel(string path, string label) => AutoPin ? PinLabel(path, label) : GotoLabel(path, label, false);
         public bool PlayLabel(string path, string label) => GotoLabel(path, label, true);
 
         /// <summary>Aktuelles Bild (1-basiert), 0 wenn der Clip fehlt.</summary>

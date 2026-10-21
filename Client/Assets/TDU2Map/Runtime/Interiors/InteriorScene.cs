@@ -172,14 +172,14 @@ namespace TDU2.Map.World
                 case 1: return "Hostess – Auto kaufen";
                 case 5: return "Garage";
                 case 6: return "Wohnbereich";
-                case 9: return "MyTULive / Tagebuch";
+                case 9: return "MyTULive";
                 case 10: return "Garderobe";
                 case 12:
                 case 14: return "Fahrzeugtafel – Auto wählen";
                 case 50: return "Bar";
                 case 51: return "Büro";
                 case 54: return "Club";
-                case 57: return "TV – TDU Media";
+                case 57: return "TDU Media";
             }
             return n;
         }

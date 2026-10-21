@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using TDU2.Map.IO;
 using UnityEngine;
 
@@ -170,7 +172,6 @@ namespace TDU2.Map.Formats
                 o += 44 + 12 * n;
             }
 
-            // Straßennamen
             o = offs[2];
             if (Tag(m, o, "EMAN") && offs[3] > o)
             {
@@ -203,6 +204,7 @@ namespace TDU2.Map.Formats
                         Points = new Vector3[pts],
                         Bank = new float[pts / 3 + 1],
                     };
+
                     int q = p + 20;
                     for (int j = 0; j < pts; j++)
                     {

@@ -43,6 +43,13 @@ namespace TDU2.Map.Vehicles
             Apply(true);
         }
 
+        /// <summary>Mitspieler-Auto: Stand kommt aus dem Netz (TDU2Multiplayer), keine eigene Berechnung.</summary>
+        public void SetExternal(float level, float scratches, bool wet)
+        {
+            Level = Mathf.Clamp01(level); Scratches = Mathf.Clamp01(scratches); Raining = wet;
+            Apply(false);
+        }
+
         /// <summary>Auto waschen (Stufe 0).</summary>
         [ContextMenu("Waschen")]
         public void Wash() { Level = 0f; Scratches = 0f; Apply(true); }

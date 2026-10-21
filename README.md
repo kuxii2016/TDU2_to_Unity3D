@@ -224,13 +224,13 @@ The ultimate goal is to bring as much of the original TDU2 experience as possibl
 </p>
 
 <p align="center">
-  <img src="./Screenshots/Unbenannt10.PNG" width="49%" alt="Screenshot 11">
-  <img src="./Screenshots/Unbenannt11.PNG" width="49%" alt="Screenshot 12">
+  <img src="./Screenshots/Unbenannt14.PNG" width="49%" alt="Screenshot 14">
+  <img src="./Screenshots/Unbenannt15.PNG" width="49%" alt="Screenshot 15">
 </p>
 
 <p align="center">
-  <img src="./Screenshots/Unbenannt12.PNG" width="49%" alt="Screenshot 13">
-  <img src="./Screenshots/Unbenannt13.PNG" width="49%" alt="Screenshot 14">
+  <img src="./Screenshots/Unbenannt16.PNG" width="49%" alt="Screenshot 16">
+  <img src="./Screenshots/Unbenannt17.PNG" width="49%" alt="Screenshot 17">
 </p>
 
 ## Disclaimer

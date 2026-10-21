@@ -126,17 +126,17 @@ namespace TDU2.Map.Vehicles
             switch (c)
             {
                 case "dbxo":
-                {
-                    // Bestätigung "Flug antreten?" (buy_ticket) / "Flughafen verlassen?" (quit) – wie die anderen Menüs mit "ja"
-                    string dc = _film.GetVariable("/:DgbxCase") ?? "";
-                    _film.SetVariable("/:PlayerAnswer", "a");
-                    _film.CallClip("/", "DialogBox");
-                    TDU2DebugLog.Event("Flughafen: Dialog '" + dc + "' mit ja beantwortet");
-                    // Rückfall: die Animationskette (BuyTicket -> CloseAirport -> close -> flok) kommt im Nachbau nicht immer an
-                    if (string.Equals(dc, "quit", StringComparison.OrdinalIgnoreCase)) _closeAt = Time.unscaledTime + 1.5f;
-                    else _flyAt = Time.unscaledTime + 1.5f;
-                    break;
-                }
+                    {
+                        // Bestätigung "Flug antreten?" (buy_ticket) / "Flughafen verlassen?" (quit) – wie die anderen Menüs mit "ja"
+                        string dc = _film.GetVariable("/:DgbxCase") ?? "";
+                        _film.SetVariable("/:PlayerAnswer", "a");
+                        _film.CallClip("/", "DialogBox");
+                        TDU2DebugLog.Event("Flughafen: Dialog '" + dc + "' mit ja beantwortet");
+                        // Rückfall: die Animationskette (BuyTicket -> CloseAirport -> close -> flok) kommt im Nachbau nicht immer an
+                        if (string.Equals(dc, "quit", StringComparison.OrdinalIgnoreCase)) _closeAt = Time.unscaledTime + 1.5f;
+                        else _flyAt = Time.unscaledTime + 1.5f;
+                        break;
+                    }
                 case "flok": Fly(); break;
                 case "wmon":
                 case "gofr": Close(); break;

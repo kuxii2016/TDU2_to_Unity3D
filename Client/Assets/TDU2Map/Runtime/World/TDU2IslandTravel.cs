@@ -12,7 +12,8 @@ namespace TDU2.Map.Vehicles
     ///  - Spielstand bekommt die Zielinsel (beim Flug ohne Position -> Ankunft am Flughafen der Zielinsel), wird gespeichert.
     ///  - Szene wird mit der Zielinsel neu geladen (<see cref="TDU2MapStreamer.IslandOverride"/>), die Sitzung (TDU2Session,
     ///    statisch) bleibt bestehen; TDU2Login setzt ohne Anmeldemenü direkt fort (<see cref="Pending"/>).
-    ///  - Während des Ladens ein Überblendbild ("Flug nach …").
+    ///  - Während des Ladens der Original-Ladebildschirm (TDU2LoadingScreen: Tipp-Bild aus tips_&lt;Sprache&gt;.bnk), bis die Welt
+    ///    an der Ankunftsstelle aufgebaut und das Auto geladen ist.
     /// </summary>
     public sealed class TDU2IslandTravel : MonoBehaviour
     {
@@ -67,6 +68,8 @@ namespace TDU2.Map.Vehicles
             DontDestroyOnLoad(go);
             _inst = go.AddComponent<TDU2IslandTravel>();
             _inst._text = flight ? "Flug nach " + DisplayName(Target) + " …" : "Lade " + DisplayName(Target) + " …";
+            // Ladebildschirm bis zur fertigen Welt auf der Zielinsel (gespeichert wird oben schon)
+            TDU2LoadingScreen.Show("Inselwechsel nach " + DisplayName(Target), () => !Pending && TDU2LoadingScreen.WorldReady(), 2f, false);
             _inst.StartCoroutine(_inst.Reload());
         }
 
@@ -104,6 +107,7 @@ namespace TDU2.Map.Vehicles
 
         void OnGUI()
         {
+            if (TDU2LoadingScreen.Visible) return;   // Original-Ladebildschirm deckt alles ab
             GUI.depth = -1000;
             float a = Mathf.Clamp01(_fade);
             GUI.color = new Color(0f, 0f, 0f, a);
@@ -112,7 +116,6 @@ namespace TDU2.Map.Vehicles
             _style.fontSize = Mathf.RoundToInt(Screen.height / 720f * 28f);
             _style.normal.textColor = new Color(1f, 0.85f, 0.6f, a);
             GUI.color = Color.white;
-            GUI.Label(new Rect(0, Screen.height * 0.45f, Screen.width, Screen.height * 0.1f), _text, _style);
         }
     }
 }
