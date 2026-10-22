@@ -112,6 +112,10 @@ namespace TDU2.Map.Vehicles
         readonly List<Light> _hiddenLights = new List<Light>();
         bool _objectsHidden; int _savedFps; bool _fpsSaved;
 
+        //TODO: Bigmap -> Maxmimale Zoom Stufe play ui.PlayLabel("/credits", "default"); <- read txt file
+        //Markers New Player player, recent (player mit !), friend, player_g (group),
+        //club unowned, my_club owned 
+        //forsale haus nicht im Besitz, home im besitz
         void Update()
         {
             if (Manager == null) Manager = GetComponent<TDU2VehicleManager>();
@@ -760,7 +764,7 @@ namespace TDU2.Map.Vehicles
                 case "fity":
                 case "stof":
                 case "ston":
-                case "mnok":   // Filterleiste: Animationsmeldungen, nichts zu tun
+                case "mnok":   // Filterleiste: Animationsmeldungen
                     break;
                 case "mysp:enbl":                         // Spot als Favorit
                 case "mysp:dsbl":
@@ -976,6 +980,13 @@ namespace TDU2.Map.Vehicles
         {
             _spots.Clear();
             var ch = Champs;
+            var spotss = Manager?.Streamer?.Spots;
+            foreach (var item in spotss.Spots)
+            {
+                Debug.Log("Spot-Debug: " + item.Code + " : " + item.Key);
+            }
+
+
             if (_contestCup >= 0 && ch != null)
             {
                 // Wettbewerbsmodus: nur die Rennen der Meisterschaft

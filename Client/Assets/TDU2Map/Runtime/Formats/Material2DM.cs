@@ -19,6 +19,9 @@ namespace TDU2.Map.Formats
         public byte[] Flags = new byte[16];
         /// <summary>Shader-Set des Originals (MAT.+0x310), z.B. TD_Road / TD_Ground / TD_Building.</summary>
         public ulong ShaderSet;
+        /// <summary>Diffusfarbe aus dem Farbblock (MAT.+0xC0 ambient/diffuse/specular/emissive). Interieur-Farb-
+        /// materialien (z. B. "370Z_Int_Noir_01") tragen ihre Grundfarbe nur hier, nicht als RAMPCLR1-Parameter.</summary>
+        public UnityEngine.Color Diffuse = UnityEngine.Color.white;
         public const ulong ShaderRoad = 0xc8ad93c95455291bUL, ShaderGround = 0xb0f1234b0f123473UL;
         public List<MaterialLayer> Layers = new List<MaterialLayer>();
         /// <summary>Shader-Parameter (Key = 8-Byte-Name, z.B. "RAMPCLR1" = Grundfarbe bei Autolack) -> float4.</summary>
@@ -100,6 +103,8 @@ namespace TDU2.Map.Formats
                 Name = Bin.CString(d, o + 0x20, 32),
             };
             System.Array.Copy(d, o + 0x40, def.Flags, 0, 16);
+            if (o + 0xD0 <= m.End)
+                def.Diffuse = new UnityEngine.Color(Bin.F32(d, o + 0xC0), Bin.F32(d, o + 0xC4), Bin.F32(d, o + 0xC8), Bin.F32(d, o + 0xCC));
             if (o + 0x318 <= m.End) def.ShaderSet = Bin.U64(d, o + 0x310);
             int n = Bin.U16(d, o + 0x10C);
             if (n > 16) n = 16;

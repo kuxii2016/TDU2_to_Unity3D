@@ -85,77 +85,12 @@ namespace TDU2.Map.Vehicles
         public int CameraId, DefaultRims, TiresPhysics;
         public float StabilityManagement;
         public bool IsBike;
-
-
-        public int CalculateDifficulty()
-        {
-            float score = 0f;
-
-            // 1. Leistung pro Tonne: viel Leistung macht das Auto anspruchsvoller.
-            float powerPerTon = PowerBhp / Math.Max(Mass / 1000f, 0.1f);
-
-            if (powerPerTon > 500f) score += 25f;
-            else if (powerPerTon > 400f) score += 20f;
-            else if (powerPerTon > 300f) score += 15f;
-            else if (powerPerTon > 200f) score += 10f;
-            else if (powerPerTon > 120f) score += 5f;
-
-            // 2. Antrieb: Die Werte müssen zu deinem TDU2-Enum passen.
-            // Beispielannahme: 1 = Front, 2 = Heck, 4 = Allrad.
-            switch (Drive)
-            {
-                case 1: // Frontantrieb
-                    score += 0f;
-                    break;
-
-                case 2: // Heckantrieb
-                    score += 10f;
-                    break;
-
-                case 4: // Allradantrieb
-                    score -= 5f;
-                    break;
-            }
-
-            // 3. Fahrhilfen
-            if (!Abs)
-                score += 7f;
-
-            if (!TractionControl)
-                score += 12f;
-
-            // 4. Reifenhaftung: Weniger Grip bedeutet schwierigere Kontrolle.
-            float averageGrip =
-                (MaxLatFrictionFront + MaxLatFrictionRear +
-                 MaxLongFrictionFront + MaxLongFrictionRear) / 4f;
-
-            if (averageGrip < 0.8f) score += 12f;
-            else if (averageGrip < 1.1f) score += 7f;
-            else if (averageGrip >= 1.8f) score -= 5f;
-
-            // 5. Radstand: kurze Fahrzeuge reagieren oft agiler.
-            if (Wheelbase < 2300f) score += 8f;
-            else if (Wheelbase < 2500f) score += 4f;
-            else if (Wheelbase > 3000f) score -= 3f;
-
-            // 6. Bremsverhalten: längerer Bremsweg erschwert die Kontrolle.
-            if (Braking100To0 > 150f) score += 8f;
-            else if (Braking100To0 > 130f) score += 4f;
-            else if (Braking100To0 < 95f) score -= 3f;
-
-            // 7. Nasshaftung
-            if (WetFrictionPercent < 50f) score += 8f;
-            else if (WetFrictionPercent < 70f) score += 4f;
-
-            // 8. Endgültige Einstufung von 1 bis 5.
-            if (score < 15f) return 1;
-            if (score < 30f) return 2;
-            if (score < 45f) return 3;
-            if (score < 60f) return 4;
-
-            return 5;
-        }
-
+        // Gelände: _isoffroad = Geländewagen, _offroad_real = echte Offroad-Physik; Reibwerte in % des Straßenwerts
+        public bool IsOffroad, OffroadReal;
+        public string TiresType, OffroadDirtTiresType, OffroadGrassTiresType;
+        public float BlueLine, BlueLineSport;                    // Hochschalt-Drehzahl (Tacho-Blauer Bereich)
+        public float OffroadDirtLatFrictionPercent, OffroadDirtLongFrictionPercent, OffroadDirtNormalFrictionPercent;   // % (0..100)
+        public float OffroadGrassLatFrictionPercent, OffroadGrassLongFrictionPercent, OffroadGrassNormalFrictionPercent; // % (0..100)
 
         public static CarPhysics From(XmbNode n)
         {
@@ -262,6 +197,19 @@ namespace TDU2.Map.Vehicles
                 DefaultRims = n.I("_default_rims"),
                 TiresPhysics = n.I("_tires_physics"),
                 StabilityManagement = F("_stability_management"),
+                IsOffroad = n.B("_isoffroad"),
+                OffroadReal = n.B("_offroad_real"),
+                TiresType = n.S("_tires_type", ""),
+                OffroadDirtTiresType = n.S("_offroad_dirt_tires_type", ""),
+                OffroadGrassTiresType = n.S("_offroad_grass_tires_type", ""),
+                BlueLine = F("_blue_line"),
+                BlueLineSport = F("_blue_line_sport"),
+                OffroadDirtLatFrictionPercent = F("_offroad_dirt_lateral_friction_percent", 100),
+                OffroadDirtLongFrictionPercent = F("_offroad_dirt_longitudinal_friction_percent", 100),
+                OffroadDirtNormalFrictionPercent = F("_offroad_dirt_normal_friction_percent", 100),
+                OffroadGrassLatFrictionPercent = F("_offroad_grass_lateral_friction_percent", 100),
+                OffroadGrassLongFrictionPercent = F("_offroad_grass_longitudinal_friction_percent", 100),
+                OffroadGrassNormalFrictionPercent = F("_offroad_grass_normal_friction_percent", 100),
             };
             for (int i = 0; i < 11; i++) c.GearRatios[i] = F("_gear_ratio" + (i + 1));
             c.IsBike = n.F("_max_lean_angle") > 0f;

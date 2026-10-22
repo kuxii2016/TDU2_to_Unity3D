@@ -261,9 +261,9 @@ namespace TDU2.Map.Vehicles
         static readonly ulong SemFlake = Bin.KeyFromString("FLAKE");
         static readonly ulong SemTexLight = Bin.KeyFromString("TEXLIGHT");
         /// <summary>lgt_g: Funktionsmaske der Lichtgläser – R = Bremse, G = Rückfahrlicht, B = Licht (Scheinwerfer/Rücklicht), A = 0 → Blinker.</summary>
-        static readonly ulong SemGlossLight = Bin.KeyFromString("GLOSSLIGHT");
+        static readonly ulong SemGlossLight = MaterialDef.KeyFromName("GLOSSLIGHT");
 
-        public static Material Create(MaterialDef def, Func<ulong, TextureWrapMode, TextureWrapMode, Texture2D> getTex, MaterialDef paint)
+        public static Material Create(MaterialDef def, Func<ulong, TextureWrapMode, TextureWrapMode, Texture2D> getTex, MaterialDef paint, MaterialDef tint = null, bool interior = false)
         {
             if (Opaque == null) Opaque = Shader.Find("TDU2/Car");
             if (Opaque == null) Opaque = Shader.Find("Standard");
@@ -272,6 +272,10 @@ namespace TDU2.Map.Vehicles
             if (def == null) return new Material(Opaque) { name = "Car_Default" };
 
             var src = paint ?? def;   // Lackfarbe aus <car>_color.2dm ersetzt das Material "Paint"
+            // Interieur: nur die Farbe übernehmen, die Textur des Original-Cockpitmaterials behalten (Sitz-/Türnähte,
+            // Perforierung „Dots“ usw. stammen aus der Cockpit-Textur, nicht aus dem Farbmaterial).
+            var colorSrc = tint ?? src;
+            if (tint != null) src = def;
             MaterialFactory.GetBlend(def, out float alphaRef, out bool twoSided);
             var f = def.Flags;
             bool additive = f[8] == 5 && f[9] == 2;
@@ -292,18 +296,24 @@ namespace TDU2.Map.Vehicles
             else if (src.TryGetLayer(MaterialDef.SemDetail, out layer) || src.TryGetLayer(MaterialDef.SemColor, out layer))
                 tex = getTex(layer.TextureKey, TextureDef.WrapFromEden(layer.AddressU), TextureDef.WrapFromEden(layer.AddressV));
 
+            // Grundfarbe: RAMPCLR1 (Rampenfarbe) > Diffusfarbe des Materials (MAT.+0xC0) > Textur/Weiß.
+            // Interieur-Materialien (z. B. "Plastic1_Int" 0,196 grau, "Black_Leather" 0,322, "A_C1_*" beige, "RedPlastic")
+            // tragen ihre Farbe NUR im Diffus-Block, nicht als RAMPCLR1 (der dort (0,0,0) ist). Außerhalb des Innenraums
+            // gilt weiterhin: kein RAMPCLR1 + keine Farbtextur = schwarz (Reifen/Felgen-Materialien).
             Color col = Color.white;
             // Reifenprofil (rim/tire/t_<Zoll>p_oh, Material T_SpCa_O): DETAIL ist lr_ambocc_* = gepackte Verschattung (R scharf,
             // G/B weicher) und keine Farbtextur – als RGB gezeigt gab das bunte Streifen. Grundton = Diffusfarbe des Materials (0,3).
             bool aoMask = tex != null && tex.name != null && tex.name.IndexOf("ambocc", StringComparison.OrdinalIgnoreCase) >= 0;
             if (aoMask) col = new Color(0.30f, 0.30f, 0.30f, 1f);
-            else if (src.TryGetParam("RAMPCLR1", out var rc) && (rc.x + rc.y + rc.z) > 0.001f) col = new Color(rc.x, rc.y, rc.z, 1f);
-            else if (tex == null && src.TryGetParam("RAMPCLR1", out var rc0)) col = new Color(rc0.x, rc0.y, rc0.z, 1f);
+            else if (colorSrc.TryGetParam("RAMPCLR1", out var rc) && (rc.x + rc.y + rc.z) > 0.001f) col = new Color(rc.x, rc.y, rc.z, 1f);
+            else if (interior && (colorSrc.Diffuse.r + colorSrc.Diffuse.g + colorSrc.Diffuse.b) > 0.001f)
+                col = new Color(colorSrc.Diffuse.r, colorSrc.Diffuse.g, colorSrc.Diffuse.b, 1f);
+            else if (tex == null && colorSrc.TryGetParam("RAMPCLR1", out var rc0)) col = new Color(rc0.x, rc0.y, rc0.z, 1f);
 
             float smooth = 0.35f, metal = 0f;
             if (src.TryGetParam("SPECPARM", out var sp) && sp.x > 0f) smooth = Mathf.Clamp01(Mathf.Log10(Mathf.Max(1f, sp.x)) / 3.1f);
             bool flake = src.TryGetLayer(SemFlake, out _);
-            bool isPaint = paint != null || CarModel.IsPaintName(name) || flake;
+            bool isPaint = (paint != null && tint == null) || CarModel.IsPaintName(name) || flake;
             if (isPaint) { smooth = 0.88f; metal = flake ? 0.35f : 0.1f; }
             if (name.Contains("chrome") || name.Contains("metal") || name.Contains("alu")) { metal = 0.9f; smooth = Mathf.Max(smooth, 0.8f); }
             if (name.Contains("mirror")) { metal = 1f; smooth = 0.97f; col = new Color(0.8f, 0.8f, 0.8f); }
@@ -357,7 +367,15 @@ namespace TDU2.Map.Vehicles
                 if (on != null && m.HasProperty("_LightMask") && def.TryGetLayer(SemGlossLight, out var gl) && gl.TextureKey != 0)
                 {
                     var mask = getTex(gl.TextureKey, TextureWrapMode.Clamp, TextureWrapMode.Clamp);
-                    if (mask != null) { m.SetTexture("_LightMask", mask); m.SetFloat("_UseMask", 1f); }
+                    if (mask != null)
+                    {
+                        // Funktionsmaske: scharf sampeln, sonst leuchten Nachbarregionen
+                        // (z. B. der Blinker) durch bilineare Filterung leicht mit.
+                        mask.filterMode = FilterMode.Point;
+                        mask.anisoLevel = 0;
+                        m.SetTexture("_LightMask", mask);
+                        m.SetFloat("_UseMask", 1f);
+                    }
                 }
             }
             if (m.HasProperty("_Cull")) m.SetFloat("_Cull", twoSided || alphaBlend ? 0f : 2f);
@@ -369,6 +387,31 @@ namespace TDU2.Map.Vehicles
                 else if (metal > 0.8f) m.SetFloat("_ClearCoat", 0.35f);
             }
             m.name = def.Name ?? "Car";
+            return m;
+        }
+
+        /// <summary>
+        /// Leuchtendes Lampenglas eines Verkehrsautos. Die Original-Materialien (FRL_*) sind unbespannte
+        /// Blend-/Glasflächen ohne Emissionsparameter; als sichtbares Glas dunkel, Beleuchtung rein über
+        /// "_Emission" (weiße Leuchttextur * _EmissionTint * _Emission, siehe TDU2/Car).
+        /// </summary>
+        public static Material CreateLamp(Color tint)
+        {
+            if (Opaque == null) Opaque = Shader.Find("TDU2/Car");
+            if (Opaque == null) Opaque = Shader.Find("Standard");
+            var m = new Material(Opaque) { name = "TrafficLamp" };
+            var dark = new Color(0.06f, 0.06f, 0.06f, 1f);
+            m.color = dark;
+            if (m.HasProperty("_Color")) m.SetColor("_Color", dark);
+            if (m.HasProperty("_Glossiness")) m.SetFloat("_Glossiness", 0.9f);
+            if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", 0f);
+            if (m.HasProperty("_EmissionTex")) m.SetTexture("_EmissionTex", Texture2D.whiteTexture);
+            if (m.HasProperty("_EmissionTint")) m.SetColor("_EmissionTint", tint);
+            if (m.HasProperty("_Emission")) m.SetFloat("_Emission", 0f);
+            if (m.HasProperty("_EmissionDiff")) m.SetFloat("_EmissionDiff", 0f);
+            if (m.HasProperty("_UseMask")) m.SetFloat("_UseMask", 0f);
+            if (m.HasProperty("_SelfIllum")) m.SetFloat("_SelfIllum", 0f);
+            if (m.HasProperty("_Cull")) m.SetFloat("_Cull", 0f);
             return m;
         }
     }
@@ -388,6 +431,22 @@ namespace TDU2.Map.Vehicles
         public Transform SteeringWheel;
         /// <summary>Lichtgläser (LGT_FL/FR/RL/RR/LGT) mit Leuchttextur (TEXLIGHT) – Helligkeit über "_Emission".</summary>
         public readonly List<Material> LightMaterials = new List<Material>();
+
+        /// <summary>Lichtfunktion einer Verkehrsauto-Leuchtfläche (aus dem Knotennamen FA_xx abgeleitet).</summary>
+        public enum LampKind { Head, Tail, Brake, Reverse, Indicator, Beacon }
+
+        /// <summary>Leuchtmaterial einer einzelnen Lampe (Verkehrsautos: eigener Material-Ableger je Knoten).</summary>
+        public struct TrafficLamp { public Material Mat; public LampKind Kind; public int Side; }
+
+        /// <summary>
+        /// Lampen der Verkehrsautos. Die Verkehrsmodelle haben keine TEXLIGHT-Maske, sondern je Funktion eigene
+        /// Leuchtquads (FRL_L/FRL_S/FRL_F/FRL_W/FRL_G + headlight) an den FA_-Knoten. Diese werden als einzelne
+        /// Materialinstanzen gesammelt, damit Blinker links/rechts getrennt leuchten können.
+        /// </summary>
+        public readonly List<TrafficLamp> TrafficLamps = new List<TrafficLamp>();
+
+        /// <summary>Wird beim Aufbau gesetzt: Karosserie eines Verkehrsautos (dann FA_-Lampenquads mitbauen).</summary>
+        bool _traffic;
         /// <summary>Lack-Materialien der Karosserie (Beklebung, Schmutz).</summary>
         public readonly List<Material> PaintMaterials = new List<Material>();
         /// <summary>Instrumente (HUD*-Materialien) – Beleuchtung per Script.</summary>
@@ -456,9 +515,73 @@ namespace TDU2.Map.Vehicles
         /// <summary>Lichtflare-Punkte (FA_L = Scheinwerfer, FA_B = Bremse, FA_R = Rückfahr, FA_S = Rücklicht, FA_W = Blinker): nur als Anker, ohne Mesh.</summary>
         static bool AnchorOnly(string n) => n.StartsWith("FA_", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Scheinwerfer-Projektionsfläche ("headlight", headlightcaustics.2db): ein ca. 9x11 m großes Quad vor dem Auto,
+        /// das im Original den Lichtkegel auf den Boden projiziert. Im Unity-Nachbau ist es sichtbare "Karosserie", die
+        /// unter dem Boden hängt – daher nie rendern.
+        /// </summary>
+        public static bool IsLightPlane(MaterialDef def)
+        {
+            if (def == null || def.Name == null) return false;
+            string n = def.Name.ToLowerInvariant();
+            return n == "headlight" || n.StartsWith("headlight") || n.Contains("caustics");
+        }
+
+        /// <summary>
+        /// Lichtfunktion + Seite aus dem FA_-Knotennamen der Verkehrsmodelle:
+        ///   FA_L_* = Scheinwerfer, FA_B_* = Bremse, FA_R_* = Rückfahrlicht, FA_S_* = Rücklicht/Bremse,
+        ///   FA_W_* = Blinker, FA_G_* = Polizei-Rundumlicht; ...HEADLI... = Scheinwerfer.
+        /// Seite: L (links) = 1, R (rechts) = 2, sonst 0.
+        /// </summary>
+        public static bool TryTrafficLamp(string name, out LampKind kind, out int side)
+        {
+            kind = LampKind.Head; side = 0;
+            if (string.IsNullOrEmpty(name)) return false;
+            string u = name.ToUpperInvariant();
+            if (u.StartsWith("FA_") && u.Length >= 4)
+            {
+                switch (u[3])
+                {
+                    case 'L': kind = LampKind.Head; break;
+                    case 'B': kind = LampKind.Brake; break;
+                    case 'R': kind = LampKind.Reverse; break;
+                    case 'S': kind = LampKind.Tail; break;
+                    case 'W': kind = LampKind.Indicator; break;
+                    case 'G': kind = LampKind.Beacon; break;
+                    default: return false;
+                }
+                side = GetSide(u);
+                return true;
+            }
+            if (u.Contains("HEADLI")) { kind = LampKind.Head; return true; }
+            return false;
+        }
+
+        static int GetSide(string u)
+        {
+            if (u.Contains("_FL") || u.Contains("_RL") || u.EndsWith("_L") || u.Contains("_L_")) return 1;
+            if (u.Contains("_FR") || u.Contains("_RR") || u.EndsWith("_R") || u.Contains("_R_")) return 2;
+            return 0;
+        }
+
+        /// <summary>Grundfarbe einer Verkehrsauto-Lampe (Emission-Farbe).</summary>
+        public static Color LampColor(LampKind kind)
+        {
+            switch (kind)
+            {
+                case LampKind.Head: return new Color(1f, 0.97f, 0.9f);
+                case LampKind.Tail: return new Color(1f, 0.06f, 0.03f);
+                case LampKind.Brake: return new Color(1f, 0.04f, 0.02f);
+                case LampKind.Reverse: return new Color(1f, 1f, 1f);
+                case LampKind.Indicator: return new Color(1f, 0.45f, 0.02f);
+                default: return new Color(0.2f, 0.4f, 1f);
+            }
+        }
+
         public static CarModel Build(CarAssets a, Transform parent)
         {
             var cm = new CarModel();
+            cm._traffic = a.Traffic;
             cm.Visual = new GameObject("Visual (" + a.Car.FileName + ")");
             cm.Visual.transform.SetParent(parent, false);
             cm.Visual.transform.localScale = new Vector3(-1f, 1f, 1f);   // Spiel ist rechtshändig (+X = links)
@@ -480,20 +603,30 @@ namespace TDU2.Map.Vehicles
                     if (!string.IsNullOrEmpty(a.Interior.Colors[i]) && a.ColorLib.Materials.TryGetValue(MaterialDef.KeyFromName(a.Interior.Colors[i]), out var d)) interiorRepl[i + 1] = d;
                 if (!string.IsNullOrEmpty(a.Interior.Material) && a.ColorLib.Materials.TryGetValue(MaterialDef.KeyFromName(a.Interior.Material), out var md)) interiorRepl[4] = md;
             }
-            MaterialDef Replace(MaterialDef def, bool interior)
-            {
-                if (def == null || def.Name == null) return null;
-                string n = def.Name.ToUpperInvariant();
-                if (n == "PAINT2") return paintDef2;
-                if (n == "PAINT_LR" || (n.StartsWith("PAINT_0") && n.Length <= 8)) return paintDef;   // LOD-/Zusatz-Lack wie Paint
-                if (!interior && n == "PAINT") return paintDef;
-                if (!interior) return null;
-                if (n == "PAINT") return paintDef;
-                for (int i = 1; i <= 3; i++)
-                    if ((n.StartsWith("A_C" + i) || n.StartsWith("C" + i + "_")) && interiorRepl.TryGetValue(i, out var r)) return r;
-                if (n.StartsWith("MAT") && interiorRepl.TryGetValue(4, out var mr)) return mr;
-                return null;
-            }
+        MaterialDef Replace(MaterialDef def, bool interior)
+        {
+            if (def == null || def.Name == null) return null;
+            string n = def.Name.ToUpperInvariant();
+            if (n == "PAINT2") return paintDef2;
+            if (n == "PAINT_LR" || (n.StartsWith("PAINT_0") && n.Length <= 8)) return paintDef;   // LOD-/Zusatz-Lack wie Paint
+            if (!interior && n == "PAINT") return paintDef;
+            if (!interior) return null;
+            if (n == "PAINT") return paintDef;
+            for (int i = 1; i <= 3; i++)
+                if ((n.StartsWith("A_C" + i) || n.StartsWith("C" + i + "_")) && interiorRepl.TryGetValue(i, out var r)) return r;
+            if (n.StartsWith("MAT") && interiorRepl.TryGetValue(4, out var mr)) return mr;
+            return null;
+        }
+        // Interieurfarbe: Farbmaterial, dessen Grundfarbe auf das Cockpitmaterial getönt wird (Textur bleibt erhalten).
+        MaterialDef InteriorTint(MaterialDef def)
+        {
+            if (def == null || def.Name == null) return null;
+            string n = def.Name.ToUpperInvariant();
+            for (int i = 1; i <= 3; i++)
+                if ((n.StartsWith("A_C" + i) || n.StartsWith("C" + i + "_")) && interiorRepl.TryGetValue(i, out var r)) return r;
+            if (n.StartsWith("MAT") && interiorRepl.TryGetValue(4, out var mr)) return mr;
+            return null;
+        }
 
             var matCache = new Dictionary<(object, ulong), Material>();
             if (a.Traffic) cm.BuildScene(a.Body, cm.Visual.transform, getTex, matCache, def => null, SkipTrafficNode);
@@ -504,7 +637,8 @@ namespace TDU2.Map.Vehicles
                 var cockRoot = new GameObject("Cockpit").transform;
                 cockRoot.SetParent(cm.Visual.transform, false);
                 cm.BuildScene(a.Cockpit, cockRoot, getTex, matCache, def => Replace(def, true),
-                    n => n.StartsWith("D_", StringComparison.OrdinalIgnoreCase) && !n.StartsWith("D_ND_", StringComparison.OrdinalIgnoreCase));
+                    n => n.StartsWith("D_", StringComparison.OrdinalIgnoreCase) && !n.StartsWith("D_ND_", StringComparison.OrdinalIgnoreCase),
+                    InteriorTint, true);
                 cm.CockpitRoot = cockRoot;
                 // Interieur liegt im Schatten der Karosserie: Grundhelligkeit wie im Spiel (vorberechnetes Licht in den Texturen)
                 var seen = new HashSet<Material>();
@@ -567,7 +701,7 @@ namespace TDU2.Map.Vehicles
         public Bounds RecomputeBodyBounds()
         {
             var parent = _parent != null ? _parent : Visual.transform.parent;
-            var body = Find("BODY_HR") ?? Visual.transform;
+            var body = Find("BODY_HR") ?? Find("BODY") ?? Visual.transform;
             bool any = false;
             Vector3 mn = Vector3.zero, mx = Vector3.zero;
             foreach (var r in body.GetComponentsInChildren<MeshRenderer>())
@@ -690,7 +824,8 @@ namespace TDU2.Map.Vehicles
         public Transform Find(string name) => Nodes.TryGetValue(name, out var t) ? t : null;
 
         void BuildScene(CarScene cs, Transform root, Func<ulong, TextureWrapMode, TextureWrapMode, Texture2D> getTex,
-            Dictionary<(object, ulong), Material> matCache, Func<MaterialDef, MaterialDef> replace, Func<string, bool> skip)
+            Dictionary<(object, ulong), Material> matCache, Func<MaterialDef, MaterialDef> replace, Func<string, bool> skip,
+            Func<MaterialDef, MaterialDef> tint = null, bool interior = false)
         {
             if (cs?.Scene == null) return;
             var scene = cs.Scene;
@@ -699,22 +834,55 @@ namespace TDU2.Map.Vehicles
             var hier = scene.Hierarchy;
             if (hier.Count == 0)
             {
-                foreach (var off in scene.InsOffsets) AddNode(cs, scene.GetIns(off), root, getTex, matCache, replace);
+                foreach (var off in scene.InsOffsets) AddNode(cs, scene.GetIns(off), root, getTex, matCache, replace, tint, true, interior);
                 return;
+            }
+            // Verkehrsautos: nur den Auto-Baum "D_CAR" aufbauen. Auf Szenenebene ("SCENE01") liegen außerdem
+            // die Scheinwerfer-Projektionsfläche ("headlight"), Schattenboxen und offene Türen/Anbauteile, die im
+            // Original nur Hilfsmittel/Projektionen sind – als gerenderte Geometrie hängen sie unter dem Auto.
+            int carRoot = 0;
+            if (_traffic)
+            {
+                foreach (var h in hier)
+                    if (NodeName(scene.GetIns(h.InsOffset).Key).Equals("D_CAR", StringComparison.OrdinalIgnoreCase)) { carRoot = h.Offset; break; }
+            }
+            if (carRoot != 0)
+            {
+                var byOff = new Dictionary<int, HieRecord>();
+                foreach (var h in hier) byOff[h.Offset] = h;
+                // Vorfahren von D_CAR (z. B. SCENE01) sind nur Container und dürfen nicht übersprungen werden,
+                // sonst wird der ganze D_CAR-Teilbaum mit entfernt.
+                var keep = new HashSet<int> { carRoot };
+                for (var a = byOff[carRoot]; a.ParentOffset != 0 && byOff.TryGetValue(a.ParentOffset, out var pa); a = pa)
+                { if (!keep.Add(a.ParentOffset)) break; }
+                foreach (var h in hier)
+                {
+                    if (keep.Contains(h.Offset)) continue;
+                    bool under = false; var cur = h; int guard = 0;
+                    while (cur.ParentOffset != 0 && guard++ < 64)
+                    {
+                        if (cur.ParentOffset == carRoot) { under = true; break; }
+                        if (!byOff.TryGetValue(cur.ParentOffset, out var p)) break;
+                        cur = p;
+                    }
+                    if (!under) skipped.Add(h.Offset);
+                }
             }
             foreach (var h in hier)
             {
                 if (h.ParentOffset != 0 && skipped.Contains(h.ParentOffset)) { skipped.Add(h.Offset); continue; }
+                if (skipped.Contains(h.Offset)) continue;
                 var ins = scene.GetIns(h.InsOffset);
                 string name = NodeName(ins.Key);
                 if (skip(name)) { skipped.Add(h.Offset); continue; }
                 var parent = h.ParentOffset != 0 && goByHie.TryGetValue(h.ParentOffset, out var pt) ? pt : root;
-                goByHie[h.Offset] = AddNode(cs, ins, parent, getTex, matCache, replace, !AnchorOnly(name) && !WheelPlaceholder(name));
+                bool lampMesh = _traffic && AnchorOnly(name);
+                goByHie[h.Offset] = AddNode(cs, ins, parent, getTex, matCache, replace, tint, lampMesh || (!AnchorOnly(name) && !WheelPlaceholder(name)), interior);
             }
         }
 
         Transform AddNode(CarScene cs, InsRecord ins, Transform parent, Func<ulong, TextureWrapMode, TextureWrapMode, Texture2D> getTex,
-            Dictionary<(object, ulong), Material> matCache, Func<MaterialDef, MaterialDef> replace, bool withMesh = true)
+            Dictionary<(object, ulong), Material> matCache, Func<MaterialDef, MaterialDef> replace, Func<MaterialDef, MaterialDef> tint = null, bool withMesh = true, bool interior = false)
         {
             string name = NodeName(ins.Key);
             var go = new GameObject(name);
@@ -723,6 +891,17 @@ namespace TDU2.Map.Vehicles
             if (!Nodes.ContainsKey(name)) Nodes[name] = go.transform;
             if (withMesh && ins.Lods.Length > 0 && cs.Meshes.TryGetValue(ins.Lods[0].ObjKey, out var md) && md != null)
             {
+                // Scheinwerfer-Projektionsfläche ("headlight"): nicht rendern (hängt sonst unter dem Auto).
+                if (md.SubMeshMaterialIndex.Count > 0 && cs.Materials != null)
+                {
+                    var bankKeys0 = cs.Scene.ReadMaterialBank(ins.MaterialBankOffset);
+                    int mi0 = md.SubMeshMaterialIndex[0];
+                    if (mi0 >= 0 && mi0 < bankKeys0.Length && cs.Materials.Materials.TryGetValue(bankKeys0[mi0], out var def0) && IsLightPlane(def0))
+                        return go.transform;
+                }
+                bool isLampNode = _traffic && AnchorOnly(name) && TryTrafficLamp(name, out _, out _);
+                int lampSide = 0; LampKind lampKind = LampKind.Head;
+                if (isLampNode) TryTrafficLamp(name, out lampKind, out lampSide);
                 var bankKeys = cs.Scene.ReadMaterialBank(ins.MaterialBankOffset);
                 var mats = new Material[md.SubMeshes.Count];
                 for (int i = 0; i < mats.Length; i++)
@@ -732,9 +911,26 @@ namespace TDU2.Map.Vehicles
                     MaterialDef def = null;
                     if (mk != 0 && cs.Materials != null) cs.Materials.Materials.TryGetValue(mk, out def);
                     var key = ((object)cs, mk);
-                    if (!matCache.TryGetValue(key, out var mat))
+                    Material mat;
+                    if (isLampNode)
                     {
-                        mat = CarMaterials.Create(def, getTex, replace(def));
+                        // Eigenständige Materialinstanz je Lampe, damit Blinker links/rechts getrennt leuchten.
+                        // Die FRL_-Materialien des Originals sind unbespannte Blend-/Glasflächen ohne _EmissionTex –
+                        // daher ein eigenes, unbeleuchtetes Emissionsmaterial auf Basis des Auto-Shaders bauen.
+                        mat = CarMaterials.CreateLamp(LampColor(lampKind));
+                        Owned.Add(mat);
+                        if (mat != null && mat.HasProperty("_EmissionTex"))
+                        {
+                            mat.SetTexture("_EmissionTex", Texture2D.whiteTexture);
+                            mat.SetFloat("_EmissionDiff", 0f);
+                            mat.SetFloat("_Emission", 0f);
+                            if (mat.HasProperty("_EmissionTint")) mat.SetColor("_EmissionTint", LampColor(lampKind));
+                            TrafficLamps.Add(new TrafficLamp { Mat = mat, Kind = lampKind, Side = lampSide });
+                        }
+                    }
+                    else if (!matCache.TryGetValue(key, out mat))
+                    {
+                        mat = CarMaterials.Create(def, getTex, replace(def), tint != null ? tint(def) : null, interior);
                         matCache[key] = mat;
                         Owned.Add(mat);
                         if (mat != null && mat.HasProperty("_EmissionTex") && mat.GetTexture("_EmissionTex") != null) LightMaterials.Add(mat);

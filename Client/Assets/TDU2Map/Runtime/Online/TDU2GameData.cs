@@ -430,7 +430,8 @@ namespace TDU2.Map.Online
             switch ((listName ?? "").ToLowerInvariant())
             {
                 case "current_players": return new List<PlayerInfo>(Players.Values);
-                case "friends": //return new List<PlayerInfo>(Friends);
+                case "friends": return new List<PlayerInfo>(Friends);
+                case "black_list": return new List<PlayerInfo>(Friends);
                 case "recent_players":
                     {
                         EnsureRecentLoaded();

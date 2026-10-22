@@ -38,7 +38,7 @@ Shader "TDU2/Terrain"
             col *= lerp(1.0, det, _DetailStrength);
             col *= lerp(1.0, splat.r, _ShadowStrength * _UseSplat);
             // Regen: nasser Boden dunkler; Nacht: Straßenlicht aus der Splatmap (G) wie im Original (outside_street_lightmap)
-            col *= 1.0 - 0.3 * _TDU2Wet;
+            col *= 1.0 - 0.45 * _TDU2Wet;
             o.Albedo = col;
             o.Emission = col * splat.g * _UseSplat * _TDU2StreetLight * half3(0.97, 0.84, 0.65);
             o.Alpha = 1;

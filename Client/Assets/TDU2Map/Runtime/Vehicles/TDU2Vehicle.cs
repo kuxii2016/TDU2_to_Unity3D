@@ -79,7 +79,7 @@ namespace TDU2.Map.Vehicles
         public bool AnyWheelGrounded { get; private set; }
 
         Rigidbody _rb;
-        float _idleW, _redW, _maxW, _engineW, _shiftTimer, _pendingGear, _limiterTimer, _airTime, _reverseTimer, _tcCut;
+        float _idleW, _redW, _maxW, _engineW, _shiftTimer, _pendingGear, _limiterTimer, _airTime, _reverseTimer, _tcCut, _shiftCooldown;
         float _engineInertia, _brakeTorqueFront, _brakeTorqueRear, _handBrakeTorque;
         float _frontDriveShare;
         float _steerCurrent;
@@ -239,6 +239,24 @@ namespace TDU2.Map.Vehicles
         [Range(0.3f, 1f)] public float DirtGrip = 0.82f, GrassGrip = 0.72f;
         [Tooltip("Geländewagen (Allrad): Dämpfung OffRoad* statt NotOffRoad* aus Physics.cpr")]
         public bool OffRoadCar;
+        /// <summary>Reibwert-Faktor je Untergrund (0..1). Geländewagen nutzen die DB-Felder _offroad_*_friction_percent.</summary>
+        void SurfaceGrip(int surface, out float lat, out float lon)
+        {
+            lat = 1f; lon = 1f;
+            if (surface == 0 || Car == null) return;
+            bool offroad = OffRoadCar || Car.IsOffroad || Car.OffroadReal;
+            if (surface == 2)   // Erde
+            {
+                lat = offroad ? PctFrac(Car.OffroadDirtLatFrictionPercent, DirtGrip) : DirtGrip;
+                lon = offroad ? PctFrac(Car.OffroadDirtLongFrictionPercent, DirtGrip) : DirtGrip;
+            }
+            else                // Gras
+            {
+                lat = offroad ? PctFrac(Car.OffroadGrassLatFrictionPercent, GrassGrip) : GrassGrip;
+                lon = offroad ? PctFrac(Car.OffroadGrassLongFrictionPercent, GrassGrip) : GrassGrip;
+            }
+        }
+        static float PctFrac(float percent, float fallback) => percent > 1.5f ? Mathf.Clamp01(percent / 100f) : percent > 0f ? percent : fallback;
         /// <summary>Anteil der Räder mit Bodenkontakt je Untergrund (0 Asphalt, 1 Gras, 2 Erde) – für Sound/Effekte.</summary>
         public readonly float[] SurfaceShare = { 1f, 0f, 0f };
 
@@ -292,7 +310,7 @@ namespace TDU2.Map.Vehicles
             if (n == 0) return;
             SurfaceShare[0] = g0 / n; SurfaceShare[1] = g1 / n; SurfaceShare[2] = g2 / n;
             if (Config == null || (g1 + g2) <= 0f) return;
-            string pre = OffRoadCar ? "OffRoad" : "NotOffRoad";
+            string pre = (OffRoadCar || (Car != null && (Car.IsOffroad || Car.OffroadReal))) ? "OffRoad" : "NotOffRoad";
             float dDirt = Config.GetCurve(pre + "DirtLinearDamping", 0.1f).Evaluate(SpeedKmh);
             float dGrass = Config.GetCurve(pre + "GrassLinearDamping", 0.15f).Evaluate(SpeedKmh);
             float d = dDirt * SurfaceShare[2] + dGrass * SurfaceShare[1];
@@ -416,6 +434,9 @@ namespace TDU2.Map.Vehicles
             if (_limiterTimer > 0f) { _limiterTimer -= h; throttle = 0f; }
             float ratio = CurrentRatio();
             bool inGear = Gear != 0 && !Shifting;
+            // Während des Schaltvorgangs kein Gas: Kraftschluss ist offen (Gear = 0), Drehzahl fällt ab.
+            // Erst beim Einkuppeln wird wieder Moment aufgenommen – kein "Gas durchschalten".
+            if (Shifting) throttle = 0f;
 
             float wheelW = 0f; int nDriven = 0;
             foreach (var w in Wheels) if (w.Driven) { wheelW += w.Omega; nDriven++; }
@@ -550,16 +571,19 @@ namespace TDU2.Map.Vehicles
             float fz = w.Fz;
             float fz0 = Mathf.Max(1f, w.StaticLoad);
             float loadSens = Mathf.Clamp(1f - 0.08f * (fz / fz0 - 1f), 0.7f, 1.1f);
-            float sg = w.Surface == 2 ? DirtGrip : w.Surface == 1 ? GrassGrip : 1f;
+            // Untergrund-Reibwert: Asphalt = 1. Geländewagen behalten auf Erde/Gras laut DB-Feld
+            // _offroad_(dirt|grass)_(lat|long)_friction_percent ihren Grip (80..100 %), normale Autos verlieren mehr.
+            SurfaceGrip(w.Surface, out float sgLat, out float sgLong);
             // Regen (TDU2Weather.GroundWet 0..1): Reibwert -> WetFrictionPercent der Fahrzeugdatenbank (z.B. 80 %)
             float wet = TDU2.Map.World.TDU2Weather.GroundWet;
             if (wet > 0f && Car != null)
             {
                 float wf = Car.WetFrictionPercent > 1.5f ? Car.WetFrictionPercent / 100f : Car.WetFrictionPercent > 0f ? Car.WetFrictionPercent : 0.8f;
-                sg *= Mathf.Lerp(1f, Mathf.Clamp(wf, 0.4f, 1f), wet);
+                float rw = Mathf.Lerp(1f, Mathf.Clamp(wf, 0.4f, 1f), wet);
+                sgLat *= rw; sgLong *= rw;
             }
-            float muX = w.MuLong * GripScale * loadSens * sg;
-            float muY = w.MuLat * GripScale * loadSens * sg;
+            float muX = w.MuLong * GripScale * loadSens * sgLong;
+            float muY = w.MuLat * GripScale * loadSens * sgLat;
 
             float denom = Mathf.Max(Mathf.Abs(vx), 4f);
             float alpha = Mathf.Atan2(vy, denom);
@@ -696,16 +720,33 @@ namespace TDU2.Map.Vehicles
             else _reverseTimer = 0f;
 
             if (!AutomaticGearbox || Gear <= 0) return;
-            float upRpm = Mathf.Lerp(Mathf.Max(c.TorqueRpm, c.RpmMin * 2.5f), Mathf.Min(c.RedLine, c.PowerRpm * 1.06f) * 0.97f, Mathf.Clamp01(AccelPedal));
+            if (_shiftCooldown > 0f) _shiftCooldown -= dt;
+            float throttle = Mathf.Clamp01(AccelPedal);
+            // Hochschalt-Drehzahl: bevorzugt Tacho-Blauwert aus der DB (_blue_line / _blue_line_sport),
+            // sonst Nennleistungsdrehzahl; bei wenig Gas früher schalten.
+            float blue = c.BlueLine > 0f ? Mathf.Lerp(c.BlueLine * 0.55f, c.BlueLine, throttle) : 0f;
+            if (blue < c.TorqueRpm) blue = Mathf.Lerp(Mathf.Max(c.TorqueRpm, c.RpmMin * 2.5f), Mathf.Min(c.RedLine, c.PowerRpm * 1.06f) * 0.97f, throttle);
+            float upRpm = Mathf.Min(blue, c.RedLine * 0.99f);
             bool drivenSlip = false;
             foreach (var w in Wheels) if (w.Driven && Mathf.Abs(w.SlipRatio) > 0.3f) drivenSlip = true;
-            if (Gear < _nbGears && rpm > upRpm && !drivenSlip && ForwardSpeed > 1f) { Shift(Gear + 1, c.ShiftTimeUp); return; }
-            if (Gear > 1)
+            if (Gear < _nbGears && rpm > upRpm && !drivenSlip && ForwardSpeed > 1f)
+            {
+                Shift(Gear + 1, c.ShiftTimeUp);
+                _shiftCooldown = Mathf.Max(0.4f, c.ShiftTimeUp + 0.25f);
+                return;
+            }
+            if (Gear > 1 && _shiftCooldown <= 0f)
             {
                 float lowerRatio = _gearRatios[Gear - 2] * c.FinalDrive;
                 float rpmLower = rpm * lowerRatio / Mathf.Max(0.01f, CurrentRatio());
-                float downRpm = Mathf.Lerp(c.RpmMin * 1.4f, c.TorqueRpm * 0.85f, Mathf.Clamp01(AccelPedal));
-                if (rpm < downRpm && rpmLower < c.RedLine * 0.88f) Shift(Gear - 1, c.ShiftTimeDown);
+                // Runterschalten erst, wenn der Motor wirklich abwürgt (deutlich unter der Hochschaltschwelle,
+                // Hysterese ~45 %) – verhindert das Hoch/Runter-Pendeln kurz nach dem Hochschalten.
+                float downRpm = Mathf.Max(c.RpmMin * 1.2f, upRpm * 0.45f);
+                if (rpm < downRpm && rpmLower < c.RedLine * 0.88f)
+                {
+                    Shift(Gear - 1, c.ShiftTimeDown);
+                    _shiftCooldown = Mathf.Max(0.4f, c.ShiftTimeDown + 0.25f);
+                }
             }
         }
 
@@ -736,7 +777,7 @@ namespace TDU2.Map.Vehicles
             _rb.position = position; _rb.rotation = rotation;
             transform.SetPositionAndRotation(position, rotation);
             foreach (var w in Wheels) { w.Omega = 0f; w.Compression = 0f; w.PrevCompression = 0f; }
-            Gear = 1; _shiftTimer = 0f; _engineW = _idleW;
+            Gear = 1; _shiftTimer = 0f; _engineW = _idleW; _shiftCooldown = 0f;
         }
 
         public void SetVelocity(Vector3 v)

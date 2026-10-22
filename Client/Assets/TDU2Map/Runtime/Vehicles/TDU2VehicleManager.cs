@@ -426,6 +426,7 @@ namespace TDU2.Map.Vehicles
             var veh = go.AddComponent<TDU2Vehicle>();
             veh.Car = car; veh.Config = Physics; veh.TorqueMax = a.TorqueMax; veh.TorqueMin = a.TorqueMin;
             veh.GripScale = GripScale; veh.Aids = Aids; veh.AutomaticGearbox = AutomaticGearbox;
+            veh.OffRoadCar = car.IsOffroad || car.OffroadReal;
             veh.GroundFallback = p => Streamer != null && Streamer.TryGetGroundHeight(p, out var gy) ? (true, gy) : (false, 0f);
 
             var wheels = new List<TDU2Vehicle.Wheel>();

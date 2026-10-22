@@ -44,6 +44,8 @@ namespace TDU2.Map.Vehicles
         public bool OnlineStatus = false;
         [Tooltip("Spielerzahl der Minimap (/:nb_FRplayers in /HUD/minimap/nb_players/in_out) – live änderbar")]
         public int PlayerCount = 1;
+        [Tooltip("Aktuelle Straße unter der Minimap anzeigen (nur Inseln mit Straßennamen, z.B. Hawaii)")]
+        public bool ShowStreetName = true;
         bool? _appliedOnline; int _appliedPlayers = -1; string _lastOnlineVar, _lastPlayersVar;
 
         public static string ExtraEnterCode;
@@ -57,13 +59,96 @@ namespace TDU2.Map.Vehicles
 
         sealed class Segment { public int Type; public Vector3[] Pts; }
 
+        /// <summary>Straßennamen aus ROAD_DETAIL/ROAD_MAP: dicht abgetastete Punkte mit Name und Suchradius.</summary>
+        sealed class RoadNameIndex
+        {
+            const float Cell = 32f;
+            struct Sample { public Vector2 P; public float R2; public string Name; }
+            readonly List<Sample> _samples = new List<Sample>();
+            readonly Dictionary<long, List<int>> _grid = new Dictionary<long, List<int>>();
+            public int NameCount { get; private set; }
+            public int SampleCount => _samples.Count;
+
+            public static RoadNameIndex Build(IaNetwork net)
+            {
+                var idx = new RoadNameIndex();
+                if (net == null) return idx;
+                var names = new HashSet<string>();
+                foreach (var road in net.Roads.Values)
+                {
+                    foreach (var piece in road.Pieces)
+                    {
+                        string name = net.StreetName(piece.NameOffset);
+                        if (string.IsNullOrEmpty(name)) continue;
+                        name = name.Trim();
+                        if (name.Length == 0) continue;
+                        names.Add(name);
+                        float half = 5f;
+                        if (net.Profiles.TryGetValue(piece.ProfileId, out var prof) && prof.TotalWidth > 0f) half = prof.TotalWidth * 0.5f;
+                        float radius = Mathf.Max(8f, half + 5f);
+                        var pts = piece.Points;
+                        if (pts == null || pts.Length < 4) continue;
+                        for (int k = 0; k + 3 < pts.Length; k += 3)
+                            idx.AddCurve(pts[k], pts[k + 1], pts[k + 2], pts[k + 3], name, radius);
+                    }
+                }
+                idx.NameCount = names.Count;
+                return idx;
+            }
+
+            void AddCurve(Vector3 a, Vector3 b, Vector3 c, Vector3 d, string name, float radius)
+            {
+                Vector2 pa = new Vector2(a.x, a.z), pb = new Vector2(b.x, b.z), pc = new Vector2(c.x, c.z), pd = new Vector2(d.x, d.z);
+                float len = (pb - pa).magnitude + (pc - pb).magnitude + (pd - pc).magnitude;
+                int steps = Mathf.Clamp(Mathf.CeilToInt(len / 10f), 2, 12);
+                float r2 = radius * radius;
+                AddSample(pa, name, r2);
+                for (int s = 1; s <= steps; s++)
+                {
+                    float t = s / (float)steps, u = 1f - t;
+                    Vector2 p = u * u * u * pa + 3f * u * u * t * pb + 3f * u * t * t * pc + t * t * t * pd;
+                    AddSample(p, name, r2);
+                }
+            }
+
+            void AddSample(Vector2 p, string name, float r2)
+            {
+                int i = _samples.Count;
+                _samples.Add(new Sample { P = p, R2 = r2, Name = name });
+                long key = Key(Mathf.FloorToInt(p.x / Cell), Mathf.FloorToInt(p.y / Cell));
+                if (!_grid.TryGetValue(key, out var l)) _grid[key] = l = new List<int>();
+                l.Add(i);
+            }
+
+            static long Key(int gx, int gz) => ((long)gx << 32) ^ (uint)gz;
+
+            /// <summary>Nächster benannter Straßenpunkt innerhalb seines Suchradius; null = keine Straße/kein Name.</summary>
+            public string Nearest(Vector2 p)
+            {
+                string name = null;
+                float best = float.MaxValue;
+                int gx = Mathf.FloorToInt(p.x / Cell), gz = Mathf.FloorToInt(p.y / Cell);
+                for (int dx = -1; dx <= 1; dx++)
+                    for (int dz = -1; dz <= 1; dz++)
+                        if (_grid.TryGetValue(Key(gx + dx, gz + dz), out var l))
+                            foreach (int i in l)
+                            {
+                                var s = _samples[i];
+                                float d = (s.P - p).sqrMagnitude;
+                                if (d <= s.R2 && d < best) { best = d; name = s.Name; }
+                            }
+                return name;
+            }
+        }
+
         Task<List<Segment>> _task;
         Mesh _mesh;
         RenderTexture _rt;
         Material _mat;
         string _bank;
         float _range;
-        GUIStyle _label;
+        GUIStyle _label, _streetStyle;
+        string _streetName;
         VmfPlayer _hud;
         string _hudBank;
         Camera _mapCam;
@@ -105,12 +190,23 @@ namespace TDU2.Map.Vehicles
             var bank = streamer != null && streamer.Index != null ? streamer.Index.IslandBank : null;
             if (bank == null || bank == _bank) return;
             _bank = bank; Error = null;
+            _nameIndex = null; _streetName = null;
             if (_mesh != null) { Destroy(_mesh); _mesh = null; }
             _task = Task.Run(() =>
             {
                 var segs = Load(bank);
                 // Topologie (ROAD_MAP): Straßen enden an Knoten mit Position -> Kreuzungen/Kreisel exakt verbinden
-                try { _net = IaNetwork.LoadFromBank(bank); } catch (Exception) { _net = null; }
+                try
+                {
+                    var net = IaNetwork.LoadFromBank(bank);
+                    _nameIndex = RoadNameIndex.Build(net);
+                    _net = net;
+                }
+                catch (Exception)
+                {
+                    _nameIndex = null;
+                    _net = null;
+                }
                 return segs;
             });
         }
@@ -172,6 +268,7 @@ namespace TDU2.Map.Vehicles
         }
 
         volatile IaNetwork _net;
+        volatile RoadNameIndex _nameIndex;
 
         static List<Segment> Load(string bankPath)
         {
@@ -349,8 +446,9 @@ namespace TDU2.Map.Vehicles
                     }
                 }
             }
-            if (_net != null && _net.Nodes.Count > 0) AddNodeJunctions(root, ends, samples, verts, cols, idx);
-            else AddJunctions(ends, samples, verts, cols, idx);
+            bool[] handled = null;
+            if (_net != null && _net.Nodes.Count > 0) handled = AddNodeJunctions(root, ends, samples, verts, cols, idx);
+            AddJunctions(ends, samples, verts, cols, idx, handled);
             // Kartenebene in die Welt-XZ-Ebene (Minimap: weit unterhalb der Insel, nur die Minimap-Kamera sieht sie)
             for (int i = 0; i < verts.Count; i++) { var q = verts[i]; verts[i] = new Vector3(q.x, height != null ? height(q.x, q.y) : 0f, q.y); }
             var mesh = new Mesh { name = height != null ? "TDU2_MapRoads" : "TDU2_Minimap", indexFormat = IndexFormat.UInt32, hideFlags = HideFlags.DontSave };
@@ -369,7 +467,7 @@ namespace TDU2.Map.Vehicles
         /// in Fahrtrichtung bis zur nächsten Straße (≤ 45 m, Kegel ±37°) verlängert.
         /// </summary>
         static void AddJunctions(List<(Vector2 p, float half, Color c, Vector2 dir)> ends, List<(Vector2 p, int seg)> samples,
-            List<Vector3> verts, List<Color32> cols, List<int> idx)
+            List<Vector3> verts, List<Color32> cols, List<int> idx, bool[] handled = null)
         {
             const float RNear = 22f, RFar = 45f;
             int n = ends.Count;
@@ -380,6 +478,7 @@ namespace TDU2.Map.Vehicles
             long Key(int gx, int gz) => ((long)gx << 32) ^ (uint)gz;
             for (int i = 0; i < n; i++)
             {
+                if (handled != null && handled[i]) continue;   // schon über ROAD_MAP-Knoten verbunden
                 int gx = Mathf.FloorToInt(ends[i].p.x / RFar), gz = Mathf.FloorToInt(ends[i].p.y / RFar);
                 for (int dx = -1; dx <= 1; dx++)
                     for (int dz = -1; dz <= 1; dz++)
@@ -403,6 +502,7 @@ namespace TDU2.Map.Vehicles
             var clusters = new Dictionary<int, List<int>>();
             for (int i = 0; i < n; i++)
             {
+                if (handled != null && handled[i]) continue;
                 int r = Find(i);
                 if (!clusters.TryGetValue(r, out var l)) clusters[r] = l = new List<int>();
                 l.Add(i);
@@ -464,13 +564,15 @@ namespace TDU2.Map.Vehicles
         /// Knotens verbunden, am Knoten eine Scheibe – Kreisel (Ringstraßen zwischen Knoten) und große Kreuzungen stimmen so.
         /// Breite/Farbe vom passenden ROAD_DETAIL-Ende.
         /// </summary>
-        void AddNodeJunctions(Transform root, List<(Vector2 p, float half, Color c, Vector2 dir)> ends, List<(Vector2 p, int seg)> samples,
+        bool[] AddNodeJunctions(Transform root, List<(Vector2 p, float half, Color c, Vector2 dir)> ends, List<(Vector2 p, int seg)> samples,
             List<Vector3> verts, List<Color32> cols, List<int> idx)
         {
             // Kreisel: alle Zufahrten enden am selben Knoten in der Kreiselmitte, der Ring selbst ist eigene Straße.
             // Eine Speiche zur Mitte füllte den Kreisel aus ("Stern"). Lange Lücken (> NodeGap) werden deshalb an die
-            // nächste andere Straße angeschlossen (Ring / Hauptstraße), nur kurze direkt an den Knoten.
-            const float NodeGap = 14f, JoinMax = 30f, SCell = 16f;
+            // nächste andere Straße angeschlossen (Ring / Hauptstraße); findet sich keine, wird trotzdem zum Knoten
+            // geschlossen (sonst bleiben an großen Kreuzungen Lücken).
+            const float NodeGap = 14f, JoinMax = 45f, SCell = 16f;
+            var handled = new bool[ends.Count];
             var sgrid = new Dictionary<long, List<int>>();
             long SKey(int gx, int gz) => ((long)gx << 32) ^ (uint)gz;
             for (int i = 0; i < samples.Count; i++)
@@ -523,7 +625,8 @@ namespace TDU2.Map.Vehicles
                             }
                 return ok;
             }
-            var nodeHalf = new Dictionary<int, (float half, Color c)>();
+            var nodePts = new Dictionary<int, List<Vector2>>();
+            var nodeStyle = new Dictionary<int, (float half, Color c)>();
             foreach (var road in net.Roads.Values)
             {
                 if (road.Pieces.Count == 0) continue;
@@ -540,20 +643,34 @@ namespace TDU2.Map.Vehicles
                     if (gap > NodeGap)
                     {
                         int seg = ei >= 0 ? ei - (ei & 1) : -1;
-                        Vector2 dir = ei >= 0 ? ends[ei].dir : (c - e) / Mathf.Max(gap, 1e-3f);
-                        if (NearestOther(e, seg, dir, Mathf.Min(JoinMax, gap), out var hit))
+                        Vector2 d = ei >= 0 ? ends[ei].dir : (c - e) / Mathf.Max(gap, 1e-3f);
+                        if (NearestOther(e, seg, d, Mathf.Min(JoinMax, gap), out var hit))
                         {
                             if ((hit - e).sqrMagnitude > 0.25f) AddQuad(verts, cols, idx, e, hit, half, col);
+                            if (ei >= 0) handled[ei] = true;
                             continue;   // Kreisel/Einmündung: nicht zur Knotenmitte
                         }
-                        if (gap > 45f) continue;
                     }
+                    if (gap > 80f) continue;   // unplausible Knotenlage: nicht quer über die Insel ziehen (Lückenfüller übernimmt)
                     if (gap > 0.5f) AddQuad(verts, cols, idx, e, c, half, col);
-                    if (!nodeHalf.TryGetValue(nodeId, out var nh) || half > nh.half) nodeHalf[nodeId] = (half, col);
+                    if (ei >= 0) handled[ei] = true;
+                    if (!nodeStyle.TryGetValue(nodeId, out var ns) || half > ns.half) nodeStyle[nodeId] = (half, col);
+                    // Querschnittskanten der Zufahrten sammeln: die konvexe Hülle schließt die Keile zwischen ihnen
+                    Vector2 dir = ei >= 0 ? ends[ei].dir : (c - e) / Mathf.Max(gap, 1e-3f);
+                    if (dir.sqrMagnitude < 1e-6f) dir = (c - e).sqrMagnitude > 1e-6f ? (c - e).normalized : Vector2.up;
+                    Vector2 nrm = new Vector2(-dir.y, dir.x) * half;
+                    if (!nodePts.TryGetValue(nodeId, out var pl)) nodePts[nodeId] = pl = new List<Vector2>(8);
+                    pl.Add(e - nrm); pl.Add(e + nrm);
                 }
             }
-            foreach (var kv in nodeHalf)
-                if (net.Nodes.TryGetValue(kv.Key, out var node)) AddDisc(verts, cols, idx, Map(root, node.Pos), kv.Value.half * 1.1f, kv.Value.c);
+            foreach (var kv in nodePts)
+            {
+                if (!net.Nodes.TryGetValue(kv.Key, out var node)) continue;
+                var ns = nodeStyle[kv.Key];
+                if (kv.Value.Count >= 4) AddHullFill(verts, cols, idx, kv.Value, ns.c);
+                AddDisc(verts, cols, idx, Map(root, node.Pos), ns.half * 1.1f, ns.c);
+            }
+            return handled;
         }
 
         static void AddDisc(List<Vector3> verts, List<Color32> cols, List<int> idx, Vector2 c, float r, Color col)
@@ -566,6 +683,36 @@ namespace TDU2.Map.Vehicles
                 verts.Add(c + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r); cols.Add(col);
             }
             for (int k = 0; k < 8; k++) { idx.Add(b0); idx.Add(b0 + 1 + k); idx.Add(b0 + 1 + (k + 1) % 8); }
+        }
+
+        static float Cross2(Vector2 o, Vector2 a, Vector2 b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+
+        /// <summary>Füllt die konvexe Hülle der Kreuzungs-Querschnittskanten (schließt die Keile zwischen den Zufahrten).</summary>
+        static void AddHullFill(List<Vector3> verts, List<Color32> cols, List<int> idx, List<Vector2> pts, Color col)
+        {
+            if (pts.Count < 3) return;
+            pts.Sort((a, b) => a.x != b.x ? a.x.CompareTo(b.x) : a.y.CompareTo(b.y));
+            var hull = new List<Vector2>(pts.Count * 2);
+            for (int i = 0; i < pts.Count; i++)
+            {
+                while (hull.Count >= 2 && Cross2(hull[hull.Count - 2], hull[hull.Count - 1], pts[i]) <= 0f) hull.RemoveAt(hull.Count - 1);
+                hull.Add(pts[i]);
+            }
+            int t = hull.Count + 1;
+            for (int i = pts.Count - 2; i >= 0; i--)
+            {
+                while (hull.Count >= t && Cross2(hull[hull.Count - 2], hull[hull.Count - 1], pts[i]) <= 0f) hull.RemoveAt(hull.Count - 1);
+                hull.Add(pts[i]);
+            }
+            hull.RemoveAt(hull.Count - 1);   // letzter Punkt = erster
+            if (hull.Count < 3) return;
+            Vector2 cen = Vector2.zero;
+            foreach (var p in hull) cen += p;
+            cen /= hull.Count;
+            int b0 = verts.Count;
+            verts.Add(cen); cols.Add(col);
+            for (int i = 0; i < hull.Count; i++) { verts.Add(hull[i]); cols.Add(col); }
+            for (int i = 0; i < hull.Count; i++) { idx.Add(b0); idx.Add(b0 + 1 + i); idx.Add(b0 + 1 + (i + 1) % hull.Count); }
         }
 
         // Kartenebene: x = Welt-X, y = Welt-Z (Spiegelung/Zentrierung des Streamers bereits enthalten)
@@ -641,7 +788,7 @@ namespace TDU2.Map.Vehicles
                 if (_task.IsFaulted) { Error = _task.Exception?.GetBaseException().Message; Debug.LogWarning("[TDU2] Minimap: " + Error); }
                 else
                 {
-                    try { BuildMesh(_task.Result); BuildRoadIndex(_task.Result); Debug.Log($"[TDU2] Minimap: {_task.Result.Count} Straßensegmente"); }
+                    try { BuildMesh(_task.Result); BuildRoadIndex(_task.Result); Debug.Log($"[TDU2] Minimap: {_task.Result.Count} Straßensegmente, {_nameIndex?.NameCount ?? 0} Straßennamen"); }
                     catch (Exception ex) { Error = ex.Message; Debug.LogWarning("[TDU2] Minimap: " + ex); }
                 }
                 _task = null;
@@ -678,6 +825,7 @@ namespace TDU2.Map.Vehicles
             _range = _range <= 0 ? target : Mathf.Lerp(_range, target, 1f - Mathf.Exp(-Time.deltaTime * 1.5f));
 
             var pos = Vehicle.transform.position;
+            UpdateStreetName(pos);
             float heading = Heading();
             RenderMap(pos);
             if (_hud != null)
@@ -1024,6 +1172,15 @@ namespace TDU2.Map.Vehicles
             Graphics.DrawMesh(mesh, m, _roadMat, MapLayer, _mapCam, 0, null, false, false);
         }
 
+        void UpdateStreetName(Vector3 world)
+        {
+            var idx = _nameIndex;
+            if (!ShowStreetName || idx == null || Vehicle == null) { _streetName = null; return; }
+            var root = Streamer != null ? Streamer.MapRoot : null;
+            Vector3 game = root != null ? root.InverseTransformPoint(world) : world;
+            _streetName = idx.Nearest(new Vector2(game.x, game.z));
+        }
+
         float Heading()
         {
             var f = Vehicle.transform.forward;
@@ -1032,50 +1189,95 @@ namespace TDU2.Map.Vehicles
 
         void OnGUI()
         {
-            if (_hud != null) return;   // Originaldarstellung über hud.vmf
-            if (!ShowMinimap || _rt == null || _mesh == null || Vehicle == null || !Vehicle.isActiveAndEnabled || _mat == null) return;
+            if (!ShowMinimap || Vehicle == null || !Vehicle.isActiveAndEnabled) return;
             if (Event.current.type != EventType.Repaint) return;
-            float size = Screen.height * Size, m = Screen.height * Margin;
-            float x0 = m, y0 = Screen.height - m - size;
-            float cx = x0 + size * 0.5f, cy = y0 + size * 0.5f, R = size * 0.5f;
 
-            GL.PushMatrix();
-            GL.LoadPixelMatrix(0, Screen.width, Screen.height, 0);
-            // Rand + Hintergrund
-            _mat.mainTexture = Texture2D.whiteTexture;
-            _mat.SetFloat("_Circle", 1f);
-            _mat.SetPass(0);
-            Quad(cx - R - 3, cy - R - 3, 2 * R + 6, 2 * R + 6, new Color(0.85f, 0.9f, 1f, 0.55f));
-            Quad(cx - R, cy - R, 2 * R, 2 * R, Background);
-            // Straßen
-            _mat.mainTexture = _rt;
-            _mat.SetPass(0);
-            Quad(x0, y0, size, size, Color.white);
-            // Spielerpfeil
-            _mat.mainTexture = Texture2D.whiteTexture;
-            _mat.SetFloat("_Circle", 0f);
-            _mat.SetPass(0);
-            float a = size * 0.045f;
-            GL.Begin(GL.TRIANGLES);
-            GL.Color(new Color(0, 0, 0, 0.6f));
-            Tri(cx, cy - a * 1.35f - 1.5f, cx - a - 1.5f, cy + a + 1.5f, cx + a + 1.5f, cy + a + 1.5f);
-            GL.Color(Arrow);
-            Tri(cx, cy - a * 1.2f, cx - a * 0.85f, cy + a, cx, cy + a * 0.45f);
-            Tri(cx, cy - a * 1.2f, cx, cy + a * 0.45f, cx + a * 0.85f, cy + a);
-            GL.End();
-            GL.PopMatrix();
+            Rect mapRect;
+            if (_hud != null)
+            {
+                var r = _hud.ScreenRect("/HUD/minimap/mmap_lure");
+                if (!r.HasValue) return;
+                mapRect = r.Value;
+            }
+            else
+            {
+                if (_rt == null || _mesh == null || _mat == null) return;
+                float size = Screen.height * Size, m = Screen.height * Margin;
+                float x0 = m, y0 = Screen.height - m - size;
+                float cx = x0 + size * 0.5f, cy = y0 + size * 0.5f, R = size * 0.5f;
 
-            // Norden
-            float h = Heading() * Mathf.Deg2Rad;
-            float nx = cx - Mathf.Sin(h) * (R - size * 0.06f), ny = cy - Mathf.Cos(h) * (R - size * 0.06f);
-            if (_label == null) _label = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
-            _label.fontSize = Mathf.Max(10, Mathf.RoundToInt(size * 0.07f));
+                GL.PushMatrix();
+                GL.LoadPixelMatrix(0, Screen.width, Screen.height, 0);
+                // Rand + Hintergrund
+                _mat.mainTexture = Texture2D.whiteTexture;
+                _mat.SetFloat("_Circle", 1f);
+                _mat.SetPass(0);
+                Quad(cx - R - 3, cy - R - 3, 2 * R + 6, 2 * R + 6, new Color(0.85f, 0.9f, 1f, 0.55f));
+                Quad(cx - R, cy - R, 2 * R, 2 * R, Background);
+                // Straßen
+                _mat.mainTexture = _rt;
+                _mat.SetPass(0);
+                Quad(x0, y0, size, size, Color.white);
+                // Spielerpfeil
+                _mat.mainTexture = Texture2D.whiteTexture;
+                _mat.SetFloat("_Circle", 0f);
+                _mat.SetPass(0);
+                float a = size * 0.045f;
+                GL.Begin(GL.TRIANGLES);
+                GL.Color(new Color(0, 0, 0, 0.6f));
+                Tri(cx, cy - a * 1.35f - 1.5f, cx - a - 1.5f, cy + a + 1.5f, cx + a + 1.5f, cy + a + 1.5f);
+                GL.Color(Arrow);
+                Tri(cx, cy - a * 1.2f, cx - a * 0.85f, cy + a, cx, cy + a * 0.45f);
+                Tri(cx, cy - a * 1.2f, cx, cy + a * 0.45f, cx + a * 0.85f, cy + a);
+                GL.End();
+                GL.PopMatrix();
+
+                // Norden
+                float h = Heading() * Mathf.Deg2Rad;
+                float nx = cx - Mathf.Sin(h) * (R - size * 0.06f), ny = cy - Mathf.Cos(h) * (R - size * 0.06f);
+                if (_label == null) _label = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold };
+                _label.fontSize = Mathf.Max(10, Mathf.RoundToInt(size * 0.07f));
+                var old = GUI.color;
+                GUI.color = new Color(0, 0, 0, 0.7f);
+                GUI.Label(new Rect(nx - 19, ny - 19, 40, 40), "N", _label);
+                GUI.color = new Color(1f, 0.85f, 0.3f, 1f);
+                GUI.Label(new Rect(nx - 20, ny - 20, 40, 40), "N", _label);
+                GUI.color = old;
+
+                mapRect = new Rect(x0, y0, size, size);
+            }
+            DrawStreetName(mapRect);
+        }
+
+        void DrawStreetName(Rect mapRect)
+        {
+            if (!ShowStreetName || string.IsNullOrEmpty(_streetName)) return;
+            if (_streetStyle == null)
+                _streetStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, clipping = TextClipping.Clip, wordWrap = false };
+            _streetStyle.normal.textColor = Color.white;
+            int fs = Mathf.Clamp(Mathf.RoundToInt(mapRect.height * 0.075f), 11, 24);
+            _streetStyle.fontSize = fs;
+            float maxW = Mathf.Max(mapRect.width * 1.5f, 160f);
+            float tw = _streetStyle.CalcSize(new GUIContent(_streetName)).x;
+            if (tw > maxW)
+            {
+                fs = Mathf.Max(9, Mathf.FloorToInt(fs * maxW / tw));
+                _streetStyle.fontSize = fs;
+                tw = _streetStyle.CalcSize(new GUIContent(_streetName)).x;
+            }
+            float w = Mathf.Min(maxW, Mathf.Max(mapRect.width, tw + 16f));
+            float h = fs + 10f;
+            float gap = Mathf.Max(3f, Screen.height * 0.006f);
+            float x = Mathf.Clamp(mapRect.center.x - w * 0.5f, 4f, Mathf.Max(4f, Screen.width - w - 4f));
+            float y = mapRect.yMax + gap;
+            if (y + h > Screen.height - 4f) y = mapRect.yMin - gap - h;
+            y = Mathf.Clamp(y, 4f, Mathf.Max(4f, Screen.height - h - 4f));
+            var bg = new Rect(x, y, w, h);
             var old = GUI.color;
-            GUI.color = new Color(0, 0, 0, 0.7f);
-            GUI.Label(new Rect(nx - 19, ny - 19, 40, 40), "N", _label);
-            GUI.color = new Color(1f, 0.85f, 0.3f, 1f);
-            GUI.Label(new Rect(nx - 20, ny - 20, 40, 40), "N", _label);
+            GUI.color = new Color(0f, 0f, 0f, 0.55f);
+            GUI.DrawTexture(bg, Texture2D.whiteTexture);
             GUI.color = old;
+            GUI.Label(bg, _streetName, _streetStyle);
         }
 
         static void Quad(float x, float y, float w, float h, Color c)

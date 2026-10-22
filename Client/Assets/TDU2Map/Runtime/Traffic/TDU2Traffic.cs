@@ -795,6 +795,15 @@ namespace TDU2.Map.Traffic
             if (t.sqrMagnitude < 1e-6f) t = c.Fwd;
             c.Fwd = t.normalized;
             c.Up = Vector3.Slerp(c.Up, c.GroundUp, dt > 0f ? 1f - Mathf.Exp(-dt * 6f) : 1f);
+            // Nur Steigung neigen, nicht seitlich kippen (Straßenquerneigung): Roll-Anteil entfernen.
+            var rightH = Vector3.Cross(Vector3.up, c.Fwd);
+            if (rightH.sqrMagnitude > 1e-6f)
+            {
+                rightH.Normalize();
+                var up = c.Up - rightH * Vector3.Dot(c.Up, rightH);
+                if (up.sqrMagnitude > 1e-6f) c.Up = up.normalized;
+                else c.Up = Vector3.up;
+            }
             var newPos = p + Vector3.up * (c.RideOffset + c.GroundDy);
             c.Vel = dt > 0f ? c.Fwd * c.V : c.Fwd * c.V;
             c.Pos = newPos;

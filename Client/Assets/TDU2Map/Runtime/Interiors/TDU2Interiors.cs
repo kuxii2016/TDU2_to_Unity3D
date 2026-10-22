@@ -9,6 +9,7 @@ using TDU2.Map.Online;
 using TDU2.Map.Racing;
 using TDU2.Map.World;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace TDU2.Map.Vehicles
 {
@@ -1712,7 +1713,6 @@ namespace TDU2.Map.Vehicles
                 float brake = r != null ? r.F("_brakingdist") : 0f;
                 int diff = r != null ? r.I("_difficulty") : 0;
                 int price = r != null ? r.I("_price") : 0;
-
                 // Kilometerzähler wie MngHud ("%08d" + Zehntel); Händlerwagen sind neu, eigene Autos aus dem gespeicherten Zähler
                 double odo = 0;
                 if (_kind != Kind.Dealer)
@@ -1726,11 +1726,112 @@ namespace TDU2.Map.Vehicles
                 bool isPaintable = c.Raw != null && c.Raw.I("_paintable") != 0;
                 bool isStickerable = c.Raw != null && c.Raw.I("_stickerable") != 0;
                 bool isTuningable = c.Raw != null && c.Raw.I("_tuningable") != 0;
+                var engineType = r?.I("_engine_type", 1) ?? 1;
+                var enginetype = r != null ? r.I("_engine_localisation") : 1;
+                string VehicleEngine = " - NA - " + engineType;
+
+
+                switch (enginetype)
+                {
+                    case 1: //front
+                        _ui.PlayLabel("/car_datas/data_full/pattern_motor", "motor_front");
+                        _ui.PinFrame("/car_datas/data_full/pattern_motor", 10);
+                        break;
+                    case 2: //mid
+                        _ui.PlayLabel("/car_datas/data_full/pattern_motor", "motor_middle");
+                        _ui.PinFrame("/car_datas/data_full/pattern_motor", 22);
+                        break;
+                    case 3: //rear
+                        _ui.PlayLabel("/car_datas/data_full/pattern_motor", "motor_rear");
+                        _ui.PinFrame("/car_datas/data_full/pattern_motor", 1);
+                        break;
+                }
+
+                var gearbox = r != null ? r.I("_gearbox") : 1;
+                Debug.Log("gearbox DB: " + gearbox);
+                switch (gearbox)
+                {
+                    case 1: //front
+                        _ui.PinFrame("/car_datas/data_full/pattern_wheel", 10);
+                        break;
+                    case 2: //mid
+                        _ui.PinFrame("/car_datas/data_full/pattern_wheel", 22);
+                        break;
+                    case 4: //rear
+                        _ui.PinFrame("/car_datas/data_full/pattern_wheel", 1);
+                        break;
+                }
+
+                switch (engineType)
+                {
+                    case 1:
+                        VehicleEngine = TDU2UIManager.GetLangString(2032, "4-Stroke");
+                        break; //4-Stroke
+                    case 2:
+                        VehicleEngine = TDU2UIManager.GetLangString(2025, "Flathead 6 cylinder");
+                        break; //Flathead 6 cylinder
+                    case 3:
+                        VehicleEngine = TDU2UIManager.GetLangString(2031, "Inline 5");
+                        break; //Inline 5
+                    case 4:
+                        VehicleEngine = TDU2UIManager.GetLangString(2029, "Inline 3");
+                        break; //Inline 3
+                    case 5:
+                        VehicleEngine = TDU2UIManager.GetLangString(2020, "Inline 4");
+                        break; //Inline 4
+                    case 6:
+                        VehicleEngine = TDU2UIManager.GetLangString(2018, "Inline 6");
+                        break; //Inline 6
+                    case 7:
+                        VehicleEngine = TDU2UIManager.GetLangString(2028, "Rotary");
+                        break; //Rotary
+                    case 8:
+                        VehicleEngine = TDU2UIManager.GetLangString(2023, "V10");
+                        break; //V10
+                    case 9:
+                        VehicleEngine = TDU2UIManager.GetLangString(2024, "V12");
+                        break; //V12
+                    case 10:
+                        VehicleEngine = TDU2UIManager.GetLangString(2030, "V16");
+                        break; //V16
+                    case 11:
+                        VehicleEngine = TDU2UIManager.GetLangString(2027, "V-twin");
+                        break; // V-twin
+                    case 12:
+                        VehicleEngine = TDU2UIManager.GetLangString(2022, "V6");
+                        break; //V6
+                    case 13:
+                        VehicleEngine = TDU2UIManager.GetLangString(2019, "V8");
+                        break; //V8
+                    case 14:
+                        VehicleEngine = TDU2UIManager.GetLangString(2026, "W12");
+                        break; //W12
+                    case 15:
+                        VehicleEngine = TDU2UIManager.GetLangString(8118, "W16");
+                        break; //W16
+                    case 16:
+                        VehicleEngine = TDU2UIManager.GetLangString(2025, "Flat 4 cylinder");
+                        break; //Flat 4 cylinder
+                    case 17: break; //L-twin
+                }
+                
 
                 if (asCompare)
                 {
                     using (_ui.PinScope())
                     {
+                        _ui.SetText("/:cur_type", VehicleEngine);
+                        _ui.SetText("/:cur_displacement_i", " ");
+                        _ui.SetText("/:cur_torque_i", c.TorqueNm + " Nm"); //Drehmoment
+                        _ui.SetText("/:cur_red_line_i", c.RedLine + " rpm"); //Leistung
+                        _ui.SetText("/:cur_type_gears", "Dual clutch"); // Getriebe
+                        _ui.SetText("/:cur_nb_gears", c.NbGears + "");
+                        _ui.SetText("/car_datas/data_full:cur_weight", r?.I("_mass") + "kg"); //Gewicht
+                        _ui.SetText("/car_datas/data_full:cur_bhp_t", " "); //Gewicht:Leistung
+                        _ui.SetText("/:cur_tires_dim_r", "285/35/19"); //Reifen Rear
+                        _ui.SetText("/:cur_tires_dim_f", "285/35/19"); //Reifen Front
+                        _ui.SetText("/:cur_brakes_front_i", r?.I("_brakes_dim_front") + ""); //Bremsen Front
+                        _ui.SetText("/:cur_brakes_rear_i", r?.I("_brakes_dim_rear") + "");
                         _ui.ForceVisible("/car_datas/datas_base/limits/forb_tun", isTuningable);
                         _ui.ForceVisible("/car_datas/datas_base/limits/forb_stick", isStickerable);
                         _ui.ForceVisible("/car_datas/datas_base/limits/forb_paint", isPaintable);
@@ -1741,10 +1842,15 @@ namespace TDU2.Map.Vehicles
                         _ui.SetValue("/:comp_accel", Mathf.Clamp(aAcc, 1, 101));
                         _ui.SetValue("/:comp_braking", Mathf.Clamp(aBrk, 1, 101));
                         _ui.SetValue("/:comp_difficulty", Mathf.Clamp(diff > 0 ? diff : 1, 1, 5));
-                        _ui.SetVariable("/:comp_power_m", bhp > 0 ? bhp.ToString("0", ci) + " bhp" : "-");
+                        //_ui.SetVariable("/:comp_power_m", bhp > 0 ? bhp.ToString("0", ci) + " bhp" : "-");
+                        //_ui.SetVariable("/:comp_power_i", bhp > 0 ? bhp.ToString("0", ci) + " bhp" : "-");
+                        var l = TDU2UIManager.Language;
+                        _ui.SetVariable("/:comp_power_m", bhp > 0 ? (bhp * 1.01387f).ToString("0", ci) + " PS" : "-");
+
                         _ui.SetVariable("/:comp_power_i", bhp > 0 ? bhp.ToString("0", ci) + " bhp" : "-");
                         _ui.SetVariable("/:comp_max_speed_m", vmax > 0 ? vmax.ToString("0", ci) + " Km/h" : "-");
                         _ui.SetVariable("/:comp_max_speed_i", vmax > 0 ? (vmax / 1.609344f).ToString("0", ci) + " mph" : "-");
+
                         _ui.SetVariable("/:comp_0_100_m", acc > 0 ? acc.ToString("0.0", ci) + " sec" : "-");
                         _ui.SetVariable("/:comp_0_100_i", acc > 0 ? acc.ToString("0.0", ci) + " sec" : "-");
                     }
@@ -1752,6 +1858,18 @@ namespace TDU2.Map.Vehicles
                 }
                 using (_ui.PinScope())   // festhalten: der Film setzt einige davon beim Auf-/Zuklappen zurück
                 {
+                    _ui.SetText("/:cur_type", VehicleEngine);
+                    _ui.SetText("/:cur_displacement_i", " ");
+                    _ui.SetText("/:cur_torque_i", c.TorqueNm + " Nm"); //Drehmoment
+                    _ui.SetText("/:cur_red_line_i", c.RedLine + " rpm"); //Leistung
+                    _ui.SetText("/:cur_type_gears", "Dual clutch"); // Getriebe
+                    _ui.SetText("/:cur_nb_gears", c.NbGears + "");
+                    _ui.SetText("/car_datas/data_full:cur_weight", r?.I("_mass") + "kg"); //Gewicht
+                    _ui.SetText("/car_datas/data_full:cur_bhp_t", " "); //Gewicht:Leistung
+                    _ui.SetText("/:cur_tires_dim_r", "285/35/19"); //Reifen Rear
+                    _ui.SetText("/:cur_tires_dim_f", "285/35/19"); //Reifen Front
+                    _ui.SetText("/:cur_brakes_front_i", r?.I("_brakes_dim_front") + ""); //Bremsen Front
+                    _ui.SetText("/:cur_brakes_rear_i", r?.I("_brakes_dim_rear") + "");
                     _ui.ForceVisible("/car_datas/datas_base/limits/forb_tun", isTuningable);
                     _ui.ForceVisible("/car_datas/datas_base/limits/forb_stick", isStickerable);
                     _ui.ForceVisible("/car_datas/datas_base/limits/forb_paint", isPaintable);
@@ -1767,10 +1885,16 @@ namespace TDU2.Map.Vehicles
                     _ui.SetValue("/:cur_accel", Mathf.Clamp(aAcc, 1, 101));
                     _ui.SetValue("/:cur_braking", Mathf.Clamp(aBrk, 1, 101));
                     _ui.SetValue("/:cur_difficulty", Mathf.Clamp(diff > 0 ? diff : 1, 1, 5));
-                    _ui.SetVariable("/:cur_power_m", bhp > 0 ? bhp.ToString("0", ci) + " bhp" : "-");
+                    //_ui.SetVariable("/:cur_power_m", bhp > 0 ? bhp.ToString("0", ci) + " bhp" : "-");
+                    //_ui.SetVariable("/:cur_power_i", bhp > 0 ? bhp.ToString("0", ci) + " bhp" : "-");
+
+                    var l = TDU2UIManager.Language;
+                    _ui.SetVariable("/:cur_power_m", bhp > 0 ? (bhp * 1.01387f).ToString("0", ci) + " PS" : "-");
                     _ui.SetVariable("/:cur_power_i", bhp > 0 ? bhp.ToString("0", ci) + " bhp" : "-");
+
                     _ui.SetVariable("/:cur_max_speed_m", vmax > 0 ? vmax.ToString("0", ci) + " Km/h" : "-");
                     _ui.SetVariable("/:cur_max_speed_i", vmax > 0 ? (vmax / 1.609344f).ToString("0", ci) + " mph" : "-");
+
                     _ui.SetVariable("/:cur_0_100_m", acc > 0 ? acc.ToString("0.0", ci) + " sec" : "-");
                     _ui.SetVariable("/:cur_0_100_i", acc > 0 ? acc.ToString("0.0", ci) + " sec" : "-");
                     _ui.SetVariable("/:Km_m", (kmW % 100000000).ToString("D8"));

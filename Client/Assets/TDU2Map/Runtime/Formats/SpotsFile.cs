@@ -58,6 +58,7 @@ namespace TDU2.Map.Formats
                     Box2 = ReadMatrix(d, o + 192),
                 };
                 if (float.IsNaN(s.Position.x)) continue;
+                Debug.Log("Spotreader: " + s.Code + " : " + s.Key);
                 f.Spots.Add(s);
             }
             return f;

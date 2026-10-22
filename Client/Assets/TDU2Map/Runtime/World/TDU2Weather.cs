@@ -232,6 +232,7 @@ namespace TDU2.Map.World
 
         // Regen / Gewitter
         RainField _rain;
+        bool _wasRaining;
         float _nextThunder, _flash;
 
         static readonly int IdNightK = Shader.PropertyToID("_TDU2NightK");
@@ -500,10 +501,18 @@ namespace TDU2.Map.World
             // nass werden in ~1 min, abtrocknen in ~6 min
             _wet = Mathf.MoveTowards(_wet, wetTarget, Time.deltaTime * (wetTarget > _wet ? 1f / 60f : 1f / 360f));
             GroundWet = _wet;
-            _wetShown = inside ? 0f : _wet;
+            // Es regnet -> Straße ist mindestens so nass wie der Regen (auch wenn ein Block rain_ground_wet nicht setzt)
+            _wetShown = inside ? 0f : Mathf.Max(_wet, Rain);
             Shader.SetGlobalFloat(IdWet, _wetShown);
             if (RainDrops > 0 && Rain > 0.01f) { if (_rain == null) _rain = new RainField(RainDrops); }
-            _rain?.Update(Rain * (inside ? 0f : 1f), Time.deltaTime);
+            _rain?.Update(Rain * (inside ? 0f : 1f), Time.deltaTime, Mathf.Lerp(1f, 0.35f, Night));
+            // Diagnose: nur beim Umschalten loggen (hilft, wenn Regen "einfach aufhört")
+            bool rainingNow = Rain > 0.01f && !inside;
+            if (rainingNow != _wasRaining)
+            {
+                _wasRaining = rainingNow;
+                Debug.Log($"[TDU2Weather] Regen {(rainingNow ? "an" : "aus")}: Rain={Rain:0.00} Nässe={_wetShown:0.00} inside={inside} Kind={Kind} ForceKind={ForceKind}");
+            }
 
             // ---------------- seltener: Lampen, Scheinwerfer, Schmutz
             if (Time.unscaledTime >= _nextSlow)
@@ -709,25 +718,28 @@ namespace TDU2.Map.World
                         px[y * 4 + x] = new Color32(255, 255, 255, (byte)(a * 255));
                     }
                 tex.SetPixels32(px); tex.Apply();
-                var sh = Shader.Find("Sprites/Default") ?? Shader.Find("Legacy Shaders/Particles/Alpha Blended");
+                var sh = Shader.Find("Sprites/Default") ?? Shader.Find("Legacy Shaders/Particles/Alpha Blended")
+                         ?? Shader.Find("Particles/Standard Unlit") ?? Shader.Find("Unlit/Transparent");
+                if (sh == null) { Debug.LogWarning("TDU2Weather: kein Regen-Shader gefunden (Sprites/Default fehlt im Build?)"); sh = Shader.Find("Standard"); }
                 _mat = new Material(sh) { name = "Rain", mainTexture = tex, renderQueue = 3100 };
                 _go = new GameObject("TDU2 Rain");
+                _go.layer = 2;   // "Ignore Raycast": von der Auto-Reflexionssonde ausgeschlossen (sonst leuchten Tropfen weiß auf dem Lack)
                 _go.AddComponent<MeshFilter>().sharedMesh = _mesh;
                 var mr = _go.AddComponent<MeshRenderer>();
                 mr.sharedMaterial = _mat;
                 mr.shadowCastingMode = ShadowCastingMode.Off; mr.receiveShadows = false;
             }
 
-            public void Update(float amount, float dt)
+            public void Update(float amount, float dt, float brightness)
             {
                 var cam = Camera.main;
-                bool show = amount > 0.01f && cam != null;
+                bool show = amount > 0.005f && cam != null;
                 if (_go.activeSelf != show) _go.SetActive(show);
                 if (!show) return;
                 var cp = cam.transform.position;
                 var right = cam.transform.right;
                 int n = _p.Length, active = Mathf.RoundToInt(n * Mathf.Clamp01(amount));
-                byte alpha = (byte)(Mathf.Lerp(40f, 95f, amount));
+                byte alpha = (byte)(Mathf.Lerp(25f, 85f, amount) * brightness);
                 var fall = new Vector3(0.6f, -1f, 0.25f).normalized;
                 for (int i = 0; i < n; i++)
                 {
@@ -739,13 +751,15 @@ namespace TDU2.Map.World
                     // Box um die Kamera wiederholen
                     float x = Mathf.Repeat(p.x - cp.x + Box, 2f * Box) - Box, z = Mathf.Repeat(p.z - cp.z + Box, 2f * Box) - Box;
                     var wp = new Vector3(cp.x + x, cp.y - Height * 0.35f + p.y, cp.z + z);
-                    var len = fall * (0.55f + _speed[i] * 0.03f);
+                    var len = fall * (0.9f + _speed[i] * 0.04f);
                     var w = right * 0.012f;
                     _v[b] = wp - w; _v[b + 1] = wp - w - len; _v[b + 2] = wp + w - len; _v[b + 3] = wp + w;
-                    var c = new Color32(200, 205, 215, alpha);
+                    var c = new Color32((byte)(150f * brightness), (byte)(162f * brightness), (byte)(180f * brightness), alpha);
                     _c[b] = _c[b + 1] = _c[b + 2] = _c[b + 3] = c;
                 }
                 _mesh.vertices = _v; _mesh.colors32 = _c;
+                // Bounds fest um die Kamera: verhindert Frustum-Culling, wenn alle Tropfen gerade auf einem Punkt liegen
+                _mesh.bounds = new Bounds(cp, Vector3.one * (Box * 2f + Height) * 2f);
             }
 
             public void Destroy()

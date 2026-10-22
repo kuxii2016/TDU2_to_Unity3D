@@ -84,18 +84,41 @@ Shader "TDU2/Object"
         sampler2D _GlossTex, _WinTex;
         float _TDU2NightK, _TDU2NightWindows;   // global (TDU2Weather): Nacht 0..1, building_nightwindow_frequency
         float _TDU2Wet;
+        // Prozedurale Pfützen (Weltposition): Wasserlachen statt "ganze Straße glänzt"
+        float TDU2Hash(float2 p)
+        {
+            p = frac(p * float2(123.34, 345.45));
+            p += dot(p, p + 34.345);
+            return frac(p.x * p.y);
+        }
+        float TDU2Noise(float2 p)
+        {
+            float2 i = floor(p), f = frac(p);
+            f = f * f * (3.0 - 2.0 * f);
+            float a = TDU2Hash(i);
+            float b = TDU2Hash(i + float2(1, 0));
+            float c = TDU2Hash(i + float2(0, 1));
+            float d = TDU2Hash(i + float2(1, 1));
+            return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+        }
+        float TDU2Puddle(float2 wp)
+        {
+            float n = TDU2Noise(wp * 0.10) * 0.65 + TDU2Noise(wp * 0.37) * 0.35;
+            return smoothstep(0.55, 0.72, n);
+        }
         // Vegetation: Normale = Welt-oben (wie Gras und Boden) -> Büsche/Bäume werden genauso hell beleuchtet wie der Boden,
         // egal wie die Blattkarten im Mesh liegen.
         void vert (inout appdata_full v)
         {
             if (_PlantMode > 0.5) v.normal = normalize(mul((float3x3)unity_WorldToObject, float3(0, 1, 0)));
         }
-        half4 LightingTDU2Wrap (SurfaceOutput s, half3 lightDir, half atten)
+        half4 LightingTDU2Wrap (SurfaceOutput s, half3 lightDir, half3 viewDir, half atten)
         {
             half ndl = dot(s.Normal, lightDir);
             half diff = saturate(ndl * (1.0 - _Wrap) + _Wrap);
             half4 c;
             c.rgb = s.Albedo * _LightColor0.rgb * (diff * atten);
+            // Kein Glanz/Spiegelung auf nassen Straßen (weder Sonne/Mond noch Lampen) - nur Abdunklung.
             c.a = s.Alpha;
             return c;
         }
@@ -149,8 +172,12 @@ Shader "TDU2/Object"
             fixed3 vc = lerp(fixed3(1,1,1), saturate(IN.color.rgb * _VcScale), _VertexColorStrength);
             fixed sh = lerp(1.0, tex2D(_ShadowTex, IN.uv2_DetailTex).r, _ShadowStrength);
             o.Albedo = c.rgb * vc * sh * _Brightness;
-            // Regen (TDU2Weather, rain_ground_wet): nasser Asphalt/Boden wird dunkler
-            o.Albedo *= 1.0 - 0.35 * _TDU2Wet * _WetSurface;
+            // Nasse Straße: nur dunkler (kein Glanz/Spiegelung - das wirkte unnatürlich)
+            half wetW = saturate(_TDU2Wet * _WetSurface);
+            half puddle = wetW > 0.001 ? TDU2Puddle(IN.worldPos.xz) * wetW : 0.0;
+            o.Albedo *= 1.0 - 0.15 * wetW - 0.35 * puddle;
+            o.Gloss = 0.0;
+            o.Specular = 0.0;
             // Nur Flächen auf der Bodenebene: Wände/Theken mit _ReflMix würden sonst das Bodenspiegelbild über die
             // Bildschirmposition zeigen ("wandert mit der Kamera")
             // (Spiegelbild: am Ende als Eigenleuchten, siehe unten)
