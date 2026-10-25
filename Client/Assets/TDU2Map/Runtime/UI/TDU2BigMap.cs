@@ -1181,7 +1181,7 @@ namespace TDU2.Map.Vehicles
                         _ui.CallClip("/pack/" + name, "setDoneStatus", true);
                         _ui.CallClip("/pack/" + name, "setRankStatus", rs.Place >= 1 && rs.Place <= 3 ? rs.Place : 0);
                     }
-                    if (label == "carDealer") ApplyDealerLogo("/pack/" + name + "/spot", _spots[idx].spot.Code);
+                    if (label == "carDealer" || label == "bikeDealer") ApplyDealerLogo("/pack/" + name + "/spot", _spots[idx].spot.Code);
                     else _ui.SetClipTexture("/pack/" + name + "/spot/ic/logo/lure", null);
                     // GPS-Ziel: Fähnchen (spot/target "open") und Pfeil wie im Spiel, sonst aus
                     if (tgt) _ui.CallClip("/pack/" + name, "setTargetStatus", true);
@@ -1599,7 +1599,7 @@ namespace TDU2.Map.Vehicles
             string name = TDU2Minimap.ExtraSpotNames.TryGetValue(s.Code, out var extraName) ? extraName : LocalizedSpotName(label, s.Code);
             if (ms.bookmark >= 0) name = Txt("m_Bookmark", "Lesezeichen") + " " + ms.bookmark;
             _ui.SetValue("/:IsSpotFavorite", TDU2Bookmarks.IsFavorite(s.Code));
-            if (label == "carDealer") { var b = DealerBrands(s.Code); if (!string.IsNullOrEmpty(b)) name = b; }
+            if (label == "carDealer" || label == "bikeDealer") { var b = DealerBrands(s.Code); if (!string.IsNullOrEmpty(b)) name = b; }
             var ch = Champs;
             if (ms.cup >= 0 && ch != null)
             {
@@ -1629,7 +1629,7 @@ namespace TDU2.Map.Vehicles
             _ui.SetVariable("/:SpotName", name);
             _ui.SetVariable("/:WhatSpot", label);
             _ui.GotoLabel("/tool_tip/ic", label, false);
-            if (label == "carDealer") ApplyDealerLogo("/tool_tip/ic", s.Code);
+            if (label == "carDealer" || label == "bikeDealer") ApplyDealerLogo("/tool_tip/ic", s.Code);
             else _ui.SetClipTexture("/tool_tip/ic/logo/lure", null);
             if (TDU2Minimap.ExtraSpotNumbers.TryGetValue(s.Code, out var tnum)) _ui.SetVariable("/tool_tip:num_contest", tnum);
             // Haken/Medaille auch im Tooltip-Symbol

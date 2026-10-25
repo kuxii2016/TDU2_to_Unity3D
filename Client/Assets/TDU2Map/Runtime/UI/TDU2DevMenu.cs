@@ -10,13 +10,13 @@ using UProfiler = UnityEngine.Profiling.Profiler;
 namespace TDU2.Map.Vehicles
 {
     /// <summary>
-    /// Entwicklermenü nach dem Vorbild des Debug-Menüs der Original-exe (edDebug "DEBUG MENU LIBRARIES": Textmenü mit
-    /// Bibliotheken, Variablen VAR/FVAR/BOOL/TABLE, Tasten NEXT/PREV VARIABLE, INCREASE/DECREASE VALUE, INCREASE/DECREASE
-    /// STEP, NEXT/PREV 10, FIRST/LAST, RESET VALUE, Farben BLUE/PURPLE/GREEN/CYAN/YELLOW) – auf Deutsch, mit den Bereichen
-    /// Netzwerk, Autos, Wetter, Welt laden, Streaming, Jobs, Verkehr, Rendering und Auslastung.
-    /// Bedienung: F1 öffnen/schließen, ↑/↓ Eintrag, ←/→ Wert (Umschalt = großer Schritt), Enter öffnen/ausführen,
-    /// Rücktaste zurück, Bild↑/↓ 10 Einträge, Pos1/Ende erster/letzter Eintrag, Entf Standardwert.
-    /// Solange es offen ist, gehen die Fahr-/Spieltasten nicht ans Spiel (TDU2Controls.Blocked).
+    /// Developer menu modeled after the debug menu of the original EXE (edDebug “DEBUG MENU LIBRARIES”: text menu with
+    /// libraries, variables VAR/FVAR/BOOL/TABLE, buttons NEXT/PREV VARIABLE, INCREASE/DECREASE VALUE, INCREASE/DECREASE
+    /// STEP, NEXT/PREV 10, FIRST/LAST, RESET VALUE, colors BLUE/PURPLE/GREEN/CYAN/YELLOW) – in German, with the sections
+    /// Network, Cars, Weather, Load World, Streaming, Jobs, Traffic, Rendering, and Utilization.
+    /// Controls: F1 to open/close, ↑/↓ to select an entry, ←/→ to adjust value (Shift = large step), Enter to open/execute,
+    /// Backspace to go back, Page Up/Page Down to scroll through 10 entries, Home/End to go to first/last entry, Delete to restore default value.
+    /// As long as it is open, the drive/game buttons do not work in the game (TDU2Controls.Blocked).
     /// </summary>
     public sealed class TDU2DevMenu : MonoBehaviour
     {
@@ -167,7 +167,7 @@ namespace TDU2.Map.Vehicles
         {
             _open = true;
             _stack.Clear();
-            _stack.Add(new Page { Title = "ENTWICKLERMENÜ", Build = MainMenu });
+            _stack.Add(new Page { Title = "DEVELOPER MENU", Build = MainMenu });
             if (!TDU2Controls.Blocked) { TDU2Controls.Blocked = true; _blockedByMe = true; }
             Rebuild(); Move(_stack[0], 0);
         }
@@ -196,7 +196,7 @@ namespace TDU2.Map.Vehicles
         static Item Bool(string label, Func<bool> get, Action<bool> set, bool def) => new Item
         {
             Label = label,
-            Value = () => get() ? "AN" : "AUS",
+            Value = () => get() ? "ON" : "OFF",
             Change = _ => set(!get()),
             Reset = () => set(def),
         };
@@ -231,34 +231,34 @@ namespace TDU2.Map.Vehicles
         // ------------------------------------------------------------------ Hauptmenü
         List<Item> MainMenu() => new List<Item>
         {
-            Head("BIBLIOTHEKEN"),
-            Menu("Netzwerk", NetworkMenu),
-            Menu("Autos", CarsMenu),
-            Menu("Wetter & Tageszeit", WeatherMenu),
-            Menu("Welt laden", WorldMenu),
+            Head("LIBRARIES"),
+            Menu("Network", NetworkMenu),
+            Menu("Cars", CarsMenu),
+            Menu("Weather & Time of Day", WeatherMenu),
+            Menu("World Loading", WorldMenu),
             Menu("Streaming", StreamingMenu),
             Menu("Jobs & Threads", JobsMenu),
-            Menu("Verkehr", TrafficMenu),
-            Menu("Rendering", RenderingMenu),
-            Menu("Auslastung", UsageMenu),
+            Menu("Traffic", TrafficMenu),
+            Menu("Renderring", RenderingMenu),
+            Menu("Usage", UsageMenu),
             Menu("Avatar", AvatarMenu),
             Menu("Flash Debug", FlashMenu),
-            Menu("GPS / Lesezeichen", GpsMenu),
+            Menu("GPS / Bookmarks", GpsMenu),
             Head(""),
-            Info("F1 schließen · ↑↓ Eintrag · ←→ Wert (Umschalt x10) · Enter öffnen · Rücktaste zurück · Entf Standard"),
+            Info("Close F1 · ↑↓ Entry · ←→ Value (Shift x10) · Enter to open · Backspace to go back · Delete (default)"),
         };
 
         // ------------------------------------------------------------------ Flash-Filme (wie der Flash Debugger im Editor)
         List<Item> FlashMenu()
         {
-            var l = new List<Item> { Head("LAUFENDE FILME") };
+            var l = new List<Item> { Head("Playing Flash") };
             var players = FindAll<Flash.VmfPlayer>();
             foreach (var p in players)
             {
                 if (p == null || p.Movie == null) continue;
                 var pp = p;
                 string file = System.IO.Path.GetFileName(p.BankPath ?? "");
-                l.Add(Menu(p.gameObject.name + "  (" + file + ")" + (p.Visible ? "" : "  [unsichtbar]"), () => FlashPlayerMenu(pp)));
+                l.Add(Menu(p.gameObject.name + "  (" + file + ")" + (p.Visible ? "" : "  [hidden]"), () => FlashPlayerMenu(pp)));
             }
             if (players.Length == 0) l.Add(Info("kein Flash-Film aktiv"));
             l.Add(Head("FILM LADEN (frontend)"));
@@ -302,7 +302,7 @@ namespace TDU2.Map.Vehicles
                 p.Load(path);
                 var pm = Mgr != null ? Mgr.GetComponent<TDU2PauseMenu>() : null;
                 if (pm?.Texts != null) Flash.FlashLocalization.Apply(p, pm.Texts);
-                Toast("Geladen: " + System.IO.Path.GetFileName(path) + " – Labels unter Flash-Filme > Film > Wurzel");
+                Toast("Loadet: " + System.IO.Path.GetFileName(path) + " – Labels under Flash Movies > Movie > Wurzel");
             }
             catch (Exception ex) { Destroy(go); Toast("Fehler: " + ex.Message); }
         }
@@ -311,18 +311,18 @@ namespace TDU2.Map.Vehicles
         {
             var l = new List<Item>();
             if (p == null || p.Root == null) { l.Add(Info("Film nicht mehr vorhanden")); return l; }
-            l.Add(Head("FILM " + System.IO.Path.GetFileName(p.BankPath ?? "")));
-            l.Add(Bool("Sichtbar", () => p.Visible, v => p.Visible = v, true));
-            l.Add(Bool("Maus", () => p.MouseEnabled, v => p.MouseEnabled = v, false));
-            l.Add(Int("GUI-Tiefe", () => p.GuiDepth, v => p.GuiDepth = v, -100, 100, 0));
-            l.Add(Info("Fokus (_root.Clip)", () => p.GetVariable("/:Clip") ?? "-"));
-            l.Add(Action_("Film zurücksetzen (neu laden + einrichten)", () => ResetFlash(p)));
-            l.Add(Info("Achtung: Labels/Bilder der Wurzel bauen Menüs/HUD um – dann hier zurücksetzen"));
-            l.Add(Head("EINGABE (wie das Spiel)"));
-            foreach (var (lab, fn, arg) in new (string, string, string)[] { ("▲ hoch", "Move", "up"), ("▼ runter", "Move", "down"), ("◀ links", "Move", "left"), ("▶ rechts", "Move", "right"), ("A", "A", null), ("B", "B", null), ("X", "X", null), ("Y", "Y", null) })
+            l.Add(Head("Clip " + System.IO.Path.GetFileName(p.BankPath ?? "")));
+            l.Add(Bool("Visible", () => p.Visible, v => p.Visible = v, true));
+            l.Add(Bool("Mouse", () => p.MouseEnabled, v => p.MouseEnabled = v, false));
+            l.Add(Int("GUI Depth", () => p.GuiDepth, v => p.GuiDepth = v, -100, 100, 0));
+            l.Add(Info("Focus (_root.Clip)", () => p.GetVariable("/:Clip") ?? "-"));
+            l.Add(Action_("Reset Movie (Reload + Set Up)", () => ResetFlash(p)));
+            l.Add(Info("Note: Labels/images from the root folder alter the menus/HUD—reset them here"));
+            l.Add(Head("INPUT (like the game)"));
+            foreach (var (lab, fn, arg) in new (string, string, string)[] { ("▲ UP", "Move", "up"), ("▼ DOWM", "Move", "down"), ("◀ LEFT", "Move", "left"), ("▶ RIGHT", "Move", "right"), ("A", "A", null), ("B", "B", null), ("X", "X", null), ("Y", "Y", null) })
             {
                 string f2 = fn, a2 = arg;
-                l.Add(Action_(lab, () => { bool ok = a2 != null ? p.Input(f2, a2) : p.Input(f2); Toast(f2 + (a2 != null ? "(" + a2 + ")" : "") + (ok ? " verarbeitet" : ": keine Funktion")); }));
+                l.Add(Action_(lab, () => { bool ok = a2 != null ? p.Input(f2, a2) : p.Input(f2); Toast(f2 + (a2 != null ? "(" + a2 + ")" : "") + (ok ? " processed" : ": no function")); }));
             }
             l.AddRange(FlashClipItems(p, "/", p.Root));
             return l;
@@ -341,7 +341,7 @@ namespace TDU2.Map.Vehicles
                 p.Visible = vis;
                 var pm = Mgr != null ? Mgr.GetComponent<TDU2PauseMenu>() : null;
                 if (pm?.Texts != null) Flash.FlashLocalization.Apply(p, pm.Texts);
-                Toast("Neu geladen: " + System.IO.Path.GetFileName(p.BankPath) + " (Ausgangszustand – ggf. Menü erneut öffnen)");
+                Toast("Reloaded: " + System.IO.Path.GetFileName(p.BankPath) + " (Initial state—reopen the menu if necessary)");
             }
             catch (Exception ex) { Toast("Fehler: " + ex.Message); }
             Rebuild();
@@ -360,11 +360,11 @@ namespace TDU2.Map.Vehicles
             var l = new List<Item>();
             if (inst == null) { l.Add(Info("Clip nicht mehr vorhanden")); return l; }
             l.Add(Head("CLIP " + path));
-            l.Add(Info("Bild / Label", () => (inst.Frame + 1) + " / " + inst.Timeline.FrameCount + "   [" + (FlashLabel(inst) ?? "-") + "]" + (inst.Playing ? "  ▶" : "  ■")));
-            l.Add(Bool("Abspielen", () => inst.Playing, v => inst.Playing = v, true));
-            l.Add(Int("Bild", () => inst.Frame + 1, v => p.GotoFrame(inst, Mathf.Clamp(v - 1, 0, Math.Max(0, inst.Timeline.FrameCount - 1)), true), 1, Math.Max(1, inst.Timeline.FrameCount), 1));
+            l.Add(Info("Image / Label", () => (inst.Frame + 1) + " / " + inst.Timeline.FrameCount + "   [" + (FlashLabel(inst) ?? "-") + "]" + (inst.Playing ? "  ▶" : "  ■")));
+            l.Add(Bool("Play", () => inst.Playing, v => inst.Playing = v, true));
+            l.Add(Int("Image", () => inst.Frame + 1, v => p.GotoFrame(inst, Mathf.Clamp(v - 1, 0, Math.Max(0, inst.Timeline.FrameCount - 1)), true), 1, Math.Max(1, inst.Timeline.FrameCount), 1));
             var owner = inst.Owner;
-            if (owner != null) l.Add(Bool("Sichtbar (_visible)", () => owner.Visible, v => owner.Visible = v, true));
+            if (owner != null) l.Add(Bool("Vvisible (_visible)", () => owner.Visible, v => owner.Visible = v, true));
             if (inst.Timeline.Labels.Count > 0)
             {
                 l.Add(Head("LABELS (Enter = gotoAndPlay, ←→ = gotoAndStop)"));
@@ -375,8 +375,8 @@ namespace TDU2.Map.Vehicles
                     string lab = kv.Key;
                     l.Add(new Item
                     {
-                        Label = lab + "  (Bild " + (kv.Value + 1) + ")",
-                        Value = () => FlashLabel(inst) == lab ? "◀ aktiv" : "",
+                        Label = lab + "  (Image " + (kv.Value + 1) + ")",
+                        Value = () => FlashLabel(inst) == lab ? "◀ aktive" : "",
                         Activate = () => { p.GotoLabel(path, lab, true); Toast(path + " → " + lab + " (Play)"); },
                         Change = _ => { p.GotoLabel(path, lab, false); Toast(path + " → " + lab + " (Stop)"); },
                     });
@@ -390,7 +390,7 @@ namespace TDU2.Map.Vehicles
                 string cp = (path == "/" ? "/" : path + "/") + name;
                 var sub = d.Sprite;
                 bool shown = d.Visible && !(d.Cx.Mul.w <= 0.003f && d.Cx.Add.w <= 0.003f);
-                kids.Add(Menu(name + (shown ? "" : "  [unsichtbar]") + "  (" + sub.Timeline.FrameCount + " B., " + sub.Timeline.Labels.Count + " Labels)", () => FlashClipItems(p, cp, sub)));
+                kids.Add(Menu(name + (shown ? "" : "  [hidden]") + "  (" + sub.Timeline.FrameCount + " B., " + sub.Timeline.Labels.Count + " Labels)", () => FlashClipItems(p, cp, sub)));
             }
             if (kids.Count > 0) { l.Add(Head("UNTER-CLIPS")); l.AddRange(kids); }
             return l;
@@ -623,7 +623,6 @@ namespace TDU2.Map.Vehicles
                 if (Avatars.AvatarLibrary.Clothe(c.Items[i])?.Part == p) { c.Items.RemoveAt(i); if (i < c.Colors.Count) c.Colors.RemoveAt(i); }
         }
 
-        // ------------------------------------------------------------------ Netzwerk
         List<Item> NetworkMenu()
         {
             var gd = TDU2GameData.Instance;
@@ -716,7 +715,6 @@ namespace TDU2.Map.Vehicles
             v.transform.SetPositionAndRotation(pos, rot);
         }
 
-        // ------------------------------------------------------------------ Autos
         static readonly string[] AidNames = { "Sicher", "Sport", "Hypersport", "Aus" };
 
         List<Item> CarsMenu()
@@ -750,7 +748,6 @@ namespace TDU2.Map.Vehicles
             return l;
         }
 
-        // ------------------------------------------------------------------ Verkehr
         List<Item> TrafficMenu()
         {
             var tr = Traffic;
@@ -790,7 +787,6 @@ namespace TDU2.Map.Vehicles
             return l;
         }
 
-        // ------------------------------------------------------------------ Welt laden / Streaming
         TDU2MapStreamer Streamer
         {
             get
@@ -893,7 +889,6 @@ namespace TDU2.Map.Vehicles
 #endif
         }
 
-        // ------------------------------------------------------------------ Jobs & Threads
         List<Item> JobsMenu()
         {
             var s = Streamer;
@@ -920,7 +915,6 @@ namespace TDU2.Map.Vehicles
             return l;
         }
 
-        // ------------------------------------------------------------------ Rendering
         static readonly string[] ShadowNames = { "Aus", "Nur harte", "Alle" };
         static readonly string[] ShadowResNames = { "Niedrig", "Mittel", "Hoch", "Sehr hoch" };
         static readonly string[] AnisoNames = { "Aus", "Je Textur", "Erzwungen" };
@@ -967,7 +961,6 @@ namespace TDU2.Map.Vehicles
         }
         bool _grassOn = true, _vegOn = true;
 
-        // ------------------------------------------------------------------ Auslastung
         float _fps, _ftAvg, _ftMin, _ftMax;
         int _sampleFrames; float _sampleTime, _sampleMin = float.MaxValue, _sampleMax;
         float _countAt; int _renderers, _renderersOn, _visible, _gameObjects;
@@ -1115,7 +1108,6 @@ namespace TDU2.Map.Vehicles
             Toast("Auto: " + ((car.Brand ?? "") + " " + car.ModelName).Trim());
         }
 
-        // ------------------------------------------------------------------ Wetter
         static readonly string[] KindNames = { "Automatisch", "Sonne", "Wolken", "Regen", "Vor Regen", "Nach Regen", "Gewitter" };
 
         List<Item> WeatherMenu()
@@ -1167,7 +1159,6 @@ namespace TDU2.Map.Vehicles
             return hh.ToString("00") + ":" + mm.ToString("00");
         }
 
-        // ------------------------------------------------------------------ Zeichnen (Stil des edDebug-Textmenüs)
         static readonly Color CYellow = new Color(1f, 0.9f, 0.2f), CCyan = new Color(0.3f, 0.95f, 1f), CGreen = new Color(0.45f, 1f, 0.45f),
                               CPurple = new Color(0.85f, 0.55f, 1f), CBlue = new Color(0.55f, 0.7f, 1f), CWhite = new Color(0.92f, 0.92f, 0.92f);
 

@@ -91,7 +91,7 @@ namespace TDU2.Map.Formats
             }
             else
             {
-                Debug.LogWarning($"[TDU2] Unbekanntes Texturformat 0x{Format:x} ({Name ?? Bin.KeyToString(Key)})");
+                DebugManager.Warning($"Unknown texture format: 0x{Format:x} ({Name ?? Bin.KeyToString(Key)})");
                 return null;
             }
             tex.name = Name ?? Bin.KeyToString(Key);

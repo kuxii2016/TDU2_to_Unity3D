@@ -123,7 +123,10 @@ namespace TDU2.Map.Flash
                     kv.Value.Applied = inst;
                 }
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Flash-Pins: " + ex.Message); }
+            catch (Exception ex) 
+            { 
+                DebugManager.Error("Flashpin: " +ex.Message);
+            }
             finally { _applyingPins = false; }
         }
 

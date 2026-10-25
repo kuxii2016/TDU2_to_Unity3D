@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
@@ -58,6 +58,47 @@ namespace TDU2.Map.Vehicles
         public static readonly Dictionary<string, string> ExtraSpotNumbers = new Dictionary<string, string>();
 
         sealed class Segment { public int Type; public Vector3[] Pts; }
+
+        public static class RoadLog
+        {
+            static readonly object _sync = new object();
+            static readonly List<string> _lines = new List<string>();
+            static bool _done;
+
+            public static bool Enabled = true;
+
+            public static void Reset()
+            {
+                lock (_sync) { _lines.Clear(); _done = false; }
+            }
+
+            public static void Line(string s)
+            {
+                if (!Enabled) return;
+                lock (_sync) { if (_lines.Count < 200000) _lines.Add(s); }
+            }
+
+            public static void Flush()
+            {
+                if (!Enabled) return;
+                lock (_sync)
+                {
+                    if (_done) return;
+                    _done = true;
+                    try
+                    {
+                        var sb = new System.Text.StringBuilder(_lines.Count * 48 + 64);
+                        sb.AppendLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] TDU2 Minimap-Diagnose  ({_lines.Count} Zeilen)");
+                        foreach (var l in _lines) sb.AppendLine(l);
+                        string dir = Path.Combine(Path.GetDirectoryName(Application.dataPath) ?? ".", "Logs");
+                        Directory.CreateDirectory(dir);
+                        File.WriteAllText(Path.Combine(dir, "tdu2_minimap.txt"), sb.ToString());
+                        Debug.Log("[TDU2] Minimap: Diagnose geschrieben (" + _lines.Count + " Zeilen, Logs/tdu2_minimap.txt)");
+                    }
+                    catch (Exception ex) { Debug.LogWarning("[TDU2] Minimap-Diagnose: " + ex.Message); }
+                }
+            }
+        }
 
         /// <summary>Straßennamen aus ROAD_DETAIL/ROAD_MAP: dicht abgetastete Punkte mit Name und Suchradius.</summary>
         sealed class RoadNameIndex
@@ -192,18 +233,23 @@ namespace TDU2.Map.Vehicles
             _bank = bank; Error = null;
             _nameIndex = null; _streetName = null;
             if (_mesh != null) { Destroy(_mesh); _mesh = null; }
+            RoadLog.Reset();
+            RoadLog.Line("Bank: " + bank);
             _task = Task.Run(() =>
             {
                 var segs = Load(bank);
+                RoadLog.Line($"ROAD_DETAIL geladen: {segs.Count} Segmente");
                 // Topologie (ROAD_MAP): Straßen enden an Knoten mit Position -> Kreuzungen/Kreisel exakt verbinden
                 try
                 {
                     var net = IaNetwork.LoadFromBank(bank);
                     _nameIndex = RoadNameIndex.Build(net);
                     _net = net;
+                    RoadLog.Line($"ROAD_MAP: {net.Roads.Count} Straßen, {net.Nodes.Count} Knoten, {net.Profiles.Count} Profile, {net.NameBytes} Namens-Bytes, {_nameIndex.NameCount} benannte Namen");
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    RoadLog.Line("ROAD_MAP nicht ladbar: " + ex.Message);
                     _nameIndex = null;
                     _net = null;
                 }
@@ -250,10 +296,10 @@ namespace TDU2.Map.Vehicles
                 _hud.GotoLabel("/HUD/enter", "off", false);
                 _enterShown = false;
                 foreach (var n in HiddenMinimapParts) _hud.SetVisible("/HUD/minimap/" + n, false);
-                // Platzhaltertexte der Navi-Anzeige ("2500" + Einheit) leeren – ohne aktive Route zeigt das Spiel nichts
+                // Platzhaltertexte der Navi-Anzeige ("2500" + Einheit) leeren â€“ ohne aktive Route zeigt das Spiel nichts
                 _hud.SetVariable("/:obj_Distance", ""); _hud.SetVariable("/:gps_Unit", "");
                 _hud.SetPosition("/HUD/minimap/cursor", LureCenter);
-                // Online-Status (Blip) und Spielerzahl wie im Spiel – angewendet in UpdateOnlineDisplay()
+                // Online-Status (Blip) und Spielerzahl wie im Spiel â€“ angewendet in UpdateOnlineDisplay()
                 _appliedOnline = null; _appliedPlayers = -1;
                 _hud.SetVariable("/:IsOnline", OnlineStatus ? "1" : "0");
                 _hud.SetVariable("/:NbPlayers", PlayerCount.ToString());
@@ -372,7 +418,7 @@ namespace TDU2.Map.Vehicles
             var root = Streamer != null ? Streamer.MapRoot : null;
             _mesh = BuildRoadMesh(segs, root, null);
             _meshOrigin = root != null ? root.position : Vector3.zero;
-            // Ausdehnung des Straßennetzes (Kartenebene) – z.B. für die Positionsmarke der Inselkarte im Pausemenü
+            // Ausdehnung des Straßennetzes (Kartenebene) â€“ z.B. für die Positionsmarke der Inselkarte im Pausemenü
             var vb = _mesh.vertices;
             if (vb.Length > 0)
             {
@@ -384,13 +430,12 @@ namespace TDU2.Map.Vehicles
 
         /// <summary>Straßennetz geladen (für die große Karte).</summary>
         public bool HasRoads => _segs != null && _segs.Count > 0;
-        /// <summary>Material der Straßen (Vertexfarbe, ZTest Always – liegt über der Welt).</summary>
+        /// <summary>Material der Straßen (Vertexfarbe, ZTest Always â€“ liegt über der Welt).</summary>
         public Material RoadMaterial { get { if (!EnsureMaterial()) return null; if (_roadMat == null) { _roadMat = new Material(_mat.shader) { hideFlags = HideFlags.HideAndDontSave }; _roadMat.mainTexture = Texture2D.whiteTexture; _roadMat.SetFloat("_Circle", 0f); } return _roadMat; } }
 
         /// <summary>
         /// Straßennetz für die große Karte: Breite × <paramref name="widthMul"/> (Mindestbreite in Bildpunkten), Höhe aus dem
         /// Höhenraster (damit die Straßen bei geneigter Kamera auf dem Gelände liegen). Weltkoordinaten zum Zeitpunkt des
-        /// Aufrufs; mit Matrix4x4.Translate(MapRoot.position - origin) zeichnen (Floating Origin).
         /// </summary>
         public Mesh BuildMapRoads(float widthMul, out Vector3 origin)
         {
@@ -413,7 +458,8 @@ namespace TDU2.Map.Vehicles
             var cols = new List<Color32>(1 << 18);
             var idx = new List<int>(1 << 19);
             var ends = new List<(Vector2 p, float half, Color c, Vector2 dir)>();
-            var samples = new List<(Vector2 p, int seg)>();   // Straßenpunkte für die Verlängerung offener Enden
+            var samples = new List<(Vector2 p, int seg)>();
+            RoadLog.Line($"BuildRoadMesh: {segs.Count} Segmente, height={(height != null ? "Karte" : "Minimap")}, wMul={_wMul:0.##}, net={(_net != null ? _net.Roads.Count + " Straßen" : "keins")}");
             // Reihenfolge: Feldwege unten, Hauptstraßen oben
             foreach (int pass in new[] { 1, 3, 6 })
             {
@@ -449,6 +495,10 @@ namespace TDU2.Map.Vehicles
             bool[] handled = null;
             if (_net != null && _net.Nodes.Count > 0) handled = AddNodeJunctions(root, ends, samples, verts, cols, idx);
             AddJunctions(ends, samples, verts, cols, idx, handled);
+            // Kreuzungsflächen (JDET) exakt zeichnen: die Straßen enden an ihren Rändern, der Belag fehlt sonst.
+            AddJunctionAreas(root, verts, cols, idx);
+            RoadLog.Line($"Mesh fertig: {verts.Count} Vertices, {idx.Count / 3} Dreiecke");
+            RoadLog.Flush();
             // Kartenebene in die Welt-XZ-Ebene (Minimap: weit unterhalb der Insel, nur die Minimap-Kamera sieht sie)
             for (int i = 0; i < verts.Count; i++) { var q = verts[i]; verts[i] = new Vector3(q.x, height != null ? height(q.x, q.y) : 0f, q.y); }
             var mesh = new Mesh { name = height != null ? "TDU2_MapRoads" : "TDU2_Minimap", indexFormat = IndexFormat.UInt32, hideFlags = HideFlags.DontSave };
@@ -470,6 +520,8 @@ namespace TDU2.Map.Vehicles
             List<Vector3> verts, List<Color32> cols, List<int> idx, bool[] handled = null)
         {
             const float RNear = 22f, RFar = 45f;
+            int nHandled = 0;
+            if (handled != null) foreach (var h in handled) if (h) nHandled++;
             int n = ends.Count;
             var parent = new int[n];
             for (int i = 0; i < n; i++) parent[i] = i;
@@ -508,6 +560,8 @@ namespace TDU2.Map.Vehicles
                 l.Add(i);
             }
             var singles = new List<int>();
+            var jdiag = new System.Text.StringBuilder();
+            int nBigSpread = 0, nClustered = 0;
             foreach (var cl in clusters.Values)
             {
                 if (cl.Count < 2) { singles.Add(cl[0]); continue; }
@@ -519,14 +573,27 @@ namespace TDU2.Map.Vehicles
                     spread = Mathf.Max(spread, (ends[i].p - c).magnitude);
                     if (ends[i].half > maxHalf) { maxHalf = ends[i].half; col = ends[i].c; }
                 }
+                nClustered++;
+                if (spread > 8f)
+                {
+                    nBigSpread++;
+                    if (jdiag.Length < 200000)
+                        jdiag.AppendLine($"  Cluster {cl.Count} Enden @ ({c.x:0},{c.y:0}) spread={spread:0.0}");
+                }
                 if (spread < 1f) continue;   // reine Fortsetzung (Enden liegen aufeinander)
                 foreach (int i in cl)
                     if ((ends[i].p - c).sqrMagnitude > 0.25f) AddQuad(verts, cols, idx, ends[i].p, c, ends[i].half, ends[i].c);
                 AddDisc(verts, cols, idx, c, maxHalf * 1.15f, col);
             }
+            RoadLog.Line($"AddJunctions-Cluster: {nClustered} Cluster, davon {nBigSpread} mit spread>8m");
+            if (jdiag.Length > 0) RoadLog.Line("  große Cluster:" + Environment.NewLine + jdiag.ToString().TrimEnd());
 
             // offene Enden in Fahrtrichtung bis zur nächsten Straße verlängern
-            if (singles.Count == 0) return;
+            if (singles.Count == 0)
+            {
+                RoadLog.Line($"AddJunctions: {n} Enden ({nHandled} von Knoten behandelt), {clusters.Count} Cluster, keine offenen Enden");
+                return;
+            }
             var sgrid = new Dictionary<long, List<int>>();
             for (int k = 0; k < samples.Count; k++)
             {
@@ -534,6 +601,8 @@ namespace TDU2.Map.Vehicles
                 if (!sgrid.TryGetValue(key, out var l)) sgrid[key] = l = new List<int>();
                 l.Add(k);
             }
+            int extended = 0;
+            var odiag = new System.Text.StringBuilder();
             foreach (int i in singles)
             {
                 var e = ends[i];
@@ -554,8 +623,35 @@ namespace TDU2.Map.Vehicles
                 {
                     AddQuad(verts, cols, idx, e.p, target, e.half, e.c);
                     AddDisc(verts, cols, idx, target, e.half * 1.1f, e.c);
+                    extended++;
+                }
+                else if (odiag.Length < 200000)
+                {
+                    float nd = NearAnyDist(samples, sgrid, Key, e.p, i & ~1, RFar * 2f);
+                    odiag.AppendLine($"  offenes Ende @ ({e.p.x:0},{e.p.y:0}) dir=({e.dir.x:0.##},{e.dir.y:0.##}) nextRoad={nd:0.0}");
                 }
             }
+            RoadLog.Line($"AddJunctions: {n} Enden ({nHandled} von Knoten behandelt), {clusters.Count} Cluster, {singles.Count} offene Enden, davon {extended} verlÃ¤ngert, {singles.Count - extended} ohne Anschluss");
+            if (odiag.Length > 0) RoadLog.Line("  offene Enden:" + Environment.NewLine + odiag.ToString().TrimEnd());
+        }
+
+        static float NearAnyDist(List<(Vector2 p, int seg)> samples, Dictionary<long, List<int>> sgrid,
+            Func<int, int, long> key, Vector2 p, int seg, float maxD)
+        {
+            float best = maxD, b2 = maxD * maxD;
+            int cell = 45;
+            int gx = Mathf.FloorToInt(p.x / cell), gz = Mathf.FloorToInt(p.y / cell);
+            int r = 2;
+            for (int dx = -r; dx <= r; dx++)
+                for (int dz = -r; dz <= r; dz++)
+                    if (sgrid.TryGetValue(key(gx + dx, gz + dz), out var l))
+                        foreach (int i in l)
+                        {
+                            if (samples[i].seg == seg) continue;
+                            float d = (samples[i].p - p).sqrMagnitude;
+                            if (d < b2) { b2 = d; best = Mathf.Sqrt(d); }
+                        }
+            return best;
         }
 
         /// <summary>
@@ -594,7 +690,6 @@ namespace TDU2.Map.Vehicles
                                 if (samples[i].seg == seg) continue;
                                 var v = samples[i].p - p; float d = v.sqrMagnitude;
                                 if (d >= best) continue;
-                                // nicht nach hinten (in die eigene Straße zurück)
                                 if (dir.sqrMagnitude > 0.5f && d > 4f && Vector2.Dot(v, dir) < 0f) continue;
                                 best = d; hit = samples[i].p; ok = true;
                             }
@@ -627,6 +722,9 @@ namespace TDU2.Map.Vehicles
             }
             var nodePts = new Dictionary<int, List<Vector2>>();
             var nodeStyle = new Dictionary<int, (float half, Color c)>();
+            var nodeArms = new Dictionary<int, List<(Vector2 p, float half, Color c, int ei)>>();
+            int nOther = 0, nRing = 0, nCenter = 0, nSkip = 0, nNodes = 0;
+            var nodeDiag = new System.Text.StringBuilder();
             foreach (var road in net.Roads.Values)
             {
                 if (road.Pieces.Count == 0) continue;
@@ -640,27 +738,36 @@ namespace TDU2.Map.Vehicles
                     Vector2 c = Map(root, node.Pos);
                     if (!StyleIdx(e, out float half, out Color col, out int ei)) { half = 4f * _wMul; col = RoadTown; }
                     float gap = (e - c).magnitude;
+                    int segId = ei >= 0 ? ei - (ei & 1) : -1;
+                    Vector2 eDir = ei >= 0 ? ends[ei].dir : (c - e) / Mathf.Max(gap, 1e-3f);
+                    if (NearestOther(e, segId, eDir, JoinMax, out var hit))
+                    {
+                        if ((hit - e).sqrMagnitude > 0.25f) AddQuad(verts, cols, idx, e, hit, half, col);
+                        if (ei >= 0) handled[ei] = true;
+                        if (!nodeStyle.TryGetValue(nodeId, out var nsO) || half > nsO.half) nodeStyle[nodeId] = (half, col);
+                        nOther++;
+                        nodeDiag.AppendLine($"  node {nodeId} road {road.Id} {(side == 0 ? "Start" : "Ende")}: gap={gap:0.0} -> FremdstraÃŸe in {(hit - e).magnitude:0.0}");
+                        continue;
+                    }
                     if (gap > NodeGap)
                     {
-                        int seg = ei >= 0 ? ei - (ei & 1) : -1;
-                        Vector2 d = ei >= 0 ? ends[ei].dir : (c - e) / Mathf.Max(gap, 1e-3f);
-                        if (NearestOther(e, seg, d, Mathf.Min(JoinMax, gap), out var hit))
-                        {
-                            if ((hit - e).sqrMagnitude > 0.25f) AddQuad(verts, cols, idx, e, hit, half, col);
-                            if (ei >= 0) handled[ei] = true;
-                            continue;   // Kreisel/Einmündung: nicht zur Knotenmitte
-                        }
+                        if (ei >= 0) handled[ei] = true;
+                        if (!nodeArms.TryGetValue(nodeId, out var armsR)) nodeArms[nodeId] = armsR = new List<(Vector2, float, Color, int)>(8);
+                        armsR.Add((e, half, col, ei));
+                        nRing++;
+                        nodeDiag.AppendLine($"  node {nodeId} road {road.Id} {(side == 0 ? "Start" : "Ende")}: gap={gap:0.0} -> RING (kein Treffer)");
+                        continue;
                     }
-                    if (gap > 80f) continue;   // unplausible Knotenlage: nicht quer über die Insel ziehen (Lückenfüller übernimmt)
-                    if (gap > 0.5f) AddQuad(verts, cols, idx, e, c, half, col);
+                    if (gap > 80f) { nSkip++; nodeDiag.AppendLine($"  node {nodeId} road {road.Id} {(side == 0 ? "Start" : "Ende")}: gap={gap:0.0} -> VERWORFEN (>80)"); continue; }   // unplausible Knotenlage: nicht quer Ã¼ber die Insel ziehen (LÃ¼ckenfÃ¼ller Ã¼bernimmt)
+                    if (gap > 0.5f) AddQuad(verts, cols, idx, e, c, half, col);   // Zufahrt bis zur Knotenmitte
                     if (ei >= 0) handled[ei] = true;
                     if (!nodeStyle.TryGetValue(nodeId, out var ns) || half > ns.half) nodeStyle[nodeId] = (half, col);
-                    // Querschnittskanten der Zufahrten sammeln: die konvexe Hülle schließt die Keile zwischen ihnen
-                    Vector2 dir = ei >= 0 ? ends[ei].dir : (c - e) / Mathf.Max(gap, 1e-3f);
+                    Vector2 dir = eDir;
                     if (dir.sqrMagnitude < 1e-6f) dir = (c - e).sqrMagnitude > 1e-6f ? (c - e).normalized : Vector2.up;
                     Vector2 nrm = new Vector2(-dir.y, dir.x) * half;
                     if (!nodePts.TryGetValue(nodeId, out var pl)) nodePts[nodeId] = pl = new List<Vector2>(8);
                     pl.Add(e - nrm); pl.Add(e + nrm);
+                    nCenter++;
                 }
             }
             foreach (var kv in nodePts)
@@ -670,7 +777,51 @@ namespace TDU2.Map.Vehicles
                 if (kv.Value.Count >= 4) AddHullFill(verts, cols, idx, kv.Value, ns.c);
                 AddDisc(verts, cols, idx, Map(root, node.Pos), ns.half * 1.1f, ns.c);
             }
+            foreach (var kv in nodeArms)
+            {
+                var arms = kv.Value;
+                if (arms.Count < 2) continue;
+                nNodes++;
+                Vector2 c = Map(root, net.Nodes[kv.Key].Pos);
+                arms.Sort((a, b) => Mathf.Atan2(a.p.y - c.y, a.p.x - c.x).CompareTo(Mathf.Atan2(b.p.y - c.y, b.p.x - c.x)));
+                nodeDiag.AppendLine($"  node {kv.Key}: RINGVERBINDUNG mit {arms.Count} Armen @ ({c.x:0},{c.y:0})");
+                if (arms.Count == 2)
+                {
+                    // Nur zwei Arme: gerade Verbindung (Gegenverkehr/versetzte StraÃŸe), KEIN Bogen (der erzeugte die Beule).
+                    var a = arms[0]; var b = arms[1];
+                    if ((a.p - b.p).sqrMagnitude >= 1f)
+                        AddQuad(verts, cols, idx, a.p, b.p, Mathf.Max(a.half, b.half), a.half >= b.half ? a.c : b.c);
+                    continue;
+                }
+                for (int i = 0; i < arms.Count; i++)
+                {
+                    var a = arms[i]; var b = arms[(i + 1) % arms.Count];
+                    if ((a.p - b.p).sqrMagnitude < 1f) continue;
+                    // Bogen am Kreisrand andeuten: Zwischenpunkt auf dem Kreis um c mit Radius |a.p-c|
+                    Vector2 mid = RingArc(c, a.p, b.p, 3);
+                    Color col = a.half >= b.half ? a.c : b.c;
+                    float half = Mathf.Max(a.half, b.half);
+                    AddQuad(verts, cols, idx, a.p, mid, half, col);
+                    AddQuad(verts, cols, idx, mid, b.p, half, col);
+                }
+            }
+            RoadLog.Line($"AddNodeJunctions: {net.Nodes.Count} Knoten, {ends.Count} Enden -> FremdstraÃŸe={nOther}, Ring={nRing}, Mitte={nCenter}, verworfen={nSkip}, Ringknoten={nNodes}");
+            if (nodeDiag.Length > 0) RoadLog.Line("Knoten-Details:" + Environment.NewLine + nodeDiag.ToString().TrimEnd());
             return handled;
+        }
+
+        /// <summary>Ein Zwischenpunkt auf dem Kreis um <paramref name="c"/> von <paramref name="a"/> nach <paramref name="b"/> (kurzer Weg).</summary>
+        static Vector2 RingArc(Vector2 c, Vector2 a, Vector2 b, int segs)
+        {
+            float ra = (a - c).magnitude, rb = (b - c).magnitude;
+            float r = (ra + rb) * 0.5f;
+            float a0 = Mathf.Atan2(a.y - c.y, a.x - c.x);
+            float a1 = Mathf.Atan2(b.y - c.y, b.x - c.x);
+            float d = a1 - a0;
+            while (d > Mathf.PI) d -= 2f * Mathf.PI;
+            while (d < -Mathf.PI) d += 2f * Mathf.PI;
+            float am = a0 + d * 0.5f;
+            return c + new Vector2(Mathf.Cos(am), Mathf.Sin(am)) * r;
         }
 
         static void AddDisc(List<Vector3> verts, List<Color32> cols, List<int> idx, Vector2 c, float r, Color col)
@@ -687,7 +838,49 @@ namespace TDU2.Map.Vehicles
 
         static float Cross2(Vector2 o, Vector2 a, Vector2 b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
 
-        /// <summary>Füllt die konvexe Hülle der Kreuzungs-Querschnittskanten (schließt die Keile zwischen den Zufahrten).</summary>
+        void AddJunctionAreas(Transform root, List<Vector3> verts, List<Color32> cols, List<int> idx)
+        {
+            var net = _net;
+            if (net == null || net.Junctions.Count == 0) return;
+            int drawn = 0, skipped = 0;
+            foreach (var kv in net.Junctions)
+            {
+                var jn = kv.Value;
+                Color col = RoadTown;
+                if (net.Nodes.TryGetValue(jn.NodeId, out var node) && net.Roads.Count > 0)
+                {
+                    foreach (var rid in node.Roads)
+                        if (net.Roads.TryGetValue(rid, out var rr) && rr.Pieces.Count > 0)
+                        {
+                            int t = rr.Pieces[0].SpeedClass;
+                            if (t >= 4) { col = RoadMain; break; }
+                        }
+                }
+                foreach (var outline in jn.Outlines)
+                {
+                    if (outline.Length < 3) { skipped++; continue; }
+                    var poly = new Vector2[outline.Length];
+                    for (int i = 0; i < outline.Length; i++) poly[i] = Map(root, new Vector3(outline[i].x, 0f, outline[i].y));
+                    AddPolygon(verts, cols, idx, poly, col);
+                    drawn++;
+                }
+            }
+            RoadLog.Line($"AddJunctionAreas: {drawn} Umrisse gezeichnet, {skipped} Ã¼bersprungen");
+        }
+
+        /// <summary>FÃ¼llt ein (nahezu) konvexes Polygon als FÃ¤cher um den Schwerpunkt.</summary>
+        static void AddPolygon(List<Vector3> verts, List<Color32> cols, List<int> idx, Vector2[] poly, Color col)
+        {
+            Vector2 cen = Vector2.zero;
+            foreach (var p in poly) cen += p;
+            cen /= poly.Length;
+            int b0 = verts.Count;
+            verts.Add(cen); cols.Add(col);
+            for (int i = 0; i < poly.Length; i++) { verts.Add(poly[i]); cols.Add(col); }
+            for (int i = 0; i < poly.Length; i++) { idx.Add(b0); idx.Add(b0 + 1 + i); idx.Add(b0 + 1 + (i + 1) % poly.Length); }
+        }
+
+        /// <summary>FÃ¼llt die konvexe HÃ¼lle der Kreuzungs-Querschnittskanten (schlieÃŸt die Keile zwischen den Zufahrten).</summary>
         static void AddHullFill(List<Vector3> verts, List<Color32> cols, List<int> idx, List<Vector2> pts, Color col)
         {
             if (pts.Count < 3) return;
@@ -729,7 +922,7 @@ namespace TDU2.Map.Vehicles
             if (l < 1e-3f) return;
             dir /= l;
             var nrm = new Vector2(-dir.y, dir.x) * half;
-            var ext = dir * half * 0.6f;   // Überstand schließt Fugen in Kurven
+            var ext = dir * half * 0.6f;   // Ãœberstand schlieÃŸt Fugen in Kurven
             a -= ext; b += ext;
             int i0 = v.Count;
             v.Add(a - nrm); v.Add(a + nrm); v.Add(b + nrm); v.Add(b - nrm);
@@ -775,7 +968,6 @@ namespace TDU2.Map.Vehicles
                 _hud.SetVariable("/:nb_FRplayers", PlayerCount.ToString());
                 _hud.SetVariable("/:nb_players", PlayerCount.ToString());
                 _hud.SetVariable("/:NbPlayers", PlayerCount.ToString()); _lastPlayersVar = _hud.GetVariable("/:NbPlayers");
-                // Spielerzahl einblenden (offline nicht – wie im Spiel nur in einer Online-Sitzung)
                 if (OnlineStatus || !first) _hud.GotoLabel("/HUD/minimap/nb_players/in_out", "in", true);
             }
             TDU2Radio.Instance.canPlayRadio = true;
@@ -794,7 +986,6 @@ namespace TDU2.Map.Vehicles
                 _task = null;
             }
             bool show = ShowMinimap && Vehicle != null && Vehicle.isActiveAndEnabled;
-            // Händler (im Ausstellungsauto): HUD-Film nur für Zubehörmenü/Restzeit sichtbar, Minimap und Einfahrt aus
             bool overlay = HudOverlay && !show;
             if (_hud != null)
             {
@@ -885,14 +1076,13 @@ namespace TDU2.Map.Vehicles
         readonly string[] _slotLabel = new string[MaxSpotIcons];
         readonly int[] _slotLogo = new int[MaxSpotIcons];
 
-        /// <summary>Datenbank für die Händler-Logos (Marke des Bestands); vom Fahrzeug-Manager gesetzt.</summary>
         public CarDatabase Database;
         string _bnkDir;
         Texture2D _brandAtlas; bool _brandAtlasTried;
         readonly Dictionary<int, Texture2D> _logoTex = new Dictionary<int, Texture2D>();
 
         /// <summary>
-        /// Markenlogo als eigene Textur: frontend/AllRes/logotexturepage.bnk -> brands_map.2db (1024 x 256, 16 x 4 Kacheln à 64 px,
+        /// Markenlogo als eigene Textur: frontend/AllRes/logotexturepage.bnk -> brands_map.2db (1024 x 256, 16 x 4 Kacheln a 64 px,
         /// Index = DBBrands._logo_global_index). Wie die übrigen .2db-Rohdaten liegt die oberste Bildzeile bei v = 0.
         /// </summary>
         Texture2D LogoTexture(int index)
@@ -919,7 +1109,7 @@ namespace TDU2.Map.Vehicles
             if ((row + 1) * 64 > _brandAtlas.height) return null;
             if (SystemInfo.copyTextureSupport != CopyTextureSupport.None)
             {
-                // Blockweise GPU-Kopie im DXT-Format (64 px = 16 Blöcke, Zeile 0 der Rohdaten = y 0)
+                // Blockweise GPU-Kopie im DXT-Format (64 px = 16 BlÃ¶cke, Zeile 0 der Rohdaten = y 0)
                 t = new Texture2D(64, 64, _brandAtlas.format, false) { name = "Logo_" + index, wrapMode = TextureWrapMode.Clamp, hideFlags = HideFlags.DontSave };
                 t.Apply(false, true);
                 Graphics.CopyTexture(_brandAtlas, 0, 0, col * 64, row * 64, 64, 64, t, 0, 0, 0, 0);
@@ -953,14 +1143,14 @@ namespace TDU2.Map.Vehicles
             }
             else _hud.GotoLabel(spotPath + "/ic", "lod", false);
         }
-        [Tooltip("Größe der Spot-Icons auf der Minimap (1 = Originalgröße)")]
+        [Tooltip("GrÃ¶ÃŸe der Spot-Icons auf der Minimap (1 = OriginalgrÃ¶ÃŸe)")]
         public float SpotIconScale = 0.55f;
 
         /// <summary>Spot-Typ (Code aus spots.bin) -> Label des Spot-Icons (Sprite "Spot" in hud.vmf, wie auf der großen Karte).</summary>
-        /// <summary>Zusätzliche Spots (z.B. Meisterschaftsrennen, siehe Racing.TDU2Championships): Code -> Symbol-Label / Anzeigename.</summary>
+        /// <summary>ZusÃ¤tzliche Spots (z.B. Meisterschaftsrennen, siehe Racing.TDU2Championships): Code -> Symbol-Label / Anzeigename.</summary>
         public static readonly Dictionary<string, string> ExtraSpotLabels = new Dictionary<string, string>();
         public static readonly Dictionary<string, string> ExtraSpotNames = new Dictionary<string, string>();
-        /// <summary>Bild für den Karten-Tooltip zusätzlicher Spots: Pfad unter frontend/AllRes/MapScreens ohne .bnk (z.B. "contest/cl-4-1").</summary>
+        /// <summary>Bild fär den Karten-Tooltip zusätzlicher Spots: Pfad unter frontend/AllRes/MapScreens ohne .bnk (z.B. "contest/cl-4-1").</summary>
         public static readonly Dictionary<string, string> ExtraSpotPictures = new Dictionary<string, string>();
 
         public static string SpotLabel(string code)
@@ -1008,7 +1198,7 @@ namespace TDU2.Map.Vehicles
                 var w = Streamer.MapRoot.TransformPoint(s.Position);
                 var rel = w - carPos; rel.y = 0f;
                 float x = Vector3.Dot(rel, right) * k, y = Vector3.Dot(rel, fwd) * k;
-                if (Mathf.Abs(x) > LureHalf - 6f || Mathf.Abs(y) > LureHalf - 6f) continue;   // außerhalb des Kartenfelds
+                if (Mathf.Abs(x) > LureHalf - 6f || Mathf.Abs(y) > LureHalf - 6f) continue;
                 list.Add((rel.sqrMagnitude, LureCenter + new Vector2(x, -y), label, s.Code));
             }
             list.Sort((a, b) => a.d.CompareTo(b.d));
@@ -1022,11 +1212,11 @@ namespace TDU2.Map.Vehicles
                 }
                 var d = _hud.AttachSprite("/HUD/minimap", _spotChar, name, SpotDepthBase + i);
                 if (d == null) continue;
-                int logoKey = list[i].label == "carDealer" ? (list[i].code ?? "").GetHashCode() : 0;
+                int logoKey = (list[i].label == "carDealer" || list[i].label == "bikeDealer") ? (list[i].code ?? "").GetHashCode() : 0;
                 if (_slotLabel[i] != list[i].label || _slotLogo[i] != logoKey || d.Sprite == null || d.Sprite.Frame < 0)
                 {
                     _hud.GotoLabel("/HUD/minimap/" + name, list[i].label, false);
-                    if (list[i].label == "carDealer") ApplyDealerLogo("/HUD/minimap/" + name, list[i].code);
+                    if ((list[i].label == "carDealer" || list[i].label == "bikeDealer")) ApplyDealerLogo("/HUD/minimap/" + name, list[i].code);
                     _slotLabel[i] = list[i].label; _slotLogo[i] = logoKey;
                 }
                 d.Matrix = new Matrix2D { A = SpotIconScale, D = SpotIconScale };
@@ -1039,7 +1229,7 @@ namespace TDU2.Map.Vehicles
         // ------------------------------------------------------------------ Mitspieler auf der Minimap (Spot-Symbol Label "player")
         const int PlayerDepthBase = SpotDepthBase + 200, MaxPlayerIcons = 16;
         readonly bool[] _playerSlot = new bool[MaxPlayerIcons];
-        [Tooltip("Mitspieler außerhalb des Kartenausschnitts am Rand zeigen")]
+        [Tooltip("Mitspieler auÃŸerhalb des Kartenausschnitts am Rand zeigen")]
         public bool ClampPlayersToEdge = true;
 
         void UpdatePlayerIcons(Vector3 carPos, Vector3 right, Vector3 fwd, float k)
@@ -1104,22 +1294,18 @@ namespace TDU2.Map.Vehicles
                 _hud.GotoLabel("/HUD/enter", "on", true);
                 _hud.GotoLabel("/HUD/enter/enter_txt", "ok", false);
                 _hud.GotoLabel("/HUD/enter/Spot", label, false);
-                if (label == "carDealer") ApplyDealerLogo("/HUD/enter/Spot", spotCode);
+                if (label == "carDealer" || label == "bikeDealer") ApplyDealerLogo("/HUD/enter/Spot", spotCode);
                 _enterShown = true; _enterLabel = label;
             }
         }
 
         public bool HasOriginalHud => _hud != null;
 
-        /// <summary>Zugriff auf den Original-HUD (hud.vmf) fǬr andere Komponenten, z.B. das Rennen-HUD.</summary>
         public VmfPlayer HudPlayer => _hud;
 
-        /// <summary>HUD-Film ohne Fahrzeug zeigen (nur Overlays wie das Zubehörmenü beim Händler; Minimap bleibt aus).</summary>
         public static bool HudOverlay;
         bool _overlayActive;
-        /// <summary>Straßennetz der Insel (ROAD_MAP/ROAD_DETAIL), null solange es lädt.</summary>
         public IaNetwork Network => _net;
-        /// <summary>Sichtradius der Minimap (m).</summary>
         public float ViewRange => _range;
 
         // ------------------------------------------------------------------ Rennstrecke auf der Minimap (RaceRoute)
@@ -1132,7 +1318,7 @@ namespace TDU2.Map.Vehicles
             _routeBuiltNext = -2;   // Neubau erzwingen
         }
 
-        /// <summary>Fortschritt setzen (Index des nächsten Tors); färbt den befahrenen Teil um.</summary>
+        /// <summary>Fortschritt setzen (Index des nÃ¤chsten Tors); färbt den befahrenen Teil um.</summary>
         public void SetRaceProgress(int nextIndex)
         {
             if (_routeNext == nextIndex) return;
@@ -1156,7 +1342,6 @@ namespace TDU2.Map.Vehicles
         void DrawRouteMesh()
         {
             if (_route == null || _routeMesh == null || _routeMesh.vertexCount == 0) return;
-            // Checkpoints liegen in Inselkoordinaten -> Kartenebene wie die Straßen (MapRoot bildet in die Welt ab).
             if (Streamer == null || Streamer.MapRoot == null) return;
             var m = Streamer.MapRoot.localToWorldMatrix * Matrix4x4.Translate(new Vector3(0f, MapPlaneY, 0f));
             Graphics.DrawMesh(_routeMesh, m, _roadMat, MapLayer, _mapCam, 0, null, false, false);
@@ -1208,17 +1393,14 @@ namespace TDU2.Map.Vehicles
 
                 GL.PushMatrix();
                 GL.LoadPixelMatrix(0, Screen.width, Screen.height, 0);
-                // Rand + Hintergrund
                 _mat.mainTexture = Texture2D.whiteTexture;
                 _mat.SetFloat("_Circle", 1f);
                 _mat.SetPass(0);
                 Quad(cx - R - 3, cy - R - 3, 2 * R + 6, 2 * R + 6, new Color(0.85f, 0.9f, 1f, 0.55f));
                 Quad(cx - R, cy - R, 2 * R, 2 * R, Background);
-                // Straßen
                 _mat.mainTexture = _rt;
                 _mat.SetPass(0);
                 Quad(x0, y0, size, size, Color.white);
-                // Spielerpfeil
                 _mat.mainTexture = Texture2D.whiteTexture;
                 _mat.SetFloat("_Circle", 0f);
                 _mat.SetPass(0);
@@ -1251,7 +1433,7 @@ namespace TDU2.Map.Vehicles
 
         void DrawStreetName(Rect mapRect)
         {
-            if (!ShowStreetName || string.IsNullOrEmpty(_streetName)) return;
+            if (!ShowStreetName || string.IsNullOrEmpty(_streetName) || !Gameconfig.showRoadNames) return;
             if (_streetStyle == null)
                 _streetStyle = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, clipping = TextClipping.Clip, wordWrap = false };
             _streetStyle.normal.textColor = Color.white;

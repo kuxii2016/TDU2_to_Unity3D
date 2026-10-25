@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using TDU2.Map.Formats;
 using TDU2.Map.IO;
@@ -8,7 +8,7 @@ using UnityEngine.Rendering;
 
 namespace TDU2.Map.Vehicles
 {
-    /// <summary>Eine geparste Szene (3dd + 3dg + 2dm) mit vorbereiteten Meshdaten (nur LOD 0).</summary>
+    /// <summary>A parsed scene (3dd + 3dg + 2dm) with pre-processed mesh data (LOD 0 only).</summary>
     public sealed class CarScene
     {
         public Scene3DD Scene;
@@ -43,7 +43,7 @@ namespace TDU2.Map.Vehicles
         }
     }
 
-    /// <summary>Alle Daten eines Fahrzeugs (im Hintergrund geladen): Modell, Interieur, Felgen, Reifen, Texturen, Drehmoment, Sound.</summary>
+    /// <summary>All vehicle data (loaded in the background): model, interior, rims, tires, textures, torque, sound.</summary>
     public sealed class CarAssets
     {
         public CarPhysics Car;
@@ -53,12 +53,12 @@ namespace TDU2.Map.Vehicles
         public CarScene Body, Cockpit, RimFront, RimRear, Tire, TireRear;
         public Material2DM ColorLib;
         /// <summary>
-        /// Werks-Beklebung (DBCarPhysicsData._sticker, z.B. "rsa_CCXR" der Rennschul-Autos, Polizei): 1024er Stickermap aus
-        /// scenarics/stickers/&lt;name&gt;.2db (EXE: "%sscenarics/Stickers/%s.2db"). Wird auf die Lack-Materialien gelegt.
+        /// Factory decals (DBCarPhysicsData._sticker, e.g., “rsa_CCXR” for racing school cars, police): 1024-pixel decal map from
+        /// scenarics/stickers/&lt;name&gt;.2db (EXE: “%sscenarics/Stickers/%s.2db”). Applied to the paint materials.
         /// </summary>
         public TextureDef Sticker;
         public string StickerName;
-        /// <summary>common_car.bnk/dirt_scratch.2db: R = Schmutz (außen/unten zuerst), G = Kratzer.</summary>
+        /// <summary>common_car.bnk/dirt_scratch.2db: R = Dirt (outside/bottom first), G = Scratches.</summary>
         public TextureDef DirtMap;
         public Curve TorqueMax, TorqueMin;
         public CarSoundConfig Sound;
@@ -66,12 +66,12 @@ namespace TDU2.Map.Vehicles
         public readonly Dictionary<string, (float[] data, int channels, int rate)> Waves = new Dictionary<string, (float[], int, int)>(StringComparer.OrdinalIgnoreCase);
         public readonly List<LocalTextureSet> TextureSets = new List<LocalTextureSet>();
         public readonly List<string> Log = new List<string>();
-        /// <summary>Verkehrsauto (islands/&lt;insel&gt;/vehicules/traffic): ein Modell mit Rädern (DISC_xx) in der Szene, keine Felgen-/Interieur-Bänke.</summary>
+        /// <summary>Traffic car (islands/island/vehicules/traffic): a model with wheels (DISC_xx) in the scene, no rims or interior seats.</summary>
         public bool Traffic;
 
         /// <summary>
-        /// Verkehrsauto laden: Modell aus islands/&lt;insel&gt;/vehicules/traffic/&lt;_car_model&gt;&lt;_car_version&gt;.bnk,
-        /// Sound aus sound/vehicles/&lt;name&gt;_high.bnk, sonst vehicules/med/generic_traffic_low.bnk.
+        /// Load traffic car: Model from islands/island/vehicles/traffic/_car_model/_car_version/.bnk,
+        /// Sound from sound/vehicles/name&gt;_high.bnk, otherwise vehicles/med/generic_traffic_low.bnk.
         /// </summary>
         public static CarAssets LoadTraffic(string bankPath, string soundBank, CarPhysics car)
         {
@@ -103,16 +103,16 @@ namespace TDU2.Map.Vehicles
             return a;
         }
 
-        /// <param name="rimId">Felge (DBRims._hashcode, 0 = Standardfelge des Autos)</param>
-        /// <param name="interiorId">Innenraum (DBInterior._hashcode, 0 = erster Innenraum der Lackfarbe)</param>
+        /// <param name="rimId">Wheel (DBRims._hashcode, 0 = car's default wheel)</param>
+        /// <param name="interiorId">Interior (DBInterior._hashcode, 0 = first interior for the paint color)</param>
         public static CarAssets Load(string bnkDir, CarDatabase db, CarPhysics car, int colorIndex, bool loadSound, int rimId = 0, int interiorId = 0)
         {
             var a = new CarAssets { Car = car };
-            // Felgen: gewählte Felge (Autohändler) bzw. Standardfelge des Autos (DBRims)
+            // Rims: selected rim (car dealer) or the car's standard rim (DBRims)
             if (rimId != 0) db.Rims.TryGetValue(rimId, out a.Rim);
             if (a.Rim == null && !db.Rims.TryGetValue(car.DefaultRims, out a.Rim) && db.CarRims.TryGetValue(car.Id, out var rl) && rl.Count > 0)
                 db.Rims.TryGetValue(rl[0], out a.Rim);
-            // Sondermodelle (Rennschule, Polizei ...) haben eigene IDs ohne Farbtabelle: _duplicate = Basis-Auto (Farben/Felgen)
+            // Special models (racing school, police, etc.) have their own IDs without a color table: _duplicate = base car (colors/rims)
             int dup = car.Raw != null ? car.Raw.I("_duplicate", 0) : 0;
             if (a.Rim == null && dup != 0 && db.CarRims.TryGetValue(dup, out var drl) && drl.Count > 0) db.Rims.TryGetValue(drl[0], out a.Rim);
             if ((!db.Colors.TryGetValue(car.Id, out var cols) || cols.Count == 0) && dup != 0) db.Colors.TryGetValue(dup, out cols);
@@ -123,7 +123,6 @@ namespace TDU2.Map.Vehicles
                     db.Interiors.TryGetValue(a.Color.Interiors[0], out a.Interior);
             }
 
-            // Werks-Beklebung
             string sticker = car.Raw != null ? car.Raw.S("_sticker", "") : "";
             if (!string.IsNullOrEmpty(sticker) && sticker != "##")
             {
@@ -159,11 +158,10 @@ namespace TDU2.Map.Vehicles
                 TryLoad(a, CarDatabase.TireBank(bnkDir, a.Rim.DiameterRear), b => a.TireRear = CarScene.Load(b));
             TryLoad(a, CarDatabase.CommonCarBank(bnkDir), b =>
             {
-                // Schmutz-/Kratzer-Maske der Karosserie (R = Schmutz, G = Kratzer), gleiche Abwicklung wie die Stickermap
+                // Dirt/scratch mask for the car body (R = dirt, G = scratches), same process as the sticker map
                 var de = b.Find("dirt_scratch.2db");
                 if (de != null) a.DirtMap = TextureDef.Parse(b.Read(de), "dirt_scratch");
             });
-            // Instrumentenskalen (hud.ini)
             try
             {
                 var gb = CarDatabase.GaugeBank(bnkDir, car);
@@ -181,14 +179,14 @@ namespace TDU2.Map.Vehicles
         }
 
         /// <summary>
-        /// Motor-/Fahrsound (CarVSTConfig.xmb + WAVs der Soundbank) in vorhandene Assets laden – z.B. für das Ausstellungsauto
-        /// beim Händler (Einsteigen: Motor anlassen, Gas im Stand, Hupe). Ohne Unity-API, darf im Hintergrund laufen.
+        /// Load engine/driving sounds (CarVSTConfig.xmb + WAV files from the sound bank) into existing assets—e.g., for the display car
+        /// at the dealership (getting in: start the engine, accelerate from a standstill, honk the horn). No Unity API required; may run in the background.
         /// </summary>
         public static void LoadSound(CarAssets a, string bnkDir, CarPhysics car)
         {
             if (a == null || car == null) return;
             var sb = CarDatabase.SoundBank(bnkDir, car);
-            if (sb == null) { a.Log.Add("Keine Soundbank für " + car.FileName); return; }
+            if (sb == null) { a.Log.Add("Keine Soundbank fÃ¼r " + car.FileName); return; }
             try
             {
                 var bank = BnkArchive.Open(sb);
@@ -203,7 +201,7 @@ namespace TDU2.Map.Vehicles
                     if (WavDecoder.TryDecode(bank.Read(e), out var data, out int ch, out int rate)) a.Waves[e.Name] = (data, ch, rate);
                     else a.Log.Add("WAV nicht lesbar: " + e.Name);
                 }
-                a.Sound = sound;   // zuletzt: wer Sound sieht, findet auch die WAVs
+                a.Sound = sound;
             }
             catch (Exception ex) { a.Log.Add("Sound: " + ex.Message); }
         }
@@ -231,8 +229,8 @@ namespace TDU2.Map.Vehicles
             TextureSets.Add(set);
         }
 
-        /// <summary>Main-Thread.</summary>
-        /// <summary>Textur nach Dateiname (ohne .2db) aus allen geladenen Bänken (z.B. "shadow" aus common_car.bnk).</summary>
+        /// <summary>Main thread.</summary>
+        /// <summary>Textures by filename (without .2db) from all loaded banks (e.g., “shadow” from common_car.bnk).</summary>
         public Texture2D FindTexture(string name, TextureWrapMode u = TextureWrapMode.Clamp, TextureWrapMode v = TextureWrapMode.Clamp)
         {
             foreach (var s in TextureSets)
@@ -254,13 +252,13 @@ namespace TDU2.Map.Vehicles
         }
     }
 
-    /// <summary>Unity-Materialien für Fahrzeuge (Lack, Chrom, Glas, Interieur) aus den .2dm-Parametern.</summary>
+    /// <summary>Unity materials for vehicles (paint, chrome, glass, interior) based on the .2dm parameters.</summary>
     public static class CarMaterials
     {
         public static Shader Opaque, Glass;
         static readonly ulong SemFlake = Bin.KeyFromString("FLAKE");
         static readonly ulong SemTexLight = Bin.KeyFromString("TEXLIGHT");
-        /// <summary>lgt_g: Funktionsmaske der Lichtgläser – R = Bremse, G = Rückfahrlicht, B = Licht (Scheinwerfer/Rücklicht), A = 0 → Blinker.</summary>
+        /// <summary>lgt_g: Function mask for the light lenses – R = Brake light, G = Reverse light, B = Light (headlight/taillight), A = 0 → Turn signal.</summary>
         static readonly ulong SemGlossLight = MaterialDef.KeyFromName("GLOSSLIGHT");
 
         public static Material Create(MaterialDef def, Func<ulong, TextureWrapMode, TextureWrapMode, Texture2D> getTex, MaterialDef paint, MaterialDef tint = null, bool interior = false)
@@ -271,9 +269,9 @@ namespace TDU2.Map.Vehicles
             if (Glass == null) Glass = Opaque;
             if (def == null) return new Material(Opaque) { name = "Car_Default" };
 
-            var src = paint ?? def;   // Lackfarbe aus <car>_color.2dm ersetzt das Material "Paint"
-            // Interieur: nur die Farbe übernehmen, die Textur des Original-Cockpitmaterials behalten (Sitz-/Türnähte,
-            // Perforierung „Dots“ usw. stammen aus der Cockpit-Textur, nicht aus dem Farbmaterial).
+            var src = paint ?? def;   // The paint color from <car>_color.2dm replaces the “Paint” material
+            // Interior: Apply only the color; retain the texture of the original cockpit material (seat/door stitching,
+            // “Dots” perforations, etc., come from the cockpit texture, not from the color material).
             var colorSrc = tint ?? src;
             if (tint != null) src = def;
             MaterialFactory.GetBlend(def, out float alphaRef, out bool twoSided);
@@ -284,9 +282,9 @@ namespace TDU2.Map.Vehicles
 
             Texture2D tex = null, overlay = null;
             MaterialLayer layer;
-            // Verkehrsautos (TD_CarDeform_TS): SHADOW = Karosserie-Schattierung (weiß, UV0) x Lackfarbe, DETAIL = Lichter-/Detail-Atlas
-            // mit Alpha auf dem zweiten UV-Satz darüber. Vorher wurde der Detail-Atlas als ganze Textur genommen (weiße Flecken).
-            // (Bremsscheiben Mat_TS_Disk_xx haben SHADOW = DETAIL = dieselbe Scheibentextur: dann einfach die Textur, kein Overlay)
+            // Road cars (TD_CarDeform_TS): SHADOW = body shading (white, UV0) x paint color, DETAIL = highlights/detail atlas
+            // with alpha on the second UV set on top. Previously, the detail atlas was used as a single texture (white spots).
+            // (Brake discs Mat_TS_Disk_xx have SHADOW = DETAIL = the same disc texture: in that case, just the texture, no overlay)
             if (src.TryGetLayer(MaterialDef.SemShadow, out var shl) && shl.TextureKey != 0 && src.TryGetLayer(MaterialDef.SemDetail, out var dtl) && dtl.TextureKey != 0
                 && shl.TextureKey != dtl.TextureKey)
             {
@@ -296,13 +294,13 @@ namespace TDU2.Map.Vehicles
             else if (src.TryGetLayer(MaterialDef.SemDetail, out layer) || src.TryGetLayer(MaterialDef.SemColor, out layer))
                 tex = getTex(layer.TextureKey, TextureDef.WrapFromEden(layer.AddressU), TextureDef.WrapFromEden(layer.AddressV));
 
-            // Grundfarbe: RAMPCLR1 (Rampenfarbe) > Diffusfarbe des Materials (MAT.+0xC0) > Textur/Weiß.
-            // Interieur-Materialien (z. B. "Plastic1_Int" 0,196 grau, "Black_Leather" 0,322, "A_C1_*" beige, "RedPlastic")
-            // tragen ihre Farbe NUR im Diffus-Block, nicht als RAMPCLR1 (der dort (0,0,0) ist). Außerhalb des Innenraums
-            // gilt weiterhin: kein RAMPCLR1 + keine Farbtextur = schwarz (Reifen/Felgen-Materialien).
+            // Base color: RAMPCLR1 (ramp color) > material's diffuse color (MAT.+0xC0) > texture/white.
+            // Interior materials (e.g., “Plastic1_Int” 0.196 gray, “Black_Leather” 0.322, “A_C1_*” beige, “RedPlastic”)
+            // carry their color ONLY in the diffuse block, not as RAMPCLR1 (which is (0,0,0) there). Outside the interior,
+            // the following still applies: no RAMPCLR1 + no color texture = black (tire/rim materials).
             Color col = Color.white;
-            // Reifenprofil (rim/tire/t_<Zoll>p_oh, Material T_SpCa_O): DETAIL ist lr_ambocc_* = gepackte Verschattung (R scharf,
-            // G/B weicher) und keine Farbtextur – als RGB gezeigt gab das bunte Streifen. Grundton = Diffusfarbe des Materials (0,3).
+            // Tire profile (rim/tire/t_<inches>p_oh, material T_SpCa_O): DETAIL is lr_ambocc_* = packed shading (R sharp,
+            // G/B softer) and no color texture—showing it as RGB resulted in colorful stripes. Base color = diffuse color of the material (0.3).
             bool aoMask = tex != null && tex.name != null && tex.name.IndexOf("ambocc", StringComparison.OrdinalIgnoreCase) >= 0;
             if (aoMask) col = new Color(0.30f, 0.30f, 0.30f, 1f);
             else if (colorSrc.TryGetParam("RAMPCLR1", out var rc) && (rc.x + rc.y + rc.z) > 0.001f) col = new Color(rc.x, rc.y, rc.z, 1f);
@@ -319,7 +317,7 @@ namespace TDU2.Map.Vehicles
             if (name.Contains("mirror")) { metal = 1f; smooth = 0.97f; col = new Color(0.8f, 0.8f, 0.8f); }
 
             Material m;
-            // Glas mit deckendem Renderstatus (Blending aus, z.B. Verkehrsautos ohne Innenraum): wie im Spiel undurchsichtig, spiegelnd
+            // Glass with an opaque render status (blending off, e.g., traffic cars without interiors): opaque and reflective, just like in the game
             bool opaqueGlass = name.Contains("glass") && !alphaBlend && !additive && f[10] == 6 && f[8] == 2 && f[9] == 1
                                && (tex == null || tex.format == TextureFormat.DXT1);   // Glastextur ohne Alpha
             if (opaqueGlass)
@@ -359,7 +357,7 @@ namespace TDU2.Map.Vehicles
                 m.SetFloat("_StickerAlphaOnly", 1f);
                 m.SetFloat("_StickerUV", 1f);
             }
-            // Lichtgläser: TEXLIGHT = eingeschaltete Variante der Lichttextur (lgt_on) -> Emission, per Script geregelt
+            // Light glasses: TEXLIGHT = “on” version of the light texture (lgt_on) -> emission, controlled by script
             if (m.HasProperty("_EmissionTex") && def.TryGetLayer(SemTexLight, out var tl) && tl.TextureKey != 0)
             {
                 var on = getTex(tl.TextureKey, TextureWrapMode.Clamp, TextureWrapMode.Clamp);
@@ -369,8 +367,8 @@ namespace TDU2.Map.Vehicles
                     var mask = getTex(gl.TextureKey, TextureWrapMode.Clamp, TextureWrapMode.Clamp);
                     if (mask != null)
                     {
-                        // Funktionsmaske: scharf sampeln, sonst leuchten Nachbarregionen
-                        // (z. B. der Blinker) durch bilineare Filterung leicht mit.
+                        // Function mask: sample sharply; otherwise, neighboring regions
+                        // (e.g., the turn signal) will glow slightly due to bilinear filtering.
                         mask.filterMode = FilterMode.Point;
                         mask.anisoLevel = 0;
                         m.SetTexture("_LightMask", mask);
@@ -379,7 +377,7 @@ namespace TDU2.Map.Vehicles
                 }
             }
             if (m.HasProperty("_Cull")) m.SetFloat("_Cull", twoSided || alphaBlend ? 0f : 2f);
-            // Lack: zusätzliche Klarlackschicht (Reflexion + Glanzpunkt), Chrom etwas Glanz
+            // Paint: additional clear coat (reflection + highlight), chrome with a slight sheen
             if (m.HasProperty("_ClearCoat"))
             {
                 if (isPaint) m.SetFloat("_ClearCoat", 1f);
@@ -391,9 +389,9 @@ namespace TDU2.Map.Vehicles
         }
 
         /// <summary>
-        /// Leuchtendes Lampenglas eines Verkehrsautos. Die Original-Materialien (FRL_*) sind unbespannte
-        /// Blend-/Glasflächen ohne Emissionsparameter; als sichtbares Glas dunkel, Beleuchtung rein über
-        /// "_Emission" (weiße Leuchttextur * _EmissionTint * _Emission, siehe TDU2/Car).
+        /// Illuminated headlight lens of a passenger car. The original materials (FRL_*) are untextured
+        /// reflective/glass surfaces without emission parameters; dark as visible glass, lighting provided solely via
+        /// “_Emission” (white glow texture * _EmissionTint * _Emission, see TDU2/Car).
         /// </summary>
         public static Material CreateLamp(Color tint)
         {
@@ -417,10 +415,10 @@ namespace TDU2.Map.Vehicles
     }
 
     /// <summary>
-    /// Erzeugt das sichtbare Fahrzeug aus den Bänken. Das Modell liegt in Spielkoordinaten (+X = links) unter einem
-    /// an X gespiegelten "Visual"-Knoten, so dass es in Unity seitenrichtig erscheint.
-    /// Knoten (demangelte Namen): BODY_HR/MR/LR (LODs), FORK_xx (Radaufhängung), STIRRUP_xx (Lenkung), DISC_xx (Raddrehung),
-    /// D_RIM_xx / D_TIRE_xx (Felge/Reifen), STEER_HR (Lenkrad im Interieur), DOOR_L/R, D_SBOX (Schattenbox) ...
+    /// Creates the visible vehicle from the banks. The model is located in game coordinates (+X = left) under a
+    /// “Visual” node mirrored along the X-axis, so that it appears oriented correctly in Unity.
+    /// Nodes (missing names): BODY_HR/MR/LR (LODs), FORK_xx (suspension), STIRRUP_xx (steering), DISC_xx (wheel rotation),
+    /// D_RIM_xx / D_TIRE_xx (rim/tire), STEER_HR (steering wheel in the interior), DOOR_L/R, D_SBOX (shadow box) ...
     /// </summary>
     public sealed class CarModel
     {
@@ -429,32 +427,32 @@ namespace TDU2.Map.Vehicles
         public readonly List<UnityEngine.Object> Owned = new List<UnityEngine.Object>();
         public Bounds BodyBounds;
         public Transform SteeringWheel;
-        /// <summary>Lichtgläser (LGT_FL/FR/RL/RR/LGT) mit Leuchttextur (TEXLIGHT) – Helligkeit über "_Emission".</summary>
+        /// <summary>Light Glasses (LGT_FL/FR/RL/RR/LGT) with a luminous texture (TEXLIGHT) – brightness controlled via “_Emission”.</summary>
         public readonly List<Material> LightMaterials = new List<Material>();
 
-        /// <summary>Lichtfunktion einer Verkehrsauto-Leuchtfläche (aus dem Knotennamen FA_xx abgeleitet).</summary>
+        /// <summary>Lighting function of a traffic car light panel (derived from the node name FA_xx).</summary>
         public enum LampKind { Head, Tail, Brake, Reverse, Indicator, Beacon }
 
-        /// <summary>Leuchtmaterial einer einzelnen Lampe (Verkehrsautos: eigener Material-Ableger je Knoten).</summary>
+        /// <summary>Lighting material for a single lamp (traffic cars: separate material instance for each node).</summary>
         public struct TrafficLamp { public Material Mat; public LampKind Kind; public int Side; }
 
         /// <summary>
-        /// Lampen der Verkehrsautos. Die Verkehrsmodelle haben keine TEXLIGHT-Maske, sondern je Funktion eigene
-        /// Leuchtquads (FRL_L/FRL_S/FRL_F/FRL_W/FRL_G + headlight) an den FA_-Knoten. Diese werden als einzelne
-        /// Materialinstanzen gesammelt, damit Blinker links/rechts getrennt leuchten können.
+        /// Lights on traffic cars. The traffic models do not have a TEXLIGHT mask, but instead have their own
+        /// light quads (FRL_L/FRL_S/FRL_F/FRL_W/FRL_G + headlight) attached to the FA_ nodes for each function. These are grouped as individual
+        /// material instances so that the left and right turn signals can light up separately.
         /// </summary>
         public readonly List<TrafficLamp> TrafficLamps = new List<TrafficLamp>();
 
-        /// <summary>Wird beim Aufbau gesetzt: Karosserie eines Verkehrsautos (dann FA_-Lampenquads mitbauen).</summary>
+        /// <summary>Set during assembly: Body of a road car (then include FA_-lamp quads).</summary>
         bool _traffic;
-        /// <summary>Lack-Materialien der Karosserie (Beklebung, Schmutz).</summary>
+        /// <summary>Paint materials on the car body (decals, dirt).</summary>
         public readonly List<Material> PaintMaterials = new List<Material>();
-        /// <summary>Instrumente (HUD*-Materialien) – Beleuchtung per Script.</summary>
+        /// <summary>Instruments (HUD* materials) – Lighting via script.</summary>
         public readonly List<Material> DashMaterials = new List<Material>();
         public Transform CockpitRoot;
         public static float InteriorSelfIllum = 0.04f;
         public static float InteriorOcclusion = 0.4f;
-        /// <summary>Höchste Glätte matter Innenraum-Materialien (Stoff, Leder, Kunststoff – im Original ohne Umgebungsspiegelung).</summary>
+        /// <summary>Ultra-smooth matte interior materials (fabric, leather, plastic—as shown, without ambient reflections).</summary>
         public static float InteriorGloss = 0.1f;
 
         static readonly string[] KnownNames =
@@ -467,6 +465,7 @@ namespace TDU2.Map.Vehicles
             "FA_L_FL1_C","FA_L_FR1_C","FA_R_RL_C","FA_R_RR_C","FA_S_RL_C","FA_S_RR_C","FA_S_RL1_C","FA_S_RR1_C","FA_W_FL_C","FA_W_FR_C","FA_W_RL_C","FA_W_RR_C",
             "PSGFOOT_LR_L","PSGFOOT_LR_R","PSGFOOT_HR_L","PSGFOOT_HR_R","STEER_HR","STEER_LR","SEAT_HR_L","SEAT_HR_R","SEAT_LR_L","SEAT_LR_R","HARDTOP_MR","HARDTOP_LR",
             "GLASS_TOP","GLASS_LEFT","GLASS_RIGHT","HANDLE_DOOR_L","HANDLE_DOOR_R","LGT_FL_MR","LGT_FR_MR","LGT_RL_MR","LGT_RR_MR",
+            "BIKE_STAND","BRAKE_LEVER",
         };
         static Dictionary<ulong, string> _names;
 
@@ -489,10 +488,12 @@ namespace TDU2.Map.Vehicles
             if (u == "D_SBOX" || u == "D_SHADOW" || u == "D_HEADLIGHT" || u == "D_REVERSING" || u == "D_BREAKING") return true;
             if (u.StartsWith("D_WHEEL")) return true;                            // Hilfs-Zylinder (Radvolumen, verzerrt skaliert)
             if (u.StartsWith("EXO_FX")) return true;                             // Auspuff-Effekte
+            if (u == "BIKE_STAND") return true;                                  // Motorrad-Ständer: im Spiel eingeklappt
+            if(u == "D_SPLANE") return true;
             return false;
         }
 
-        /// <summary>Verkehrsautos: WLR_xx ist der Ersatz-Zylinder für das drehende Rad (DISC_xx wird gezeichnet), Schattenboxen/Dummies weg.</summary>
+        /// <summary>Traffic cars: WLR_xx is the replacement cylinder for the rotating wheel (DISC_xx is drawn), shadow boxes/dummies removed.</summary>
         static bool SkipTrafficNode(string n)
         {
             string u = n.ToUpperInvariant();
@@ -503,8 +504,8 @@ namespace TDU2.Map.Vehicles
         }
 
         /// <summary>
-        /// Rad-Platzhalter der Karosseriebank (D_TIRE_xx / WHEEL_xx): grobe Reifen-Geometrie, die im Spiel durch rim/tire/t_&lt;Zoll&gt;p_oh
-        /// ersetzt wird. Nur als Anker verwenden – sonst liegt ein zweiter, zackiger Reifen über dem echten.
+        /// Wheel placeholder for the body bench (D_TIRE_xx / WHEEL_xx): rough tire geometry, which is replaced in the game by rim/tire/t_&lt;inches&gt;p_oh
+        /// Use only as an anchor—otherwise, a second, jagged tire will appear on top of the real one.
         /// </summary>
         static bool WheelPlaceholder(string n)
         {
@@ -512,13 +513,13 @@ namespace TDU2.Map.Vehicles
             return u.Contains("TIRE") || u.Contains("WHEEL") || u.Contains("PNEU");
         }
 
-        /// <summary>Lichtflare-Punkte (FA_L = Scheinwerfer, FA_B = Bremse, FA_R = Rückfahr, FA_S = Rücklicht, FA_W = Blinker): nur als Anker, ohne Mesh.</summary>
+        /// <summary>Light flare points (FA_L = headlight, FA_B = brake light, FA_R = reverse light, FA_S = taillight, FA_W = turn signal): used only as anchors, without a mesh.</summary>
         static bool AnchorOnly(string n) => n.StartsWith("FA_", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
-        /// Scheinwerfer-Projektionsfläche ("headlight", headlightcaustics.2db): ein ca. 9x11 m großes Quad vor dem Auto,
-        /// das im Original den Lichtkegel auf den Boden projiziert. Im Unity-Nachbau ist es sichtbare "Karosserie", die
-        /// unter dem Boden hängt – daher nie rendern.
+        /// Headlight projection surface (“headlight”, headlightcaustics.2db): a quad approximately 9x11 m in size in front of the car,
+        /// which, in the original, projects the beam of light onto the ground. In the Unity recreation, it is visible “bodywork” that
+        /// hangs below the ground, so it should never be rendered.
         /// </summary>
         public static bool IsLightPlane(MaterialDef def)
         {
@@ -528,10 +529,10 @@ namespace TDU2.Map.Vehicles
         }
 
         /// <summary>
-        /// Lichtfunktion + Seite aus dem FA_-Knotennamen der Verkehrsmodelle:
-        ///   FA_L_* = Scheinwerfer, FA_B_* = Bremse, FA_R_* = Rückfahrlicht, FA_S_* = Rücklicht/Bremse,
-        ///   FA_W_* = Blinker, FA_G_* = Polizei-Rundumlicht; ...HEADLI... = Scheinwerfer.
-        /// Seite: L (links) = 1, R (rechts) = 2, sonst 0.
+        /// Light function + side based on the FA_-node names in the traffic models:
+        ///   FA_L_* = headlights, FA_B_* = brake lights, FA_R_* = reverse lights, FA_S_* = taillights/brake lights,
+        ///   FA_W_* = turn signal, FA_G_* = police rotating beacon; ...HEADLI... = headlights.
+        /// Side: L (left) = 1, R (right) = 2, otherwise 0.
         /// </summary>
         public static bool TryTrafficLamp(string name, out LampKind kind, out int side)
         {
@@ -564,7 +565,7 @@ namespace TDU2.Map.Vehicles
             return 0;
         }
 
-        /// <summary>Grundfarbe einer Verkehrsauto-Lampe (Emission-Farbe).</summary>
+        /// <summary>Base color of a traffic light (emission color).</summary>
         public static Color LampColor(LampKind kind)
         {
             switch (kind)
@@ -603,34 +604,36 @@ namespace TDU2.Map.Vehicles
                     if (!string.IsNullOrEmpty(a.Interior.Colors[i]) && a.ColorLib.Materials.TryGetValue(MaterialDef.KeyFromName(a.Interior.Colors[i]), out var d)) interiorRepl[i + 1] = d;
                 if (!string.IsNullOrEmpty(a.Interior.Material) && a.ColorLib.Materials.TryGetValue(MaterialDef.KeyFromName(a.Interior.Material), out var md)) interiorRepl[4] = md;
             }
-        MaterialDef Replace(MaterialDef def, bool interior)
-        {
-            if (def == null || def.Name == null) return null;
-            string n = def.Name.ToUpperInvariant();
-            if (n == "PAINT2") return paintDef2;
-            if (n == "PAINT_LR" || (n.StartsWith("PAINT_0") && n.Length <= 8)) return paintDef;   // LOD-/Zusatz-Lack wie Paint
-            if (!interior && n == "PAINT") return paintDef;
-            if (!interior) return null;
-            if (n == "PAINT") return paintDef;
-            for (int i = 1; i <= 3; i++)
-                if ((n.StartsWith("A_C" + i) || n.StartsWith("C" + i + "_")) && interiorRepl.TryGetValue(i, out var r)) return r;
-            if (n.StartsWith("MAT") && interiorRepl.TryGetValue(4, out var mr)) return mr;
-            return null;
-        }
-        // Interieurfarbe: Farbmaterial, dessen Grundfarbe auf das Cockpitmaterial getönt wird (Textur bleibt erhalten).
-        MaterialDef InteriorTint(MaterialDef def)
-        {
-            if (def == null || def.Name == null) return null;
-            string n = def.Name.ToUpperInvariant();
-            for (int i = 1; i <= 3; i++)
-                if ((n.StartsWith("A_C" + i) || n.StartsWith("C" + i + "_")) && interiorRepl.TryGetValue(i, out var r)) return r;
-            if (n.StartsWith("MAT") && interiorRepl.TryGetValue(4, out var mr)) return mr;
-            return null;
-        }
+            MaterialDef Replace(MaterialDef def, bool interior)
+            {
+                if (def == null || def.Name == null) return null;
+                string n = def.Name.ToUpperInvariant();
+                if (n == "PAINT2") return paintDef2;
+                if (n == "PAINT_LR" || (n.StartsWith("PAINT_0") && n.Length <= 8)) return paintDef;   // LOD-/Zusatz-Lack wie Paint
+                if (!interior && n == "PAINT") return paintDef;
+                if (!interior) return null;
+                if (n == "PAINT") return paintDef;
+                for (int i = 1; i <= 3; i++)
+                    if ((n.StartsWith("A_C" + i) || n.StartsWith("C" + i + "_")) && interiorRepl.TryGetValue(i, out var r)) return r;
+                if (n.StartsWith("MAT") && interiorRepl.TryGetValue(4, out var mr)) return mr;
+                return null;
+            }
+            // Interieurfarbe: Farbmaterial, dessen Grundfarbe auf das Cockpitmaterial getönt wird (Textur bleibt erhalten).
+            MaterialDef InteriorTint(MaterialDef def)
+            {
+                if (def == null || def.Name == null) return null;
+                string n = def.Name.ToUpperInvariant();
+                for (int i = 1; i <= 3; i++)
+                    if ((n.StartsWith("A_C" + i) || n.StartsWith("C" + i + "_")) && interiorRepl.TryGetValue(i, out var r)) return r;
+                if (n.StartsWith("MAT") && interiorRepl.TryGetValue(4, out var mr)) return mr;
+                return null;
+            }
 
             var matCache = new Dictionary<(object, ulong), Material>();
+            bool bikeModel = a.Car != null && a.Car.IsBike;
             if (a.Traffic) cm.BuildScene(a.Body, cm.Visual.transform, getTex, matCache, def => null, SkipTrafficNode);
-            else cm.BuildScene(a.Body, cm.Visual.transform, getTex, matCache, def => Replace(def, false), n => SkipNode(n, a.Cockpit != null));
+            else cm.BuildScene(a.Body, cm.Visual.transform, getTex, matCache, def => Replace(def, false),
+                n => SkipNode(n, a.Cockpit != null));
             if (!a.Traffic) cm.SetupPaint(a, matCache);
             if (a.Cockpit != null)
             {
@@ -649,10 +652,9 @@ namespace TDU2.Map.Vehicles
                         string mn = m.name.ToUpperInvariant();
                         bool hud = mn.StartsWith("HUD");
                         m.SetFloat("_SelfIllum", hud ? 0.12f : InteriorSelfIllum);
-                        // Innenraum: Himmelslicht und Umgebungsreflexion dämpfen (zu hell ohne Verdeckung durch Dach/Säulen)
                         if (m.HasProperty("_Occlusion")) m.SetFloat("_Occlusion", InteriorOcclusion);
-                        // Original (TD_CarMat_NM / TD_CarVelour / TD_CarPaint_NM): Stoffe, Leder, Kunststoff haben ENVCOEFF = 0 – keine
-                        // Umgebungsspiegelung, nur ein schwacher, breiter Glanz (SPECPARM 3…10). Standard-PBR mit Glätte ~0,2–0,35 und
+                        // Original (TD_CarMat_NM / TD_CarVelour / TD_CarPaint_NM): Stoffe, Leder, Kunststoff haben ENVCOEFF = 0 “ keine
+                        // Umgebungsspiegelung, nur ein schwacher, breiter Glanz (SPECPARM). Standard-PBR mit Glätte ~0,2 0,35 und
                         // Echtzeit-Reflexion ließ sie wie lackiert glänzen -> matt; Chrom/Stahl/Spiegel/Glas/Instrumente bleiben.
                         bool shiny = hud || mn.Contains("CHROME") || mn.Contains("STEEL") || mn.Contains("MIRROR") || mn.Contains("GLASS") || mn.Contains("ALU") || mn.Contains("METAL");
                         if (!shiny)
@@ -662,24 +664,59 @@ namespace TDU2.Map.Vehicles
                             if (m.HasProperty("_ClearCoat")) m.SetFloat("_ClearCoat", 0f);
                             if (m.HasProperty("_Flake")) m.SetFloat("_Flake", 0f);
                         }
+
+                        if (mn.Contains("MIRROR"))
+                        {
+                            //TODO: wir brauchen einen Shader um das ausen Herrunm zu Verdecken
+                        }
+
                         if (hud) cm.DashMaterials.Add(m);
                     }
             }
 
             // Felgen und Reifen an D_RIM_xx / D_TIRE_xx
-            foreach (var w in new[] { "FL", "FR", "RL", "RR" })
+            bool isBikeModel = bikeModel;
+            if (isBikeModel)
             {
-                bool front = w[0] == 'F';
-                var rimScene = front ? a.RimFront : (a.RimRear ?? a.RimFront);
-                float rimMeshR = 0f;
-                if (rimScene != null && cm.Nodes.TryGetValue("D_RIM_" + w, out var rimNode))
+                foreach (var w in new[] { "F", "R" })
                 {
-                    cm.BuildScene(rimScene, rimNode, getTex, matCache, d => null, n => false);
-                    rimMeshR = RimRadius(rimScene) * Mathf.Abs(rimNode.localScale.y);
+                    bool front = w == "F";
+                    var rimScene = front ? a.RimFront : (a.RimRear ?? a.RimFront);
+                    float rimMeshR = 0f;
+                    Transform rimNode = cm.Find("D_RIM_" + w);
+                    if (rimNode == null) rimNode = cm.Find("D_RIM_" + (front ? "FL" : "RL"));
+                    if (rimNode == null) rimNode = cm.Find(front ? "WHR_F" : "WHR_R");
+                    if (rimScene != null && rimNode != null)
+                    {
+                        cm.BuildScene(rimScene, rimNode, getTex, matCache, d => null, n => false);
+                        rimMeshR = RimRadius(rimScene) * Mathf.Abs(rimNode.localScale.y);
+                    }
+                    var tireScene = front ? a.Tire : (a.TireRear ?? a.Tire);
+                    Transform tireNode = cm.Find("TIRE_" + w);
+                    if (tireNode == null) tireNode = cm.Find("D_TIRE_" + w);
+                    if (tireNode == null) tireNode = cm.Find("D_TIRE_" + (front ? "FL" : "RL"));
+                    if (tireNode == null) tireNode = cm.Find(front ? "WHR_F" : "WHR_R");
+                    if (tireNode == null && rimNode != null) tireNode = rimNode;
+                    if (tireScene != null && tireNode != null)
+                        cm.BuildTire(a, tireScene, front, tireNode, rimMeshR, getTex, matCache);
                 }
-                var tireScene = front ? a.Tire : (a.TireRear ?? a.Tire);
-                if (tireScene != null && cm.Nodes.TryGetValue("D_TIRE_" + w, out var tireNode))
-                    cm.BuildTire(a, tireScene, front, tireNode, rimMeshR, getTex, matCache);
+            }
+            else
+            {
+                foreach (var w in new[] { "FL", "FR", "RL", "RR" })
+                {
+                    bool front = w[0] == 'F';
+                    var rimScene = front ? a.RimFront : (a.RimRear ?? a.RimFront);
+                    float rimMeshR = 0f;
+                    if (rimScene != null && cm.Nodes.TryGetValue("D_RIM_" + w, out var rimNode))
+                    {
+                        cm.BuildScene(rimScene, rimNode, getTex, matCache, d => null, n => false);
+                        rimMeshR = RimRadius(rimScene) * Mathf.Abs(rimNode.localScale.y);
+                    }
+                    var tireScene = front ? a.Tire : (a.TireRear ?? a.Tire);
+                    if (tireScene != null && cm.Nodes.TryGetValue("D_TIRE_" + w, out var tireNode))
+                        cm.BuildTire(a, tireScene, front, tireNode, rimMeshR, getTex, matCache);
+                }
             }
 
             cm.SteeringWheel = cm.Find("STEER_HR") ?? cm.Find("STEER_LR");
@@ -695,7 +732,7 @@ namespace TDU2.Map.Vehicles
         Vector3 _fallbackSize;
 
         /// <summary>
-        /// Karosserie-Bounds im Fahrzeugraum neu berechnen (nur sichtbare Teile). Aus den 8 Ecken der Mesh-Bounds jedes Teils –
+        /// Karosserie-Bounds im Fahrzeugraum neu berechnen (nur sichtbare Teile). Aus den 8 Ecken der Mesh-Bounds jedes Teils 
         /// unabhängig von der Drehung des Autos in der Welt (Welt-Bounds eines gedrehten Autos wären zu groß und schief).
         /// </summary>
         public Bounds RecomputeBodyBounds()
@@ -723,7 +760,7 @@ namespace TDU2.Map.Vehicles
         }
 
         /// <summary>UV-Satz der Stickermap/Schmutzmaske auf der Karosserie: -1 = automatisch, 0 = erster, 1 = zweiter UV-Satz.</summary>
-        public static int StickerUvSet = 1;   // geprüft an Esprit_S3: UV-Satz 1 = Karosserie-Abwicklung (Seiten oben/unten, Dach Mitte); UV 0 = Draufsicht-Projektion
+        public static int StickerUvSet = 1;
 
         /// <summary>
         /// UV-Satz der Karosserie-Abwicklung bestimmen: der Satz, dessen Koordinaten auf den Lackflächen im Bereich 0..1 liegen
@@ -792,7 +829,7 @@ namespace TDU2.Map.Vehicles
             if (a.Sticker != null)
             {
                 sticker = a.Sticker.CreateTexture(TextureWrapMode.Clamp, TextureWrapMode.Clamp);
-                if (sticker == null) Debug.LogWarning("[TDU2] Beklebung " + a.StickerName + ": Texturformat nicht unterstützt");
+                if (sticker == null) Debug.LogWarning("[TDU2] Beklebung " + a.StickerName + ": Texturformat nicht unterstÃ¼tzt");
                 else { sticker.name = a.StickerName; Owned.Add(sticker); }
             }
             if (a.DirtMap != null)
@@ -810,7 +847,7 @@ namespace TDU2.Map.Vehicles
             if (sticker != null) Debug.Log("[TDU2] Beklebung " + a.StickerName + " auf " + PaintMaterials.Count + " Lack-Material(ien)");
         }
 
-        /// <summary>Lack-Materialien der Karosserie: Paint, Paint2 (zweite Farbe), Paint_LR (LOD), Paint_01 …</summary>
+        /// <summary>Lack-Materialien der Karosserie: Paint, Paint2 (zweite Farbe), Paint_LR (LOD), Paint_01 â€¦</summary>
         public static bool IsPaintName(string n)
         {
             if (string.IsNullOrEmpty(n)) return false;
@@ -837,9 +874,9 @@ namespace TDU2.Map.Vehicles
                 foreach (var off in scene.InsOffsets) AddNode(cs, scene.GetIns(off), root, getTex, matCache, replace, tint, true, interior);
                 return;
             }
-            // Verkehrsautos: nur den Auto-Baum "D_CAR" aufbauen. Auf Szenenebene ("SCENE01") liegen außerdem
-            // die Scheinwerfer-Projektionsfläche ("headlight"), Schattenboxen und offene Türen/Anbauteile, die im
-            // Original nur Hilfsmittel/Projektionen sind – als gerenderte Geometrie hängen sie unter dem Auto.
+            // Traffic cars: Build only the “D_CAR” car tree. At the scene level (“SCENE01”), there are also
+            // the headlight projection surface (“headlight”), shadow boxes, and open doors/attachments, which in the
+            // original are only auxiliary elements/projections—as rendered geometry, they hang beneath the car.
             int carRoot = 0;
             if (_traffic)
             {
@@ -850,8 +887,8 @@ namespace TDU2.Map.Vehicles
             {
                 var byOff = new Dictionary<int, HieRecord>();
                 foreach (var h in hier) byOff[h.Offset] = h;
-                // Vorfahren von D_CAR (z. B. SCENE01) sind nur Container und dürfen nicht übersprungen werden,
-                // sonst wird der ganze D_CAR-Teilbaum mit entfernt.
+                // Ancestors of D_CAR (e.g., SCENE01) are only containers and must not be skipped;
+                // otherwise, the entire D_CAR subtree will be removed as well.
                 var keep = new HashSet<int> { carRoot };
                 for (var a = byOff[carRoot]; a.ParentOffset != 0 && byOff.TryGetValue(a.ParentOffset, out var pa); a = pa)
                 { if (!keep.Add(a.ParentOffset)) break; }
@@ -891,7 +928,7 @@ namespace TDU2.Map.Vehicles
             if (!Nodes.ContainsKey(name)) Nodes[name] = go.transform;
             if (withMesh && ins.Lods.Length > 0 && cs.Meshes.TryGetValue(ins.Lods[0].ObjKey, out var md) && md != null)
             {
-                // Scheinwerfer-Projektionsfläche ("headlight"): nicht rendern (hängt sonst unter dem Auto).
+                // Headlight projection surface (“headlight”): Do not render (otherwise it will hang under the car).
                 if (md.SubMeshMaterialIndex.Count > 0 && cs.Materials != null)
                 {
                     var bankKeys0 = cs.Scene.ReadMaterialBank(ins.MaterialBankOffset);
@@ -914,9 +951,9 @@ namespace TDU2.Map.Vehicles
                     Material mat;
                     if (isLampNode)
                     {
-                        // Eigenständige Materialinstanz je Lampe, damit Blinker links/rechts getrennt leuchten.
-                        // Die FRL_-Materialien des Originals sind unbespannte Blend-/Glasflächen ohne _EmissionTex –
-                        // daher ein eigenes, unbeleuchtetes Emissionsmaterial auf Basis des Auto-Shaders bauen.
+                        // Separate material instance for each lamp so that the left and right turn signals light up independently.
+                        // The original FRL_ materials are untextured reflector/glass surfaces without _EmissionTex—
+                        // therefore, create a separate, unlit emission material based on the Auto-Shader.
                         mat = CarMaterials.CreateLamp(LampColor(lampKind));
                         Owned.Add(mat);
                         if (mat != null && mat.HasProperty("_EmissionTex"))
@@ -947,10 +984,10 @@ namespace TDU2.Map.Vehicles
         }
 
         /// <summary>
-        /// Reifen: Das Modell aus rim/tire/t_&lt;Zoll&gt;p_oh.bnk ist normiert (Radius 0.48 m). Radial wird es auf
-        /// [Felgenradius, Reifenradius] abgebildet, axial auf die Reifenbreite (DBRims: Durchmesser, Breite, Flankenhöhe %).
+        /// Tire: The model from rim/tire/t_&lt;inches&gt;p_oh.bnk is normalized (radius 0.48 m). Radially, it is mapped to
+        /// [rim radius, tire radius], and axially to the tire width (DBRims: diameter, width, sidewall height %).
         /// </summary>
-        /// <summary>Außenradius (um die X-Achse) der Felgen-Meshes in Modelleinheiten.</summary>
+        /// <summary>Outer radius (around the X-axis) of the rim meshes in model units.</summary>
         static float RimRadius(CarScene cs)
         {
             float r = 0f;
@@ -965,13 +1002,15 @@ namespace TDU2.Map.Vehicles
             var rim = a.Rim;
             float rimR = rim != null ? (front ? rim.DiameterFront : rim.DiameterRear) * 0.0254f * 0.5f : 0.23f;
             float tireR = rim != null ? rim.TireRadius(front) : 0.33f;
-            // Felge sitzt im Reifen: Innenradius = tatsächlicher Felgenradius (Mesh x Knotenskalierung), falls plausibel
-            if (rimMeshR > rimR * 0.8f && rimMeshR < rimR * 1.25f) rimR = rimMeshR;   // Außenradius bleibt = Physikradius (Bodenkontakt)
+            float targetWidth = 0f;
+            if (a.Car != null && a.Car.IsBike && rim != null)
+                targetWidth = Mathf.Max(0.06f, (front ? rim.WidthFront : rim.WidthRear) * 0.001f);
+            if (rimMeshR > rimR * 0.8f && rimMeshR < rimR * 1.25f) rimR = rimMeshR;
             foreach (var off in cs.Scene.InsOffsets)
             {
                 var ins = cs.Scene.GetIns(off);
                 if (ins.Lods.Length == 0 || !cs.Meshes.TryGetValue(ins.Lods[0].ObjKey, out var md) || md == null) continue;
-                var copy = RevolveTire(md, rimR, tireR);
+                var copy = RevolveTire(md, rimR, tireR, targetWidth);
                 if (copy == null) continue;
                 var tmp = new CarScene { Scene = cs.Scene, Geo = cs.Geo, Materials = cs.Materials };
                 tmp.Meshes[ins.Lods[0].ObjKey] = copy;
@@ -981,13 +1020,13 @@ namespace TDU2.Map.Vehicles
         }
 
         /// <summary>
-        /// Reifen als glatter Rotationskörper: Das Original (t_&lt;Zoll&gt;p_oh) hat nur 20 Segmente mit modellierten
-        /// Schulterblöcken und ist nicht maßstäblich (Außenradius 0.43–0.51). Aus seinen Profilstationen (UV0.x =
-        /// Bogenlänge Wulst→Lauffläche→Wulst) wird die Hüllkurve (Blockoberkanten) entnommen, radial auf
-        /// [Felgenradius, Reifenradius] abgebildet und mit 72 Segmenten rotiert; V = Winkel/18° wie im Original,
-        /// damit Laufflächen-/Flankentextur unverändert passen.
+        /// Tire as a smooth solid of revolution: The original (t_&lt;inches&gt;p_oh) has only 20 segments with modeled
+        /// shoulder blocks and is not to scale (outer radius 0.43–0.51). The envelope curve (block top edges) is derived from its profile stations (UV0.x =
+        /// arc length bead→tread→bead), mapped radially to
+        /// [rim radius, tire radius], and rotated with 72 segments; V = angle/18°, as in the original,
+        /// so that the tread and sidewall textures fit unchanged.
         /// </summary>
-        static MeshData RevolveTire(MeshData md, float rimR, float tireR)
+        static MeshData RevolveTire(MeshData md, float rimR, float tireR, float targetWidth = 0f)
         {
             if (md.Positions.Count == 0 || md.UV0.Count != md.Positions.Count || md.SubMeshes.Count == 0) return null;
             // Hauptsubmesh = das mit den meisten Indizes (das zweite ist die flache Abdeckscheibe)
@@ -1005,13 +1044,13 @@ namespace TDU2.Map.Vehicles
             }
             if (rMax - rMin < 1e-3f) return null;
             float xc = (xMin + xMax) * 0.5f;
-            // Profilstationen: je UV.x die äußerste Position (Hüllkurve über Blöcke und Rillen)
+            float xScale = targetWidth > 0.01f && (xMax - xMin) > 0.01f ? targetWidth / (xMax - xMin) : 1f;
             var st = new SortedDictionary<int, Vector2>();   // key = round(u*1000) -> (x, r)
             foreach (int vi in used)
             {
                 if (vi < 0 || vi >= md.Positions.Count) continue;
                 var p = md.Positions[vi];
-                float r = Mathf.Sqrt(p.y * p.y + p.z * p.z), x = p.x - xc;
+                float r = Mathf.Sqrt(p.y * p.y + p.z * p.z), x = (p.x - xc) * xScale;
                 int k = Mathf.RoundToInt(md.UV0[vi].x * 1000f);
                 if (!st.TryGetValue(k, out var cur) || r > cur.y + 1e-4f || (Mathf.Abs(r - cur.y) <= 1e-4f && Mathf.Abs(x) > Mathf.Abs(cur.x)))
                     st[k] = new Vector2(x, r);
@@ -1021,12 +1060,10 @@ namespace TDU2.Map.Vehicles
             for (int i = 0; i < keys.Count; i++)
             {
                 var v = st[keys[i]];
-                // Umlaufende Rillengründe auslassen (tiefer als beide Nachbarn)
                 if (i > 0 && i < keys.Count - 1 && v.y < Mathf.Min(st[keys[i - 1]].y, st[keys[i + 1]].y) - 0.005f * rMax) continue;
                 prof.Add(new Vector3(keys[i] / 1000f, v.x, v.y));
             }
             if (prof.Count < 3) return null;
-            // Radiale Abbildung: Lauffläche/Schulter (obere 30 %) mit fester Tiefe, Flanke linear bis zur Felge
             const float treadOut = 0.03f;
             float rS = rMin + 0.7f * (rMax - rMin);
             float kT = treadOut / Mathf.Max(1e-4f, rMax - rS);
@@ -1060,12 +1097,12 @@ namespace TDU2.Map.Vehicles
             }
             bool wantPositive = sign >= 0f;
 
-            const int N = 72;   // 4 Segmente je Texturwiederholung (18°)
+            const int N = 72;   // 4 Segmente je Texturwiederholung (180°)
             var o = new MeshData { Name = md.Name + "_rev", HasColors = md.HasColors, HasUV1 = md.HasUV1, HasUV2 = md.HasUV2 };
             for (int j = 0; j <= N; j++)
             {
                 float th = 2f * Mathf.PI * j / N, c = Mathf.Cos(th), s = Mathf.Sin(th);
-                float vv = j * (20f / N);   // V = Winkel / 18°
+                float vv = j * (20f / N);   // V = Winkel / 180°
                 for (int i = 0; i < M; i++)
                 {
                     var q = prof[i];
@@ -1081,7 +1118,6 @@ namespace TDU2.Map.Vehicles
             var tris = new List<int>(N * (M - 1) * 6);
             bool flip = false;
             {
-                // Testdreieck gegen die Profilnormale prüfen
                 var A = o.Positions[0]; var B = o.Positions[M]; var C = o.Positions[1];
                 var nn = Vector3.Cross(B - A, C - A);
                 bool pos = Vector3.Dot(nn, o.Normals[0] + o.Normals[1]) > 0f;

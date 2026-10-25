@@ -72,7 +72,10 @@ namespace TDU2.Map.Flash
                             }
                     }
                 }
-                catch (Exception ex) { Debug.LogWarning("[TDU2] Flash-Texte nicht ladbar: " + ex.Message); }
+                catch (Exception ex) 
+                { 
+                    DebugManager.Error("Flash text not loadable: " + ex.Message);
+                }
                 _texts = result; _loadedKey = key;
                 return result;
             }

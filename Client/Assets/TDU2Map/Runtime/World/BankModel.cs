@@ -8,7 +8,7 @@ namespace TDU2.Map.World
 {
     public enum BankKind { Island, Area, Sector, Exterior, Generic }
 
-    /// <summary>Eine Objektszene: .3dd (Instanzen/Hierarchie) + .3dg (Geometrie) + .2dm (Materialien).</summary>
+    /// <summary>An object scene: .3dd (instances/hierarchy) + .3dg (geometry) + .2dm (materials).</summary>
     public sealed class ObjectSet
     {
         public string Name;
@@ -16,10 +16,9 @@ namespace TDU2.Map.World
         public Geometry3DG Geo;
         public Material2DM Materials;
         public readonly Dictionary<ulong, MeshData> Meshes = new Dictionary<ulong, MeshData>();
-        /// <summary>Platzierungen relativ zum Bank-Ursprung (null = einmal an Identität). Exteriors: aus entities.xmb.</summary>
+        /// <summary>Placements relative to the bank's origin (null = once at identity). Exteriors: from entities.xmb.</summary>
         public List<Matrix4x4> Placements;
 
-        /// <summary>Thread-sicher. Bereitet die Meshdaten aller referenzierten Geometrien vor.</summary>
         public static ObjectSet Load(BnkArchive bank, BnkEntry e3dd, BnkEntry e3dg, BnkEntry e2dm, List<string> log)
         {
             var set = new ObjectSet
@@ -56,9 +55,9 @@ namespace TDU2.Map.World
     }
 
     /// <summary>
-    /// Vollständig geparster Inhalt einer Map-Bank (Insel / Area / Sektor / Spot-Exterior).
-    /// <see cref="Load"/> ist thread-sicher und kann im Hintergrund laufen;
-    /// Unity-Objekte werden danach im Main-Thread von den Buildern erzeugt.
+    /// Fully parsed content of a map bank (island / area / sector / spot exterior).
+    /// <see cref="Load"/> is thread-safe and can run in the background;
+    /// Unity objects are then created by the builders on the main thread.
     /// </summary>
     public sealed class BankModel
     {
@@ -71,11 +70,10 @@ namespace TDU2.Map.World
         public HeightGrid Heights;
         public ulong ColorMapKey, SplatMapKey;
         public MaterialDef TerrainMaterial;
-        // Objekte (<name>-o.3dd/.3dg/.2dm) bzw. bei Exteriors alle Szenen der Bank
+        // Objects (<name>-o.3dd/.3dg/.2dm) or, for exteriors, all scenes of the bank
         public ObjectSet Objects;
         public readonly List<ObjectSet> ExtraObjects = new List<ObjectSet>();
-        // Platzierungen / Gras (nur Sektoren)
-        public PmiFile Vegetation, Placements, Actors, Rails;   // -V, -O, -A, -S (Leitplanken)
+        public PmiFile Vegetation, Placements, Actors, Rails, Fbank, Rbank;   // -V, -O, -A, -S (Leitplanken), -F, -R
         public GrassMap Grass;
         public readonly LocalTextureSet Textures = new LocalTextureSet();
         public readonly List<string> Log = new List<string>();
@@ -108,10 +106,12 @@ namespace TDU2.Map.World
                         }
                     case ".pmi":
                         if (!loadPlacements) break;
-                        if (stem.EndsWith("-V", StringComparison.OrdinalIgnoreCase)) m.Vegetation = PmiFile.Parse(bank.Read(e));
-                        else if (stem.EndsWith("-O", StringComparison.OrdinalIgnoreCase)) m.Placements = PmiFile.Parse(bank.Read(e));
-                        else if (stem.EndsWith("-A", StringComparison.OrdinalIgnoreCase)) m.Actors = PmiFile.Parse(bank.Read(e));
-                        else if (stem.EndsWith("-S", StringComparison.OrdinalIgnoreCase)) m.Rails = PmiFile.Parse(bank.Read(e));
+                        if (stem.EndsWith("-V", StringComparison.OrdinalIgnoreCase)) m.Vegetation = PmiFile.Parse(bank.Read(e), "-V");
+                        else if (stem.EndsWith("-O", StringComparison.OrdinalIgnoreCase)) m.Placements = PmiFile.Parse(bank.Read(e), "-O");
+                        else if (stem.EndsWith("-A", StringComparison.OrdinalIgnoreCase)) m.Actors = PmiFile.Parse(bank.Read(e), "-A");
+                        else if (stem.EndsWith("-S", StringComparison.OrdinalIgnoreCase)) m.Rails = PmiFile.Parse(bank.Read(e), "-S");
+
+                        else if (stem.EndsWith("-F", StringComparison.OrdinalIgnoreCase)) m.Fbank = PmiFile.Parse(bank.Read(e), "-F");
                         break;
                     case ".pgr":
                         if (loadGrass) m.Grass = GrassMap.Parse(bank.Read(e));
@@ -153,11 +153,11 @@ namespace TDU2.Map.World
         }
 
         /// <summary>
-        /// Spot-Exteriors (exterior/*.bnk) enthalten mehrere Szenen mit Hash-Namen. Platziert wird wie im Spiel über
-        /// entities.xmb: "Scenery" (Hauptgebäude, am Spot-Ursprung) und "Entity__Actor"/"Entity__Actor__ActorShared"
-        /// (Tore, Flugzeug, Pflanzen ... mit pos/rot/scale). Die Ressourcen-Hashes werden über hashcodes.xmb
-        /// ({Type, SubType, FileIndices[], FileReferences[]}) auf Bankeinträge abgebildet. Interieurs (Entity__Actor__Interior) optional.
-        /// Ohne entities.xmb: alle "_sc_"-Szenen (Fallback).
+        /// Spot exteriors (exterior/*.bnk) contain multiple scenes with hash names. They are placed as in the game via
+        /// entities.xmb: “Scenery” (main building, at the spot's origin) and ‘Entity__Actor’/“Entity__Actor__ActorShared”
+        /// (gates, airplane, plants ... with pos/rot/scale). The resource hashes are mapped to bank entries via hashcodes.xmb
+        /// ({Type, SubType, FileIndices[], FileReferences[]}). Interiors (Entity__Actor__Interior) are optional.
+        /// Without entities.xmb: all “_sc_” scenes (fallback).
         /// </summary>
         static void LoadAllScenes(BankModel m, bool loadObjects)
         {
@@ -210,7 +210,7 @@ namespace TDU2.Map.World
             catch (Exception ex) { m.Log.Add(dd.Name + ": " + ex.Message); }
         }
 
-        /// <summary>Interieurs der Spots (Autohändler, Häuser) mitladen ("ArrayOf_Entity__Actor__Interior", Szene in derselben Bank).</summary>
+        /// <summary>Load the interiors of the locations (car dealerships, houses) (“ArrayOf_Entity__Actor__Interior,” scene in the same bank).</summary>
         public static bool IncludeInteriors = true;
 
         static bool LoadByEntities(BankModel m)
@@ -274,8 +274,8 @@ namespace TDU2.Map.World
                 {
                     if (!arr.IsArray) continue;
                     bool scenery = arr.Name == "ArrayOf_Scenery";
-                    // alle Actor-Arten mit Mesh (auch abgeleitete: Casino __NeonSlotMachine, __SlotMachineSpinner, __CasinoFlashScreen,
-                    // __CasinoGame__*, __Mesh (D_REFLECT: Boden/Pool), __CasinoCashier …); Interieur-Platzhalter nur auf Wunsch
+                    // All actor types with a mesh (including derived types: Casino __NeonSlotMachine, __SlotMachineSpinner, __CasinoFlashScreen,
+                    // __CasinoGame__*, __Mesh (D_REFLECT: Floor/Pool), __CasinoCashier …); Interior placeholders only if desired
                     bool actor = arr.Name.StartsWith("ArrayOf_Entity__Actor", StringComparison.Ordinal)
                                  && (arr.Name != "ArrayOf_Entity__Actor__Interior" || IncludeInteriors)
                                  && arr.Name.IndexOf("Avatar", StringComparison.OrdinalIgnoreCase) < 0;
@@ -300,8 +300,8 @@ namespace TDU2.Map.World
         }
 
         /// <summary>
-        /// orient_pos_scale aus entities.xmb. Die Quaternionen sind wie D3D-Matrizen (Zeilenvektoren) gespeichert,
-        /// d.h. die Drehung entspricht in Unity der inversen Quaternion (geprüft an den Spot-Kameras "NO_CAMERA").
+        /// `orient_pos_scale` from `entities.xmb`. The quaternions are stored like D3D matrices (row vectors),
+        /// i.e., the rotation corresponds to the inverse quaternion in Unity (tested on the “NO_CAMERA” spot cameras).
         /// </summary>
         public static Matrix4x4 EntityMatrix(XmbNode ops)
         {
@@ -320,7 +320,7 @@ namespace TDU2.Map.World
             foreach (var s in ExtraObjects) yield return s;
         }
 
-        /// <summary>Textur aus dieser Bank, sonst aus dem globalen Cache (commonworld).</summary>
+        /// <summary>Texture from this bank, otherwise from the global cache (commonworld).</summary>
         public Texture2D GetTexture(ulong key, TextureWrapMode u, TextureWrapMode v, GlobalTextureCache global)
         {
             if (key == 0) return null;

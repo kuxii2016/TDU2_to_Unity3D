@@ -64,6 +64,13 @@ namespace TDU2.Map.Formats
         public readonly List<IaPiece> Pieces = new List<IaPiece>();
     }
 
+    /// <summary>Kreuzungsfläche (JDET aus ROAD_DETAIL): bis zu drei Umrisse (x,z) in Inselkoordinaten.</summary>
+    public sealed class IaJunction
+    {
+        public int NodeId;                       // entspricht der NODE-Id in ROAD_MAP
+        public readonly List<Vector2[]> Outlines = new List<Vector2[]>();
+    }
+
     /// <summary>
     /// Verkehrsnetz einer Insel (&lt;Insel&gt;_ROAD_MAP.IA + &lt;Insel&gt;_ROAD_DETAIL.IA in level/&lt;insel&gt;.bnk), siehe tdu2-specs §8.2.
     /// Chunk-Tags stehen rückwärts ("EDON" = NODE). Alle Positionen in Inselkoordinaten (Meter, Y oben, rechtshändig).
@@ -74,9 +81,13 @@ namespace TDU2.Map.Formats
         public readonly Dictionary<int, IaNode> Nodes = new Dictionary<int, IaNode>();
         public readonly Dictionary<int, IaRoad> Roads = new Dictionary<int, IaRoad>();
         public readonly Dictionary<int, IaProfile> Profiles = new Dictionary<int, IaProfile>();
+        public readonly Dictionary<int, IaJunction> Junctions = new Dictionary<int, IaJunction>();
         /// <summary>Tempoklassen 1..n in m/s.</summary>
         public float[] Speeds = Array.Empty<float>();
         byte[] _names;
+
+        /// <summary>Länge des NAME-Chunks (Straßennamen-Puffer) in Bytes; 0 = Insel ohne Straßennamen.</summary>
+        public int NameBytes => _names?.Length ?? 0;
 
         public float SpeedOf(int speedClass) => Speeds.Length == 0 ? 13.9f : Speeds[Mathf.Clamp(speedClass - 1, 0, Speeds.Length - 1)];
 
@@ -100,7 +111,7 @@ namespace TDU2.Map.Formats
                 if (e.Name.IndexOf("ROAD_MAP", StringComparison.OrdinalIgnoreCase) >= 0 && e.Extension == ".ia") map = e;
                 else if (e.Name.IndexOf("ROAD_DETAIL", StringComparison.OrdinalIgnoreCase) >= 0 && e.Extension == ".ia") det = e;
             }
-            if (map == null || det == null) throw new FileNotFoundException("ROAD_MAP/ROAD_DETAIL.IA nicht in " + Path.GetFileName(islandBank));
+            if (map == null || det == null) throw new FileNotFoundException("ROAD_MAP/ROAD_DETAIL.IA not in " + Path.GetFileName(islandBank));
             return Parse(bank.Read(map), bank.Read(det));
         }
 
@@ -221,9 +232,38 @@ namespace TDU2.Map.Formats
             var empty = new List<int>();
             foreach (var kv in net.Roads) if (kv.Value.Pieces.Count == 0) empty.Add(kv.Key);
             foreach (var k in empty) net.Roads.Remove(k);
+
+            // Kreuzungsflächen (JDET) am Ende von ROAD_DETAIL: u32 Anzahl, dann je Eintrag
+            // "JDET"-Tag, u32 Node-Id, u8[3] Punktzahlen, u8 0, u8[16] 0, je Umriss (f32 x, f32 z)-Punkte.
+            try
+            {
+                int nJ = Bin.I32(d, o);
+                int j = o + 4;
+                for (int i = 0; i < nJ && Tag(d, j, "TEDJ") && j + 28 <= d.Length; i++)
+                {
+                    int id = Bin.I32(d, j + 4);
+                    int c0 = d[j + 8], c1 = d[j + 9], c2 = d[j + 10];
+                    int q = j + 28;
+                    var jn = new IaJunction { NodeId = id };
+                    foreach (int cnt in new[] { c0, c1, c2 })
+                    {
+                        if (cnt <= 0 || q + 8 * cnt > d.Length) { q += 8 * Math.Max(0, cnt); continue; }
+                        var pts = new Vector2[cnt];
+                        for (int k = 0; k < cnt; k++)
+                        {
+                            pts[k] = new Vector2(Bin.F32(d, q), Bin.F32(d, q + 4));
+                            q += 8;
+                        }
+                        jn.Outlines.Add(pts);
+                    }
+                    net.Junctions[id] = jn;
+                    j = q;
+                }
+            }
+            catch { /* JDET optional: ohne bleiben die Kreuzungsflächen aus dem Hüllen-Ersatz */ }
             return net;
         }
 
-        public override string ToString() => $"Verkehrsnetz: {Nodes.Count} Kreuzungen, {Roads.Count} Straßen, {Profiles.Count} Profile";
+        public override string ToString() => $"Roadnet: {Nodes.Count} Intersections, {Roads.Count} Roads, {Profiles.Count} Profiles";
     }
 }

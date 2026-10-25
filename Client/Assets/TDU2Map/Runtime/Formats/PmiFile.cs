@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Text;
 using TDU2.Map.IO;
 using UnityEngine;
 
@@ -17,6 +19,8 @@ namespace TDU2.Map.Formats
         /// <summary>Leitplanken (Art 3): alle Knochenmatrizen (Spaltenform, Index = Knochen-Index im Mesh). Die Planke wird
         /// damit an die Straße angepasst – ohne sie entstehen an jedem Pfosten kleine Stufen.</summary>
         public Matrix4x4[] Bones;
+        public string SignName;
+        public string SignTemplate;
     }
 
     public sealed class PmiGroup
@@ -37,7 +41,7 @@ namespace TDU2.Map.Formats
     ///   Sector-...-F/S.pmi : (meist leer)
     ///
     ///   MOBA-Chunk @0x10, payload: u32 Gruppen, float hMin, float hMax, ... Dichteraster; Kinder ab MOBA+hdr:
-    ///   MOB.-Chunk payload: u64 Key, u32 Anzahl, u16 ?, u16 Version, danach je Instanz 32 Byte:
+    ///   MOB.-Chunk payload: u64 Key8, u32 Count, u16 Unknown, u16 Version, danach je Instanz 32 Byte:
     ///     +0 u16 x, +2 u16 y, +4 u16 z   (x,z: v/65535*1024-128 ; y: hMin + v/65535*(hMax-hMin))
     ///     +6 u16 sx, sy, sz             (Skalierung, 0x4000 = 1.0)
     ///     +12 s16 rotX, +14 u16 rotY, +16 s16 rotZ (65536 = 360°)
@@ -51,20 +55,21 @@ namespace TDU2.Map.Formats
 
         public const float RangeMin = -128f, RangeSize = 1024f;
 
-        public static PmiFile Parse(byte[] d)
+        public static PmiFile Parse(byte[] d, string pmifile = "")
         {
             var f = new PmiFile();
             if (d == null || d.Length < 0x30 || !Bin.TagIs(d, 0x10, "MOBA")) return f;
+
             int mobaSize = (int)Bin.U32(d, 0x18), mobaHdr = (int)Bin.U32(d, 0x1C);
             f.HeightMin = Bin.F32(d, 0x24);
             f.HeightMax = Bin.F32(d, 0x28);
             float hRange = f.HeightMax - f.HeightMin;
+
             foreach (var c in EdenChunks.Read(d, 0x10 + mobaHdr, 0x10 + mobaSize))
             {
                 if (c.Tag != "MOB.") continue;
                 int p = c.DataOffset;
-                // MOB. (Spezifikation 7.4): Key8, u16 Anzahl, u16 Zusatzbytes, u16 Sichtweite, u16 Art; dann Einträge zu
-                // 32 + (Zusatzbytes auf 16 aufgerundet) Byte. Art 3 = Leitplanken (Matrizen), Art 4 = Schilder (Text, Tafel leer).
+
                 var g = new PmiGroup
                 {
                     Key = Bin.U64(d, p),
@@ -72,28 +77,41 @@ namespace TDU2.Map.Formats
                     Version = Bin.U16(d, p + 14),
                     ExtraBytes = Bin.U16(d, p + 10),
                 };
-                if (g.Version < 1 || g.Version > 5) { f.SkippedGroups++; continue; }
+
+                if (g.Version < 1 || g.Version > 5)
+                {
+                    f.SkippedGroups++;
+                    continue;
+                }
+
                 int cnt = Bin.U16(d, p + 8);
                 int stride = 32 + ((g.ExtraBytes + 15) / 16) * 16;
                 int ip = c.Offset + 32;
+
                 for (int i = 0; i < cnt; i++, ip += stride)
                 {
                     if (ip + stride > c.End) break;
+
                     float x = Bin.U16(d, ip) / 65535f * RangeSize + RangeMin;
                     float y = f.HeightMin + Bin.U16(d, ip + 2) / 65535f * hRange;
                     float z = Bin.U16(d, ip + 4) / 65535f * RangeSize + RangeMin;
+
                     var s = new Vector3(Bin.U16(d, ip + 6), Bin.U16(d, ip + 8), Bin.U16(d, ip + 10)) / 16384f;
                     if (s.x <= 0.001f || s.y <= 0.001f || s.z <= 0.001f) s = Vector3.one;
+
                     const float toDeg = 360f / 65536f;
-                    // Spezifikation: p' = p · S · Rx(Nicken) · Rz(Rollen) · Ry(Richtung) + Position (Zeilenvektoren)
-                    //  -> Unity (Spaltenvektoren): Ry * Rz * Rx; die Achsrichtungen entsprechen Quaternion.AngleAxis.
-                    float pitch = Bin.I16(d, ip + 12) * toDeg, head = Bin.U16(d, ip + 14) * toDeg, roll = Bin.I16(d, ip + 16) * toDeg;
-                    var rot = Quaternion.AngleAxis(head, Vector3.up) * Quaternion.AngleAxis(roll, Vector3.forward) * Quaternion.AngleAxis(pitch, Vector3.right);
+                    float pitch = Bin.I16(d, ip + 12) * toDeg,
+                          head = Bin.U16(d, ip + 14) * toDeg,
+                          roll = Bin.I16(d, ip + 16) * toDeg;
+                    var rot = Quaternion.AngleAxis(head, Vector3.up) *
+                              Quaternion.AngleAxis(roll, Vector3.forward) *
+                              Quaternion.AngleAxis(pitch, Vector3.right);
+
                     Matrix4x4? pre = null;
                     Matrix4x4[] bones = null;
+
                     if (g.Version == 3 && g.ExtraBytes >= 64)
                     {
-                        // Zusatzmatrizen (Zeilenvektor-Form, Verschiebung in der 4. Zeile) -> Spaltenform; die erste = Pre
                         int nb = Mathf.Min(g.ExtraBytes / 64, 16);
                         bones = new Matrix4x4[nb];
                         for (int b = 0; b < nb; b++)
@@ -107,19 +125,118 @@ namespace TDU2.Map.Formats
                         }
                         pre = bones[0];
                     }
-                    g.Instances.Add(new PmiInstance
+
+                    ushort extra = Bin.U16(d, ip + 18);
+                    ushort art = (ushort)(extra >> 9);
+
+                    var instance = new PmiInstance
                     {
                         Position = new Vector3(x, y, z),
                         Rotation = rot,
                         Scale = s,
-                        Extra = Bin.U16(d, ip + 18),
+                        Extra = extra,
                         Pre = pre,
                         Bones = bones,
-                    });
+                        SignName = "",
+                        SignTemplate = ""
+                    };
+
+                    g.Instances.Add(instance);
                 }
                 f.Groups.Add(g);
             }
             return f;
+        }
+
+        /// <summary>
+        /// Extrahiert den Text aus dem Schild (basierend auf der Formatbeschreibung)
+        /// </summary>
+        private static string ExtractSignText(byte[] data, int instanceOffset, ushort extraBytes, string file)
+        {
+            try
+            {
+                if (extraBytes < 1) return "";
+
+                // Die Textdaten beginnen nach den 32 Instanzbytes
+                int textStart = instanceOffset + 32;
+
+                // Prüfe ob wir genug Daten haben
+                if (textStart >= data.Length || textStart + extraBytes > data.Length)
+                {
+                    UnityEngine.Debug.LogWarning($"Not enough data for sign text at offset {instanceOffset}");
+                    return "";
+                }
+
+                // Lesen des Templates (erstes Byte nach Instanzdaten)
+                byte templateByte = data[textStart];
+
+                // Template 0x00 ist leer - das heißt: keine echte Signatur
+                if (templateByte == 0x00)
+                {
+                    UnityEngine.Debug.Log("Empty template found for sign");
+                    return "";
+                }
+
+                string result = "";
+                int maxBytesToRead = Math.Min(30, extraBytes - 1); // -1 für Template
+
+                for (int i = 0; i < maxBytesToRead && textStart + 1 + i < data.Length; i++)
+                {
+                    byte code = data[textStart + 1 + i];
+
+                    if (code == 0) break;
+
+                    char character = ConvertCodeToChar(code);
+                    result += character;
+                }
+
+                return result.Trim();
+            }
+            catch (Exception ex)
+            {
+                UnityEngine.Debug.LogError("Error in ExtractSignText: " + ex.Message);
+                return "";
+            }
+        }
+
+
+
+        /// <summary>
+        /// Konvertiert einen Schild-Code in ein Zeichen gemäß der Formatbeschreibung
+        /// </summary>
+        private static char ConvertCodeToChar(byte code)
+        {
+            // Basierend auf 7.7 Format:
+            // 0 = Leerzeichen
+            // 1-26 = A-Z 
+            // 27-36 = 0-9
+            // 37-41 = Pfeile
+
+            if (code == 0) return ' ';
+            else if (code >= 1 && code <= 26) return (char)('A' + code - 1);
+            else if (code >= 27 && code <= 36) return (char)('0' + code - 27);
+            else if (code >= 37 && code <= 41) return GetArrowSymbol(code); // Pfeile
+            else if (code == 42) return ' '; // Route Shield?
+            else if (code >= 43 && code <= 69)
+                return (char)('a' + (code - 43)); // Kleinbuchstaben Hawaii
+
+            return '?'; // Unbekannter Code
+        }
+
+        /// <summary>
+        /// Konvertiert Pfeil-Codes in passende Symbole
+        /// </summary>
+        private static char GetArrowSymbol(byte code)
+        {
+            switch (code)
+            {
+                case 37: return '↑';
+                case 38: return '↖';
+                case 39: return '←';
+                case 40: return '↗';
+                case 41: return '→';
+                default: return '?';
+            }
         }
     }
 }

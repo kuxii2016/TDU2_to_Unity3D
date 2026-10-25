@@ -106,7 +106,6 @@ namespace TDU2.Map.Avatars
         public readonly List<SkinPrim> Prims = new List<SkinPrim>();
         public readonly List<MaterialDef> PrimMaterials = new List<MaterialDef>();
         public readonly LocalTextureSet Textures = new LocalTextureSet();
-        /// <summary>Haar-/Bartfarbe aus clothes/common hair_mat.2dm (PRIMCLR, SCDCLR); sonst die des Modells.</summary>
         public bool HasHairColor;
         public Color HairPrim, HairScd;
     }
@@ -209,14 +208,24 @@ namespace TDU2.Map.Avatars
                             if (!_bankByStem.ContainsKey(stem)) _bankByStem[stem] = f;
                         }
                 }
-                catch (Exception ex) { Debug.LogWarning("[TDU2] Avatar-Kleidung: " + ex.Message); }
+                catch (Exception ex) 
+                { 
+                    DebugManager.Error("Avatar clothing" + ex.Message);
+                }
                 foreach (var name in new[] { Path.Combine("avatar", "common_bodies.bnk"), Path.Combine("avatar", "clothes", "common_clothes.bnk") })
                 {
                     var p = Path.Combine(bnkDir ?? "", name);
-                    try { if (File.Exists(p)) CommonTextures.IndexBank(BnkArchive.Open(p)); } catch (Exception ex) { Debug.LogWarning("[TDU2] Avatar: " + p + " – " + ex.Message); }
+                    try 
+                    { 
+                        if (File.Exists(p)) CommonTextures.IndexBank(BnkArchive.Open(p)); 
+                    } 
+                    catch (Exception ex) 
+                    { 
+                        DebugManager.Error("Avatar: " + p + " - " + ex.Message);
+                    }
                 }
                 _clothes = map;
-                Debug.Log($"[TDU2] Avatare: {map.Count} Kleidungsstücke, {_bankByStem.Count} Kleidungsbänke, {CommonTextures.Count} gemeinsame Texturen");
+                DebugManager.Info($"Avatars: {map.Count} clothing items, {_bankByStem.Count} clothing benches, {CommonTextures.Count} shared textures");
             }
         }
 
@@ -277,7 +286,10 @@ namespace TDU2.Map.Avatars
                 }
                 var e = _anims?.Find(name + ".anm");
                 c = e != null ? AnmClip.Parse(_anims.Read(e), name) : null;
-                if (c == null) Debug.LogWarning("[TDU2] Avatar-Animation fehlt: " + name);
+                if (c == null) 
+                { 
+                    DebugManager.Warning("Avatar animation Missing for: " + name);
+                }
                 _clips[name] = c;
                 return c;
             }
@@ -300,7 +312,7 @@ namespace TDU2.Map.Avatars
             return list;
         }
 
-        /// <summary>Kleidungsstück (avatar/clothes/&lt;Kollektion&gt;/&lt;datei&gt;.bnk), Farbe 0 = wie modelliert.</summary>
+        /// <summary>Kleidungsstück (avatar/clothes/Kollektion&gt/datei&gt.bnk), Farbe 0 = wie modelliert.</summary>
         public static AvatarPartData LoadClothe(ClotheInfo c, int color, bool helmetTwin = false)
         {
             if (c == null || c.IsNothing) return null;
@@ -339,7 +351,10 @@ namespace TDU2.Map.Avatars
                                 _hairMat[m.Name ?? ""] = (new Color(pc.x, pc.y, pc.z, 1f), new Color(sc.x, sc.y, sc.z, 1f));
                             }
                     }
-                    catch (Exception ex) { Debug.LogWarning("[TDU2] hair_mat.2dm: " + ex.Message); }
+                    catch (Exception ex) 
+                    { 
+                        DebugManager.Error("hair_mat.2dm: " + ex.Message);
+                    }
                 }
                 string letter = ((char)('A' + Mathf.Clamp(c - 1, 0, 25))).ToString();
                 if (!_hairMat.TryGetValue(letter, out var v)) return false;
@@ -349,16 +364,26 @@ namespace TDU2.Map.Avatars
         }
 
         /// <summary>
-        /// Teil aus einer Bank: &lt;stem&gt;.3dd (Instanz -> Objekt, Materialliste), &lt;stem&gt;.3dg (gehäutete Geometrie),
-        /// Materialien aus <paramref name="mat2dm"/> (sonst &lt;stem&gt;.2dm), Farbvariante c aus &lt;stem&gt;_mat.2dm (c-te Variante
+        /// Teil aus einer Bank:.3dd (Instanz -> Objekt, Materialliste)
         /// in Namensreihenfolge statt der Materialien des Stücks, außer "UNCHANGEABLE").
         /// </summary>
+        /// <param name="bank"></param>
+        /// <param name="stem"></param>
+        /// <param name="mat2dm"><paramref name="mat2dm"/></param>
+        /// <param name="variants2dm"></param>
+        /// <param name="color"></param>
+        /// <param name="ownTextures"></param>
+        /// <returns></returns>
         static AvatarPartData LoadPart(BnkArchive bank, string stem, string mat2dm, string variants2dm, int color, bool ownTextures)
         {
             var e3dd = bank.Find(stem + ".3dd");
             var e3dg = bank.Find(stem + ".3dg");
             var e2dm = bank.Find(mat2dm ?? (stem + ".2dm"));
-            if (e3dd == null || e3dg == null) { Debug.LogWarning("[TDU2] Avatar-Teil fehlt: " + stem); return null; }
+            if (e3dd == null || e3dg == null) 
+            { 
+                DebugManager.Warning("Avatar part missing: " + stem);
+                return null; 
+            }
             var scene = Scene3DD.Parse(bank.Read(e3dd));
             var geo = Geometry3DG.Parse(bank.Read(e3dg));
             var mats = e2dm != null ? Material2DM.Parse(bank.Read(e2dm)) : null;
@@ -419,9 +444,15 @@ namespace TDU2.Map.Avatars
         public static void SetLocal(AvatarConfig cfg)
         {
             if (cfg == null) return;
-            if (TDU2Session.Save == null) { _offline = cfg.Encode(); LocalChanged?.Invoke(); return; }
+            if (TDU2Session.Save == null) 
+            { 
+                _offline = cfg.Encode(); 
+                LocalChanged?.Invoke(); 
+                return; 
+            }
             TDU2Session.Save.avatar = cfg.Encode();
-            if (TDU2Session.LoggedIn) TDU2Session.SaveAsync();
+            if (TDU2Session.LoggedIn) 
+                TDU2Session.SaveAsync();
             LocalChanged?.Invoke();
         }
 

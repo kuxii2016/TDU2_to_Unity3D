@@ -55,7 +55,7 @@ namespace TDU2.Map.Formats
             return false;
         }
 
-        /// <summary>HASH-Chunk: Einträge à 16 Byte {u64 key, u32 offset, u32 0}.</summary>
+        /// <summary>HASH-Chunk: Einträge a 16 Byte {u64 key, u32 offset, u32 0}.</summary>
         public static Dictionary<ulong, int> ReadHash(byte[] d, Chunk hash)
         {
             var r = new Dictionary<ulong, int>();

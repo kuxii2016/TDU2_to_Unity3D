@@ -1,12 +1,12 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
 namespace TDU2.Map.Vehicles
 {
     /// <summary>
-    /// Fahrzeug-Loader: liest die Autos direkt aus dem Spielordner (Euro/Bnk/vehicules, database, sound/vehicles),
     /// spawnt das gewählte Auto und steuert es. Dev-Tasten:
     ///   F2 einsteigen/aussteigen (Freiflug), F5/F6 nächstes/vorheriges Auto, F7 nächste Lackfarbe, F8 neu laden,
     ///   C Kamera wechseln, B Rückblick (halten), T Fahrhilfen, G Automatik/Manuell, E/Q hoch-/runterschalten,
@@ -22,7 +22,6 @@ namespace TDU2.Map.Vehicles
         [Range(0, 2)] public float Volume = 0.7f;
         [Range(0.3f, 1.2f)] public float GripScale = 0.62f;
         public DrivingAids Aids = DrivingAids.Sport;
-        /// <summary>Getriebe für jedes (auch neu geladene) Fahrzeug; Optionsmenü/Taste setzen diesen Wert.</summary>
         public bool AutomaticGearbox = true;
         public bool ShowHud = true;
         [Tooltip("Physik-Zeitschritt während der Fahrt (s). TDU2 rechnet die Räder zusätzlich in Unterschritten.")]
@@ -52,7 +51,7 @@ namespace TDU2.Map.Vehicles
         [Tooltip("Original-HUD des Spiels (Flash/VMF: Drehzahlmesser, Tacho, Gang)")]
         public bool ShowOriginalHud = true;
         TDU2VehicleHud _hud;
-        [Tooltip("Minimap mit Straßennetz aus <Insel>_ROAD_DETAIL.IA (Taste J schaltet um)")]
+        [Tooltip("Minimap mit StraÃŸennetz aus <Insel>_ROAD_DETAIL.IA (Taste J schaltet um)")]
         public bool ShowMinimap = true;
         TDU2Minimap _minimap;
         int _headlights;
@@ -60,15 +59,15 @@ namespace TDU2.Map.Vehicles
         float _defaultFixedDt;
         string _status = "";
         float _steerInput;
-        [Tooltip("Häuser, Autohändler & Co. betreten (Enter an der Einfahrt), Laufen in der Ich-Perspektive")]
+        [Tooltip("HÃ¤user, AutohÃ¤ndler & Co. betreten (Enter an der Einfahrt), Laufen in der Ich-Perspektive")]
         public bool EnableInteriors = true;
         [Tooltip("Original-Pausemenü (ESC) aus main.bnk")]
         public bool EnablePauseMenu = true;
-        [Tooltip("Große Karte (M) wie im Original: Kamera über der Insel + map.bnk")]
+        [Tooltip("GroÃŸe Karte (M) wie im Original: Kamera über der Insel + map.bnk")]
         public bool EnableBigMap = true;
         [Tooltip("Anmeldung wie im Spiel (log_in2.bnk + Profilmenü) mit Konto/Spielstand auf dem TDU2Server")]
         public bool EnableLogin = true;
-        [Tooltip("Verkehr (Straßennetz .IA, Verkehrsautos der Insel) – Einstellungen am Objekt 'TDU2 Traffic Manager' bzw. an der TDU2Traffic-Komponente")]
+        [Tooltip("Verkehr (StraÃŸennetz .IA, Verkehrsautos der Insel) Einstellungen am Objekt 'TDU2 Traffic Manager' bzw. an der TDU2Traffic-Komponente")]
         public bool EnableTraffic = true;
 
         /// <summary>true, solange ein Interieur aktiv ist (keine Fahr-/Dev-Tasten, kein Fahr-HUD).</summary>
@@ -77,9 +76,9 @@ namespace TDU2.Map.Vehicles
         public bool ExternalControl { get; set; }
         public string BnkDir => _bnkDir;
         public int ColorIndex => _colorIndex;
-        /// <summary>Felge des aktuellen Autos (DBRims._hashcode, 0 = keine) – geht an die Mitspieler (UDP).</summary>
+        /// <summary>Felge des aktuellen Autos (DBRims._hashcode, 0 = keine) geht an die Mitspieler (UDP).</summary>
         public int RimId { get; private set; }
-        /// <summary>Innenraum des aktuellen Autos (DBInterior._hashcode, 0 = keiner) – geht an die Mitspieler (UDP).</summary>
+        /// <summary>Innenraum des aktuellen Autos (DBInterior._hashcode, 0 = keiner) geht an die Mitspieler (UDP).</summary>
         public int InteriorId { get; private set; }
         /// <summary>Glühende Bremsscheiben des aktuellen Autos (null ohne Auto/Scheibenmaterial).</summary>
         public TDU2BrakeGlow BrakeGlow { get { var fx = Current != null ? Current.GetComponent<TDU2VehicleEffects>() : null; return fx != null ? fx.Glow : null; } }
@@ -109,7 +108,7 @@ namespace TDU2.Map.Vehicles
             if (EnableInteriors && GetComponent<TDU2Interiors>() == null) gameObject.AddComponent<TDU2Interiors>().Manager = this;
             if (EnablePauseMenu && GetComponent<TDU2PauseMenu>() == null) gameObject.AddComponent<TDU2PauseMenu>().Manager = this;
             if (EnableBigMap && GetComponent<TDU2BigMap>() == null) gameObject.AddComponent<TDU2BigMap>().Manager = this;
-            var online = Online.TDU2GameData.Ensure();   // Online Manager: Server-Adresse, Online-Status, Spielerdaten für alle Flash-Filme
+            var online = Online.TDU2GameData.Ensure();   // Online Manager: Server-Adresse, Online-Status, Spielerdaten fÃ¼r alle Flash-Filme
             online.BindManager(this);
             bool login = EnableLogin && online.UseLogin;
             if (login && EnablePauseMenu && GetComponent<TDU2Login>() == null) gameObject.AddComponent<TDU2Login>().Manager = this;
@@ -139,7 +138,7 @@ namespace TDU2.Map.Vehicles
         /// <summary>
         /// Genau dieses Fahrzeug laden (auch Sondermodelle, die wegen gleicher Fahrzeugbank nicht in <see cref="Available"/> stehen,
         /// z.B. Rennschul-Autos #626 "CCXR Edition Racing School Asphalt" = Bank CCXR_Edition mit eigener Physik und Beklebung).
-        /// false, wenn gerade ein anderes Auto lädt.
+        /// false, wenn gerade ein anderes Auto lÃ¤dt.
         /// </summary>
         public bool SpawnCarExact(CarPhysics car, Vector3 pos, Quaternion rot)
         {
@@ -148,16 +147,16 @@ namespace TDU2.Map.Vehicles
             if (i >= 0) _carIndex = i;
             _pendingPos = pos; _pendingRot = rot; _pendingVel = Vector3.zero;
             string bnk = _bnkDir; var db = Database; int color = _colorIndex; bool snd = LoadSound;
-            // gekaufte Ausstattung (Autohändler: Lack, Felgen, Innenraum); der Lack-Index geht auch an die Mitspieler (UDP)
+            // gekaufte Ausstattung (AutohÃ¤ndler: Lack, Felgen, Innenraum); der Lack-Index geht auch an die Mitspieler (UDP)
             int rim = 0, interior = 0;
             if (TDU2CarChoices.TryGet(car.FileName, out var ch)) { color = _colorIndex = ch.Color; rim = ch.Rim; interior = ch.Interior; _colorFromChoice = true; }
-            else if (_colorFromChoice) { color = _colorIndex = 0; _colorFromChoice = false; }   // Lack eines anderen Autos nicht übernehmen
+            else if (_colorFromChoice) { color = _colorIndex = 0; _colorFromChoice = false; }   // Lack eines anderen Autos nicht Ã¼bernehmen
             _status = "Lade " + car.ModelName + " ...";
             _loadTask = Task.Run(() => CarAssets.Load(bnk, db, car, color, snd, rim, interior));
             return true;
         }
 
-        /// <summary>Aktuelles Auto entfernen, ohne die Freiflug-Kamera zu aktivieren (Interieur übernimmt die Kamera).</summary>
+        /// <summary>Aktuelles Auto entfernen, ohne die Freiflug-Kamera zu aktivieren (Interieur Ã¼bernimmt die Kamera).</summary>
         public void RemoveCar()
         {
             Despawn(false);
@@ -170,7 +169,7 @@ namespace TDU2.Map.Vehicles
             }
         }
 
-        public CarPhysics FindCar(string fileName) => Available.Find(c => string.Equals(c.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+        public CarPhysics FindCar(string fileName) => Available.Find(c => string.Equals(c.FileName, fileName, StringComparison.OrdinalIgnoreCase)) ?? (Database != null ? Database.Cars.Find(c => string.Equals(c.FileName, fileName, StringComparison.OrdinalIgnoreCase)) : null);
         public float GroundHeight(Vector3 p) => GroundY(p);
 
         static TDU2MapStreamer FindAnyStreamer()
@@ -199,7 +198,7 @@ namespace TDU2.Map.Vehicles
                 var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var c in db.Cars)
                 {
-                    if (c.IsBike || !seen.Add(c.FileName)) continue;
+                    if (!seen.Add(c.FileName)) continue;
                     if (CarDatabase.CarBank(bnk, c) != null) avail.Add(c);
                 }
                 avail.Sort((a, b) => string.Compare(a.ModelName, b.ModelName, StringComparison.OrdinalIgnoreCase));
@@ -248,7 +247,7 @@ namespace TDU2.Map.Vehicles
             Load(_carIndex, pos, Quaternion.LookRotation(fwd.normalized, Vector3.up), Vector3.zero);
         }
 
-        // ------------------------------------------------------------------ Zurück auf die Straße / sicherer Teleport
+        // ------------------------------------------------------------------ ZurÃ¼ck auf die Straße / sicherer Teleport
         Vector3 _roadPos; Quaternion _roadRot = Quaternion.identity; bool _hasRoad; float _roadAt;
         Vector3 _settlePos; Quaternion _settleRot = Quaternion.identity; float _settleRefY, _settleStart, _settleUntil = -1f; bool _settleHasRef;
 
@@ -344,7 +343,6 @@ namespace TDU2.Map.Vehicles
                 if (d < best) { best = d; y = h.point.y; ok = true; }
             }
             bool timeout = Time.unscaledTime > _settleUntil;
-            // Fläche nahe der Zielhöhe (±6 m) sofort; weiter weg erst nach 3 s (Zielhöhe evtl. ungenau), sonst weiter warten
             if (ok && _settleHasRef && best > 6f && Time.unscaledTime - _settleStart < 3f) ok = false;
             if (!ok && !timeout) return;   // Umgebung noch nicht geladen: weiter festhalten
             if (!ok) y = _settleHasRef ? refY : GroundY(sp);
@@ -367,10 +365,9 @@ namespace TDU2.Map.Vehicles
             var car = Available[_carIndex];
             _pendingPos = pos; _pendingRot = rot; _pendingVel = vel;
             string bnk = _bnkDir; var db = Database; int color = _colorIndex; bool snd = LoadSound;
-            // gekaufte Ausstattung (Autohändler: Lack, Felgen, Innenraum); der Lack-Index geht auch an die Mitspieler (UDP)
             int rim = 0, interior = 0;
             if (TDU2CarChoices.TryGet(car.FileName, out var ch)) { color = _colorIndex = ch.Color; rim = ch.Rim; interior = ch.Interior; _colorFromChoice = true; }
-            else if (_colorFromChoice) { color = _colorIndex = 0; _colorFromChoice = false; }   // Lack eines anderen Autos nicht übernehmen
+            else if (_colorFromChoice) { color = _colorIndex = 0; _colorFromChoice = false; } 
             _status = "Lade " + car.ModelName + " ...";
             _loadTask = Task.Run(() => CarAssets.Load(bnk, db, car, color, snd, rim, interior));
         }
@@ -408,13 +405,23 @@ namespace TDU2.Map.Vehicles
             if (!Racing.RacingSchoolMenu.IsSchoolCar(car)) { TDU2StickerLibrary.Ensure(_bnkDir); TDU2LiveryView.ApplyOwn(_model, car.FileName); }
             if (!_liveryHooked) { _liveryHooked = true; TDU2Liveries.Changed += OnLiveryChanged; }
 
-            // Karosserie-Collider (Bounds der High-Poly-Karosserie, Unterkante um CollisionOffset angehoben)
+            // Karosserie-Collider (Bounds der High-Poly-Karosserie)
             var b = _model.BodyBounds;
             float lift = Physics != null ? Physics.Get("CollisionOffset", 0.1f) : 0.1f;
             var box = go.AddComponent<BoxCollider>();
             float bottom = b.min.y + lift;
-            box.center = new Vector3(b.center.x, (bottom + b.max.y) * 0.5f, b.center.z);
-            box.size = new Vector3(b.size.x * 0.96f, Mathf.Max(0.3f, b.max.y - bottom), b.size.z * 0.98f);
+            bool isBike = car != null && car.IsBike;
+            if (isBike)
+            {
+                bottom = b.min.y + Mathf.Max(lift, 0.2f);
+                box.center = new Vector3(0f, (bottom + b.max.y) * 0.5f + 0.02f, b.center.z);
+                box.size = new Vector3(Mathf.Max(0.38f, b.size.x * 0.68f), Mathf.Max(0.36f, b.max.y - bottom), Mathf.Max(0.9f, b.size.z * 0.84f));
+            }
+            else
+            {
+                box.center = new Vector3(b.center.x, (bottom + b.max.y) * 0.5f, b.center.z);
+                box.size = new Vector3(b.size.x * 0.96f, Mathf.Max(0.3f, b.max.y - bottom), b.size.z * 0.98f);
+            }
 #if UNITY_6000_0_OR_NEWER
             var pm = new PhysicsMaterial { dynamicFriction = 0.3f, staticFriction = 0.3f, bounciness = 0.05f, frictionCombine = PhysicsMaterialCombine.Minimum };
 #else
@@ -430,30 +437,66 @@ namespace TDU2.Map.Vehicles
             veh.GroundFallback = p => Streamer != null && Streamer.TryGetGroundHeight(p, out var gy) ? (true, gy) : (false, 0f);
 
             var wheels = new List<TDU2Vehicle.Wheel>();
-            foreach (var n in new[] { "FL", "FR", "RL", "RR" })
+            if (isBike)
             {
-                bool front = n[0] == 'F';
-                var fork = _model.Find("FORK_" + n);
-                var w = new TDU2Vehicle.Wheel { Name = n, Front = front };
-                if (fork != null) w.Anchor = go.transform.InverseTransformPoint(fork.position);
-                else
+                // Bikes: Vorderrad an FORK/WHR_F, Hinterrad an ARM/WHR_R.
+                // Felge (D_RIM_x) und Reifen (TIRE_x) drehen; Bremssattel (BRAKE_x) bleibt stehen.
+                var wheelDefs = new[] { ("F", true), ("R", false) };
+                foreach (var wd in wheelDefs)
                 {
-                    float x = (front ? car.TrackFront : car.TrackRear) * 0.0005f;
-                    float z = front ? car.Wheelbase * 0.0005f : -car.Wheelbase * 0.0005f;
-                    w.Anchor = new Vector3(n[1] == 'L' ? -x : x, 0.2f, z);
+                    string tag = wd.Item1;
+                    string name = tag == "F" ? "WHR_F" : "WHR_R";
+                    bool front = wd.Item2;
+                    var whr = _model.Find(name);
+                    var w = new TDU2Vehicle.Wheel { Name = front ? "FL" : "RL", Front = front };
+                    if (whr != null) w.Anchor = go.transform.InverseTransformPoint(whr.position);
+                    else
+                    {
+                        float z = car.Wheelbase * 0.0005f * (front ? 1f : -1f);
+                        w.Anchor = new Vector3(0f, 0.35f, z);
+                    }
+                    w.Left = w.Anchor.x < 0f;
+                    w.Radius = a.Rim != null ? a.Rim.TireRadius(front) : 0.3f;
+                    w.Width = a.Rim != null ? (front ? a.Rim.WidthFront : a.Rim.WidthRear) * 0.001f : 0.14f;
+                    // Nur die Vorderradgabel bewegt sich mit der Federung (FORK enthält WHR_F)
+                    w.Fork = front ? _model.Find("FORK") : null;
+                    // Lenkung läuft beim Bike über BARS (Fahrzeugfeld BikeSteerNode), nicht über STIRRUP
+                    w.Stirrup = null;
+                    // Felge dreht, Reifen dreht mit
+                    w.Disc = _model.Find("D_RIM_" + tag) ?? _model.Find("RIM_" + tag);
+                    w.Spin2 = _model.Find("TIRE_" + tag);
+                    wheels.Add(w);
                 }
-                w.Left = w.Anchor.x < 0f;
-                w.Radius = a.Rim != null ? a.Rim.TireRadius(front) : 0.33f;
-                w.Width = a.Rim != null ? (front ? a.Rim.WidthFront : a.Rim.WidthRear) * 0.001f : 0.24f;
-                w.Fork = fork;
-                w.Stirrup = _model.Find("STIRRUP_" + n);
-                w.Disc = _model.Find("DISC_" + n);
-                if (w.Stirrup != null && w.Stirrup.parent != null)
+                veh.ModelRoot = _model.Visual != null ? _model.Visual.transform : null;
+                veh.BikeSteerNode = _model.Find("BARS") ?? _model.Find("FORK");
+            }
+            else
+            {
+                foreach (var n in new[] { "FL", "FR", "RL", "RR" })
                 {
-                    var m = go.transform.worldToLocalMatrix * w.Stirrup.parent.localToWorldMatrix;
-                    w.SteerSign = m.determinant < 0f ? -1f : 1f;
+                    bool front = n[0] == 'F';
+                    var fork = _model.Find("FORK_" + n);
+                    var w = new TDU2Vehicle.Wheel { Name = n, Front = front };
+                    if (fork != null) w.Anchor = go.transform.InverseTransformPoint(fork.position);
+                    else
+                    {
+                        float x = (front ? car.TrackFront : car.TrackRear) * 0.0005f;
+                        float z = front ? car.Wheelbase * 0.0005f : -car.Wheelbase * 0.0005f;
+                        w.Anchor = new Vector3(n[1] == 'L' ? -x : x, 0.2f, z);
+                    }
+                    w.Left = w.Anchor.x < 0f;
+                    w.Radius = a.Rim != null ? a.Rim.TireRadius(front) : 0.33f;
+                    w.Width = a.Rim != null ? (front ? a.Rim.WidthFront : a.Rim.WidthRear) * 0.001f : 0.24f;
+                    w.Fork = fork;
+                    w.Stirrup = _model.Find("STIRRUP_" + n);
+                    w.Disc = _model.Find("DISC_" + n);
+                    if (w.Stirrup != null && w.Stirrup.parent != null)
+                    {
+                        var m = go.transform.worldToLocalMatrix * w.Stirrup.parent.localToWorldMatrix;
+                        w.SteerSign = m.determinant < 0f ? -1f : 1f;
+                    }
+                    wheels.Add(w);
                 }
-                wheels.Add(w);
             }
             veh.Wheels = wheels.ToArray();
             veh.SteeringWheel = _model.SteeringWheel;
@@ -478,7 +521,7 @@ namespace TDU2.Map.Vehicles
                 if (_pendingVel.sqrMagnitude < 1f) _audio.Play("EngineStart");
             }
 
-            // Lichter (Scheinwerfer, Bremse, Rückfahr, Blinker)
+            // Lichter (Scheinwerfer, Bremse, RÃ¼ckfahr, Blinker)
             _lights = go.AddComponent<TDU2VehicleLights>();
             _lights.Headlights = _headlights;
             _lights.Setup(veh, _model);
@@ -488,14 +531,12 @@ namespace TDU2.Map.Vehicles
             go.AddComponent<TDU2VehicleEffects>().Setup(veh, _model, a);
             // Verschmutzung (dirt_scratch, DBCarDirtData)
             go.AddComponent<TDU2CarDirt>().Setup(veh, _model);
-            // Fahrer: eigener Avatar mit der Kleidung aus dem Spielstand (Hände am Lenkrad, Füße an den Pedalen)
             if (ShowDriver)
             {
                 var drv = Avatars.TDU2CarAvatar.Attach(go, _model, Avatars.AvatarConfigs.Local, false, () => veh.Steer);
                 if (drv != null) drv.ConfigCode = () => Avatars.AvatarConfigs.LocalCode;
             }
 
-            // Spiegel/Lack: Echtzeit-Reflexionen der Umgebung (Rück- und Außenspiegel sind Chrommaterialien)
             if (MirrorReflections)
             {
                 var probeGo = new GameObject("ReflectionProbe");
@@ -580,10 +621,9 @@ namespace TDU2.Map.Vehicles
             if (Input.GetKeyDown(KeyCode.F7)) { _colorIndex++; SwitchCar(0); }
             if (Input.GetKeyDown(KeyCode.F8)) SwitchCar(0);
             if (Current == null) return;
-            // Einstellungen (Optionsmenü) gelten immer für das aktuelle Fahrzeug
             if (Current.Aids != Aids) Current.Aids = Aids;
             if (Current.AutomaticGearbox != AutomaticGearbox) Current.AutomaticGearbox = AutomaticGearbox;
-            if (Time.timeScale <= 0f) return;   // Pause/Menü: keine Fahrtasten
+            if (Time.timeScale <= 0f) return;  
             if (TDU2Controls.Pressed("camera") && _vcam != null) _vcam.NextMode();
             if (TDU2Controls.Pressed("minimap") && _minimap != null) _minimap.ShowMinimap = !_minimap.ShowMinimap;
             if (_vcam != null) _vcam.LookBack = TDU2Controls.Held("lookback");
@@ -591,7 +631,7 @@ namespace TDU2.Map.Vehicles
             if (TDU2Controls.Pressed("gearbox")) { AutomaticGearbox = !AutomaticGearbox; Current.AutomaticGearbox = AutomaticGearbox; }
             if (TDU2Controls.Pressed("gearup")) Current.ShiftUp();
             if (TDU2Controls.Pressed("geardown")) Current.ShiftDown();
-            if (TDU2Controls.Pressed("reset")) ResetToRoad();   // "Back on track": zurück auf die Straße
+            if (TDU2Controls.Pressed("reset")) ResetToRoad();
             if (_audio != null) _audio.SetHorn(TDU2Controls.Held("horn"));
             if (_lights != null)
             {
@@ -599,14 +639,12 @@ namespace TDU2.Map.Vehicles
                 if (TDU2Controls.Pressed("blinkl")) { _lights.IndicatorLeft = !_lights.IndicatorLeft; _lights.IndicatorRight = false; }
                 if (TDU2Controls.Pressed("blinkr")) { _lights.IndicatorRight = !_lights.IndicatorRight; _lights.IndicatorLeft = false; }
                 if (TDU2Controls.Pressed("hazard")) _lights.Hazard = !_lights.Hazard;
-                _lights.Flash = TDU2Controls.Held("flash");   // Lichthupe (im Original: Herausforderung an Mitspieler)
+                _lights.Flash = TDU2Controls.Held("flash"); 
             }
-            // Zubehör wie im Spiel (HUD-Menü /HUD/ig_menu): Verdeck, Fenster, Blinker – Auswahl beim Fahren mit 1–4
             var acc = _model != null ? TDU2Accessories.For(_model, _lights) : null;
             if (acc != null)
             {
                 acc.Audio = _audio;
-                // Türen nur im Stand; ab ~12 km/h gehen offene Türen von selbst zu
                 if (TDU2Controls.Pressed("doors") && Mathf.Abs(Current.SpeedKmh) < 5f) acc.ToggleDoors();
                 else if (acc.DoorsOpen && Mathf.Abs(Current.SpeedKmh) > 12f) { acc.SetDoor(true, false); acc.SetDoor(false, false); }
                 if (TDU2Controls.Pressed("windows")) acc.ToggleWindows();
@@ -670,7 +708,6 @@ namespace TDU2.Map.Vehicles
             if (Mathf.Abs(steer) < 0.01f && Mathf.Abs(padH) > 0.15f) steer = padH;
             if (accel < 0.01f && padV > 0.15f) accel = padV;
             if (brake < 0.01f && padV < -0.15f) brake = -padV;
-            // Tastatur-Lenkung glätten
             float rate = Mathf.Abs(steer) > Mathf.Abs(_steerInput) ? 4f : 6f;
             _steerInput = Mathf.MoveTowards(_steerInput, steer, rate * Time.deltaTime);
             Current.AccelPedal = accel;
@@ -715,3 +752,4 @@ namespace TDU2.Map.Vehicles
         }
     }
 }
+

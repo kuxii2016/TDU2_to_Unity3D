@@ -103,7 +103,7 @@ namespace TDU2.Map.Flash
         // ---------------------------------------------------------------- Laden
         public static VmfMovie Parse(byte[] d, Func<string, bool> textureExists = null)
         {
-            if (d == null || d.Length < 19 || d[0] != 'F' || d[1] != 'M' || d[2] != 'V') throw new FormatException("keine VMF-Datei");
+            if (d == null || d.Length < 19 || d[0] != 'F' || d[1] != 'M' || d[2] != 'V') throw new FormatException("no falid VMF File");
             var m = new VmfMovie { FrameRate = Mathf.Max(1, (d[14] << 8) | d[15]) };
             int o = 19;
             if (d[18] != 0)

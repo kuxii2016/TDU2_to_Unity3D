@@ -64,7 +64,10 @@ namespace TDU2.Map.Avatars
                     if (ci.Sex == 1 && cfg.Sex == 0 || ci.Sex == 2 && cfg.Sex == 1) continue;   // falsches Geschlecht
                     AvatarPartData data = null;
                     try { data = AvatarLibrary.LoadClothe(ci, i < cfg.Colors.Count ? cfg.Colors[i] : 0, hat); }
-                    catch (Exception ex) { Debug.LogWarning("[TDU2] Kleidung " + ci.File + ": " + ex.Message); }
+                    catch (Exception ex) 
+                    { 
+                        DebugManager.Error("Clothes " + ci.File + ": " + ex.Message);
+                    }
                     clothes.Add((ci, data));
                 }
                 return (skel, body, clothes);
@@ -75,14 +78,22 @@ namespace TDU2.Map.Avatars
         {
             if (_load == null || !_load.IsCompleted) return;
             var t = _load; _load = null;
-            if (t.IsFaulted) { Debug.LogWarning("[TDU2] Avatar laden: " + t.Exception?.GetBaseException().Message); return; }
+            if (t.IsFaulted) 
+            { 
+                DebugManager.Error("Avatar loding: " + t.Exception?.GetBaseException().Message);
+                return; 
+            }
             try { Build(t.Result.skel, t.Result.body, t.Result.clothes); }
             catch (Exception ex) { Debug.LogException(ex); }
         }
 
         void Build(XsbSkeleton skel, List<AvatarPartData> body, List<(ClotheInfo info, AvatarPartData data)> clothes)
         {
-            if (skel == null) { Debug.LogWarning("[TDU2] Avatar: kein Skelett (avatar/common_bodies.bnk fehlt?)"); return; }
+            if (skel == null) 
+            { 
+                DebugManager.Error("Avatar: missing Skelett (avatar/common_bodies.bnk?)");
+                return; 
+            }
             Skeleton = skel;
             int n = skel.Count;
             Bones = new Transform[n];

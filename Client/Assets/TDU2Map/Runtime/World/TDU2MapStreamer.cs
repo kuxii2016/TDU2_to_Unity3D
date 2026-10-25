@@ -110,7 +110,7 @@ namespace TDU2.Map
 
         // --- Laufzeit ---
         sealed class AreaPayload { public BankModel Model; public List<TerrainPiece> Pieces; public List<(Spot spot, BankModel model)> Exteriors = new List<(Spot, BankModel)>(); }
-        sealed class SectorPayload { public BankModel Model; public MeshData Terrain; public List<(Spot spot, BankModel model)> Exteriors = new List<(Spot, BankModel)>(); }
+        sealed class SectorPayload { public BankModel Model; public MeshData Terrain; public MeshData TerrainCollider; public List<(Spot spot, BankModel model)> Exteriors = new List<(Spot, BankModel)>(); }
 
         sealed class AreaState
         {
@@ -495,19 +495,6 @@ namespace TDU2.Map
         /// Build Island Water
         /// </summary>
         /// <param name="center"></param>
-        //void BuildWater(Vector3 center)
-        //{
-        //    const float half = 150000f;
-        //    var m = new Mesh { name = "TDU2_Water" };
-        //    m.SetVertices(new List<Vector3> { new Vector3(-half, 0, -half), new Vector3(-half, 0, half), new Vector3(half, 0, -half), new Vector3(half, 0, half) });
-        //    m.SetNormals(new List<Vector3> { Vector3.up, Vector3.up, Vector3.up, Vector3.up });
-        //    m.SetUVs(0, new List<Vector2> { new Vector2(0, 0), new Vector2(0, 1), new Vector2(1, 0), new Vector2(1, 1) });
-        //    m.SetTriangles(new[] { 0, 1, 2, 2, 1, 3 }, 0);
-        //    m.bounds = new Bounds(Vector3.zero, new Vector3(2 * half, 1, 2 * half));
-        //    _islandRes.Owned.Add(m);
-        //    var go = CreateMeshObject("Water", _root, new Vector3(center.x, SeaLevel, center.z), m, MaterialFactory.Water, null, false);
-        //    go.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
-        //}
         void BuildWater(Vector3 center)
         {
             const float half = 150000f;
@@ -569,6 +556,7 @@ namespace TDU2.Map
             go.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
             _water = go;
         }
+
         /// <summary>
         /// Create Grass
         /// </summary>
@@ -866,20 +854,45 @@ namespace TDU2.Map
             var st = new SectorState { Key = k };
             var exteriors = LoadSpotExteriors ? SpotsInSector(k) : new List<(Spot, string)>();
             var tex = _textures;
+            var origin = WorldLayout.SectorOrigin(k);
+            var neighborBanks = cutTunnels ? NeighborBankPaths(k, origin) : null;
             st.Task = Task.Run(() =>
             {
                 var model = BankModel.Load(path, BankKind.Sector, objs, place, grass);
                 // Sektortexturen global bekannt machen (Library-Objekte wie Felsen nutzen Texturen aus der Sektorbank)
                 tex.IndexBank(model.Bank);
                 if (objs) { try { TDU2.Map.Vehicles.InteriorFx.PrepareUva(model.Bank); } catch (Exception) { } }   // Textur-Animationen (.uva)
-                bool[] holes = null;
+                bool[] holes = null, driveHoles = null;
                 if (cutTunnels && model.Heights != null)
                 {
-                    try { holes = TerrainHoles.Compute(model.Heights, model.AllObjectSets()); }
-                    catch (Exception ex) { model.Log.Add("TerrainHoles: " + ex.Message); }
+                    try
+                    {
+                        List<UnityEngine.Vector3> extra = null;
+                        int extraTris = 0;
+                        if (neighborBanks != null)
+                            foreach (var (nbPath, off) in neighborBanks)
+                            {
+                                var t = TunnelTriangles.Get(nbPath);
+                                if (t.Length == 0) continue;
+                                if (extra == null) extra = new List<UnityEngine.Vector3>();
+                                for (int i = 0; i < t.Length; i++) extra.Add(t[i] + off);
+                                extraTris += t.Length / 3;
+                            }
+                        holes = TerrainHoles.Compute(model.Heights, model.AllObjectSets(), extra, out driveHoles);
+                        if (holes != null)
+                        {
+                            int hc = model.Heights.Size - 1, n = 0, minx = hc, maxx = -1, minz = hc, maxz = -1;
+                            for (int z = 0; z < hc; z++)
+                                for (int x = 0; x < hc; x++)
+                                    if (holes[z * hc + x]) { n++; if (x < minx) minx = x; if (x > maxx) maxx = x; if (z < minz) minz = z; if (z > maxz) maxz = z; }
+                            if (n > 0) Debug.Log($"[TDU2] CutTunnel {k}: {n} Zellen (Sicht), X{minx}..{maxx} Z{minz}..{maxz}, Nachbar-Dreiecke={extraTris}");
+                        }
+                    }
+                    catch (Exception ex) { model.Log.Add("TerrainHoles: " + ex.Message); Debug.LogWarning($"[TDU2] TerrainHoles {k}: {ex}"); }
                 }
                 var terrain = model.Heights != null ? TerrainMeshBuilder.BuildSector(model.Heights, skirt, holes) : null;
-                var payload = new SectorPayload { Model = model, Terrain = terrain };
+                var terrainCollider = model.Heights != null && driveHoles != null ? TerrainMeshBuilder.BuildSector(model.Heights, skirt, driveHoles) : null;
+                var payload = new SectorPayload { Model = model, Terrain = terrain, TerrainCollider = terrainCollider };
                 foreach (var (spot, file) in exteriors)
                 {
                     try { var em = BankModel.Load(file, BankKind.Exterior); tex.IndexBank(em.Bank); TDU2.Map.Vehicles.InteriorFx.PrepareUva(em.Bank); payload.Exteriors.Add((spot, em)); }
@@ -888,6 +901,28 @@ namespace TDU2.Map
                 return payload;
             });
             _sectors[k] = st;
+        }
+
+        /// <summary>
+        /// Kanten-Nachbarn eines Sektors (N/O/S/W) samt Versatz ihrer Bank-lokalen Koordinaten zu diesem Raster.
+        /// Damit kann ein Sektor das Tunnelportal eines Nachbarn mit ausschneiden (Tunnel über Sektorgrenze).
+        /// Wird auf dem Hauptthread aufgerufen (nur Index-Zugriffe); das teure Bank-Parsen passiert im Task/Cache.
+        /// </summary>
+        List<(string path, Vector3 offset)> NeighborBankPaths(SectorKey k, Vector3 origin)
+        {
+            var list = new List<(string, Vector3)>();
+            if (_index == null) return list;
+            float s = WorldLayout.SectorSize, half = s * 0.5f;
+            var ox = new float[4] { -1f, s + 1f, half, half };
+            var oz = new float[4] { half, half, -1f, s + 1f };
+            for (int i = 0; i < 4; i++)
+            {
+                var wk = WorldLayout.SectorAt(origin.x + ox[i], origin.z + oz[i]);
+                if (wk.Equals(k)) continue;
+                if (!_index.SectorBanks.TryGetValue(wk, out var nbPath) || string.IsNullOrEmpty(nbPath)) continue;
+                list.Add((nbPath, WorldLayout.SectorOrigin(wk) - origin));
+            }
+            return list;
         }
 
         /// <summary>Pro Frame höchstens eine fertige Kachel in Unity-Objekte umwandeln (verhindert Ruckler).</summary>
@@ -1046,7 +1081,16 @@ namespace TDU2.Map
                 }
                 var mat = MaterialFactory.CreateTerrainMaterial(color, splat, d1, d2, DetailTiling, DetailStrength);
                 st.Res.Owned.Add(mat);
-                CreateMeshObject("Terrain", st.Root.transform, Vector3.zero, data.Terrain.ToMesh(), mat, st.Res, true);
+                var terrainGo = CreateMeshObject("Terrain", st.Root.transform, Vector3.zero, data.Terrain.ToMesh(), mat, st.Res, true);
+                if (data.TerrainCollider != null)
+                {
+                    // Sicht bleibt voll (Berg), Kollision hat den Tunnel-Korridor ausgespart.
+                    var cm = data.TerrainCollider.ToMesh();
+                    st.Res.Owned.Add(cm);
+                    var mcol = terrainGo.AddComponent<MeshCollider>();
+                    mcol.sharedMesh = cm;
+                    mcol.convex = false;
+                }
             }
 
             if (LoadSectorObjects && st.Model.Objects != null)

@@ -93,7 +93,7 @@ namespace TDU2.Map.Formats
 
         public static XmbNode Parse(byte[] b)
         {
-            if (!IsXmb(b)) throw new FormatException("Keine XMBF-Datei");
+            if (!IsXmb(b)) throw new FormatException("no valid XMBF file");
             var x = new XmbFile(b);
             int rootName = Bin.I32(b, 20);
             int rootType = Bin.I32(b, 24);

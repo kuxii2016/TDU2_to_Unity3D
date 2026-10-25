@@ -85,6 +85,8 @@ namespace TDU2.Map.Vehicles
         public int CameraId, DefaultRims, TiresPhysics;
         public float StabilityManagement;
         public bool IsBike;
+        /// <summary>Maximaler Schräglagenwinkel in Grad (DB _max_lean_angle); 0 = kein Bike.</summary>
+        public float MaxLeanAngle;
         // Gelände: _isoffroad = Geländewagen, _offroad_real = echte Offroad-Physik; Reibwerte in % des Straßenwerts
         public bool IsOffroad, OffroadReal;
         public string TiresType, OffroadDirtTiresType, OffroadGrassTiresType;
@@ -212,7 +214,8 @@ namespace TDU2.Map.Vehicles
                 OffroadGrassNormalFrictionPercent = F("_offroad_grass_normal_friction_percent", 100),
             };
             for (int i = 0; i < 11; i++) c.GearRatios[i] = F("_gear_ratio" + (i + 1));
-            c.IsBike = n.F("_max_lean_angle") > 0f;
+            c.MaxLeanAngle = Mathf.Max(0f, n.F("_max_lean_angle"));
+            c.IsBike = c.MaxLeanAngle > 0f;
             if (c.WheelMassFront <= 0) c.WheelMassFront = 20; if (c.WheelMassRear <= 0) c.WheelMassRear = 20;
             return c;
         }

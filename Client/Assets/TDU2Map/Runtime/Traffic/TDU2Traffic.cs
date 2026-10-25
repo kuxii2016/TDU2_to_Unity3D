@@ -262,7 +262,7 @@ namespace TDU2.Map.Traffic
             foreach (var ti in _spawnable) StartTypeLoad(ti);
             _fillUntil = Time.unscaledTime + 4f;
             _status = r.Log;
-            Debug.Log("[TDU2] Verkehr: " + r.Log);
+            //Debug.Log("[TDU2] Verkehr: " + r.Log);
         }
 
         void StartTypeLoad(TypeInfo ti)

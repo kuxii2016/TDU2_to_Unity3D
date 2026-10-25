@@ -58,7 +58,7 @@ namespace TDU2.Map.Formats
                     Box2 = ReadMatrix(d, o + 192),
                 };
                 if (float.IsNaN(s.Position.x)) continue;
-                Debug.Log("Spotreader: " + s.Code + " : " + s.Key);
+                //Debug.Log("Spotreader: " + s.Code + " : " + s.Key);
                 f.Spots.Add(s);
             }
             return f;
@@ -90,7 +90,7 @@ namespace TDU2.Map.Formats
             if (c.StartsWith("EGAM")) return "Comunity Racing Center";
             if (c.StartsWith("EAIR")) return "Flughafen";
             if (c.StartsWith("EDI")) return "EDI?";
-            if (c.StartsWith("ELAND")) return "Landeplatz/Fähre?";
+            if (c.StartsWith("ELAND")) return "Landeplatz";
             if (c.StartsWith("ECAS")) return "Casino";
             return "Spot";
         }

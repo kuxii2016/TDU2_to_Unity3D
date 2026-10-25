@@ -65,10 +65,10 @@ namespace TDU2.Map.World
 
             if (skirt > 0f)
             {
-                AddSkirt(md, tris, vx, vz, skirt, Edge.Bottom);
-                AddSkirt(md, tris, vx, vz, skirt, Edge.Top);
-                AddSkirt(md, tris, vx, vz, skirt, Edge.Left);
-                AddSkirt(md, tris, vx, vz, skirt, Edge.Right);
+                AddSkirt(md, tris, vx, vz, skirt, Edge.Bottom, holes, x0, z0, nx, nz, g.Size - 1);
+                AddSkirt(md, tris, vx, vz, skirt, Edge.Top, holes, x0, z0, nx, nz, g.Size - 1);
+                AddSkirt(md, tris, vx, vz, skirt, Edge.Left, holes, x0, z0, nx, nz, g.Size - 1);
+                AddSkirt(md, tris, vx, vz, skirt, Edge.Right, holes, x0, z0, nx, nz, g.Size - 1);
             }
             md.SubMeshes.Add(tris);
             md.SubMeshMaterialIndex.Add(0);
@@ -77,10 +77,26 @@ namespace TDU2.Map.World
 
         enum Edge { Bottom, Top, Left, Right }
 
-        static void AddSkirt(MeshData md, List<int> tris, int vx, int vz, float depth, Edge edge)
+        static void AddSkirt(MeshData md, List<int> tris, int vx, int vz, float depth, Edge edge,
+                             bool[] holes, int x0, int z0, int nx, int nz, int cellSize)
         {
             int count = (edge == Edge.Bottom || edge == Edge.Top) ? vx : vz;
             int start = md.Positions.Count;
+            var skip = new bool[count - 1];
+            if (holes != null)
+                for (int k = 0; k < count - 1; k++)
+                {
+                    int ci, cj;
+                    switch (edge)
+                    {
+                        case Edge.Bottom: ci = k; cj = 0; break;
+                        case Edge.Top: ci = k; cj = nz - 1; break;
+                        case Edge.Left: ci = 0; cj = k; break;
+                        default: ci = nx - 1; cj = k; break;
+                    }
+                    int hx = x0 + ci, hz = z0 + cj;
+                    if (hx < cellSize && hz < cellSize && holes[hz * cellSize + hx]) skip[k] = true;
+                }
             for (int k = 0; k < count; k++)
             {
                 int src = EdgeIndex(edge, k, vx, vz);
@@ -91,6 +107,7 @@ namespace TDU2.Map.World
             }
             for (int k = 0; k < count - 1; k++)
             {
+                if (skip[k]) continue;   // kein Skirt quer über einer Portalöffnung
                 int a = EdgeIndex(edge, k, vx, vz), b = EdgeIndex(edge, k + 1, vx, vz);
                 int c = start + k, d = start + k + 1;
                 // beidseitig, damit die Wicklung egal ist

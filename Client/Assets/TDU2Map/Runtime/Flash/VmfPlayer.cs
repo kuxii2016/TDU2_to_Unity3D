@@ -121,7 +121,7 @@ namespace TDU2.Map.Flash
             var bank = BnkArchive.Open(bankPath);
             BnkEntry vmfEntry = null;
             foreach (var e in bank.All(".vmf")) { vmfEntry = e; break; }
-            if (vmfEntry == null) throw new FileNotFoundException("keine .vmf in " + bankPath);
+            if (vmfEntry == null) throw new FileNotFoundException("no VMF file in: " + bankPath);
             foreach (var e in bank.All(".2db"))
             {
                 var def = TextureDef.Parse(bank.Read(e), Path.GetFileNameWithoutExtension(e.Name));

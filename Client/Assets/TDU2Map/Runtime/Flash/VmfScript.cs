@@ -40,7 +40,10 @@ namespace TDU2.Map.Flash
         {
             if (d == null || !_btnObjs.TryGetValue(d, out var bo) || !bo.Members.TryGetValue(ev, out var h) || !(h is AsFunction fn)) return;
             try { InvokeTop(fn, bo, Array.Empty<object>()); }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Flash-Button " + ev + ": " + ex.Message); }
+            catch (Exception ex) 
+            {
+                DebugManager.Error("Flash-Button " + ev + ": " + ex.Message);
+            }
         }
 
         // onEnterFrame-Handler (je Bild nach dem Zeitleisten-Schritt)
@@ -54,7 +57,10 @@ namespace TDU2.Map.Flash
                 if (!Attached(inst)) { _enterFrame.Remove(inst); continue; }
                 if (!_objVars.TryGetValue(VarKey(inst, "onEnterFrame"), out var f) || !(f is AsFunction fn)) { _enterFrame.Remove(inst); continue; }
                 try { InvokeTop(fn, inst, Array.Empty<object>()); }
-                catch (Exception ex) { Debug.LogWarning("[TDU2] onEnterFrame (" + PathOf(inst) + "): " + ex.Message); }
+                catch (Exception ex) 
+                { 
+                    DebugManager.Error("Flash onEnterFrame (" + PathOf(inst) + "): " + ex.Message);
+                }
             }
         }
 
@@ -181,7 +187,10 @@ namespace TDU2.Map.Flash
             if (_depth > 24) return;
             _depth++; _inActions++;
             try { Exec(code, 0, code.Length, self, null, null, out _); }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Flash-Skript (" + PathOf(self) + "): " + ex.Message); }
+            catch (Exception ex) 
+            { 
+                DebugManager.Error("[TDU2] Flash-sction (" + PathOf(self) + "): " + ex.Message);
+            }
             finally { _depth--; _inActions--; if (_inActions == 0) DrainActionQueue(); }
         }
 
@@ -931,7 +940,10 @@ namespace TDU2.Map.Flash
                         };
                         _activeList = l;
                         try { ListCreated?.Invoke(l); }
-                        catch (Exception ex) { Debug.LogWarning("[TDU2] ASFlashList " + l.Name + ": " + ex.Message); }
+                        catch (Exception ex) 
+                        { 
+                            DebugManager.Error("ASFlashList " + l.Name + ": " + ex.Message);
+                        }
                         return l;
                     }
                 // MovieClip-Methoden als globale Funktion im aktuellen Ziel (tellTarget/SetTarget): z.B. menu_sq.attachOtherIcons()
@@ -1116,7 +1128,10 @@ namespace TDU2.Map.Flash
             var a = new object[args?.Length ?? 0];
             for (int i = 0; i < a.Length; i++) a[i] = args[i] is int iv ? (object)(double)iv : args[i] is float fv ? (object)(double)fv : args[i];
             try { InvokeTop(best, bestInst, a); }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Flash-Eingabe " + function + ": " + ex.Message); }
+            catch (Exception ex) 
+            { 
+                DebugManager.Error("Flash-Input " + function + ": " + ex.Message); 
+            }
             return true;
         }
 
@@ -1286,7 +1301,7 @@ namespace TDU2.Map.Flash
             var a = new object[args?.Length ?? 0];
             for (int i = 0; i < a.Length; i++) a[i] = args[i] is int iv ? (object)(double)iv : args[i] is float fv ? (object)(double)fv : args[i];
             try { InvokeTop(fn, inst, a); }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Flash-Aufruf " + function + ": " + ex.Message); }
+            catch (Exception ex) { DebugManager.Error("Flash-Call " + function + ": " + ex.Message); }
             return true;
         }
 
