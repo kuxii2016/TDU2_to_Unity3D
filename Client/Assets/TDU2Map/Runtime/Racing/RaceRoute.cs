@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Baut die Geometrie der Rennstrecke für die Minimap: ein flaches Band (Ribbon) entlang der Checkpoints

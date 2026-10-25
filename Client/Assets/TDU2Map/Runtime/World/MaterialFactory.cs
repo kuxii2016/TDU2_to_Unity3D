@@ -1,9 +1,9 @@
 using System;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>Shader-Referenzen (werden vom Streamer gesetzt, sonst per Shader.Find).</summary>
     [Serializable]
@@ -85,13 +85,13 @@ namespace TDU2.Map.World
                 || n.Contains("mark") || n.Contains("stripe") || n.Contains("logo") || n.Contains("decal");
         }
 
-        static readonly ulong SemMaterial = TDU2.Map.IO.Bin.KeyFromString("MATERIAL");
-        static readonly ulong SemTex = TDU2.Map.IO.Bin.KeyFromString("TEX");
-        static readonly ulong SemNeon = TDU2.Map.IO.Bin.KeyFromString("NEONGLOW");
-        static readonly ulong SemDiffuse = TDU2.Map.IO.Bin.KeyFromString("DIFFUSE");
-        static readonly ulong SemMarks = TDU2.Map.IO.Bin.KeyFromString("MARKS");
-        static readonly ulong SemMarks2 = TDU2.Map.IO.Bin.KeyFromString("MARKS2");
-        static readonly ulong SemGloss = TDU2.Map.IO.Bin.KeyFromString("GLOSS");
+        static readonly ulong SemMaterial = TDU2.IO.Bin.KeyFromString("MATERIAL");
+        static readonly ulong SemTex = TDU2.IO.Bin.KeyFromString("TEX");
+        static readonly ulong SemNeon = TDU2.IO.Bin.KeyFromString("NEONGLOW");
+        static readonly ulong SemDiffuse = TDU2.IO.Bin.KeyFromString("DIFFUSE");
+        static readonly ulong SemMarks = TDU2.IO.Bin.KeyFromString("MARKS");
+        static readonly ulong SemMarks2 = TDU2.IO.Bin.KeyFromString("MARKS2");
+        static readonly ulong SemGloss = TDU2.IO.Bin.KeyFromString("GLOSS");
         static readonly ulong SemWindow = MaterialDef.KeyFromName("WINDOWMAP");
 
         /// <summary>Haupt-Farbtextur: COLOR, sonst MATERIAL/TEX/DIFFUSE/NEONGLOW (z.B. Flugzeug, Neonschilder).</summary>
@@ -362,12 +362,12 @@ namespace TDU2.Map.World
                     if (m.HasProperty("_Lit")) m.SetFloat("_Lit", 0f);
                     if (m.HasProperty("_VcMul")) m.SetFloat("_VcMul", 1f);
                     if (m.HasProperty("_DetailMode")) m.SetFloat("_DetailMode", 0f);
-                    if (def.TryGetLayer(TDU2.Map.IO.Bin.KeyFromString("NEONGLOW"), out _)) m.mainTexture = Texture2D.blackTexture;
+                    if (def.TryGetLayer(TDU2.IO.Bin.KeyFromString("NEONGLOW"), out _)) m.mainTexture = Texture2D.blackTexture;
                     else m.mainTexture = Texture2D.whiteTexture;
                     return;
                 }
                 // mit NEONGLOW-Ebene: Leuchten nur über die animierte Maske (AnimValue, setzt das Spiel zur Laufzeit) -> aus
-                bool masked = def.TryGetLayer(TDU2.Map.IO.Bin.KeyFromString("NEONGLOW"), out _);
+                bool masked = def.TryGetLayer(TDU2.IO.Bin.KeyFromString("NEONGLOW"), out _);
                 m.mainTexture = masked ? Texture2D.blackTexture : Texture2D.whiteTexture;
                 if (m.HasProperty("_Unlit")) m.SetFloat("_Unlit", 1f);
                 if (m.HasProperty("_VertexColorStrength")) m.SetFloat("_VertexColorStrength", 1f);

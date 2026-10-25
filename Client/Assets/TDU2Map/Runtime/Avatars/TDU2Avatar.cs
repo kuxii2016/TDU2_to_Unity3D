@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Avatars
+namespace TDU2.Avatars
 {
     /// <summary>
     /// Ein Avatar (Spielfigur) wie im Spiel: ein Skelett (.xsb) häutet Körper, Kopf und alle Kleidungsstücke.

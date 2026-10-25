@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace TDU2.Map.Formats
+namespace TDU2.Formats
 {
     /// <summary>
     /// Terrain-Höhenraster. In TDU2 ist das Terrain ein HMAP-Objekt im .3dd + ein DXVB im .3dg:

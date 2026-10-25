@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Fahrzeugkameras aus camerasingame.xmb (je Auto, Fehlendes aus den Standardsätzen):

@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
-using TDU2.Map.World;
+using TDU2.Formats;
+using TDU2.IO;
+using TDU2.World;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>A parsed scene (3dd + 3dg + 2dm) with pre-processed mesh data (LOD 0 only).</summary>
     public sealed class CarScene

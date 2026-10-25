@@ -4,8 +4,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
-using TDU2.Map;
-using TDU2.Map.Traffic;
+using TDU2;
+using TDU2.Traffic;
 using UnityEngine;
 
 public enum Islands
@@ -38,6 +38,8 @@ public class DebugManager : MonoBehaviour
             return;
         }
         Instance = this;
+        Clear();
+        INIT("TDU2toUNITY3d Port Started: " + DateTime.Now.ToString("dd.MM.yyyy - HH:mm:ss"));
     }
 
     public static void Debug(string Message) => Tracer.Print(NameOfCallingClass() + "()=>" + Message, "DEBUG");
@@ -87,7 +89,7 @@ public class Tracer
                 UnityEngine.Debug.LogWarning("<color=orange>Warning</color>: <color=#b9770e>" + condition + "</color>");
                 break;
             case "DEBUG":
-                UnityEngine.Debug.Log("<color=yellow>Debug</color>: <color=#34495e>" + condition + "</color>");
+                UnityEngine.Debug.Log("<color=yellow>Debug</color>: <color=#1C69A8>" + condition + "</color>");
                 break;
             case "Other":
                 ///Do we need Log here?

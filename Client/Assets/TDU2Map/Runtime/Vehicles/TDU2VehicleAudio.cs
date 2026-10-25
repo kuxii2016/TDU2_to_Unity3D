@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Fahrzeugsound nach CarVSTConfig.xmb: jedes Sample (Motor Last/Schub, Getriebe, Wind, Reifen, Schaltgeräusche ...)
@@ -133,7 +133,7 @@ namespace TDU2.Map.Vehicles
                     _phys[34 + i] = w != null && w.Grounded ? Deadzone(w.LongSlipVel, SquealLongDeadzone) : 0f;
                 }
             }
-            _phys[43] = Mathf.Max(Wetness, TDU2.Map.World.TDU2Weather.GroundWet);   // nasse Fahrbahn (Wetter)
+            _phys[43] = Mathf.Max(Wetness, TDU2.World.TDU2Weather.GroundWet);   // nasse Fahrbahn (Wetter)
 
             foreach (var v in _loops)
             {

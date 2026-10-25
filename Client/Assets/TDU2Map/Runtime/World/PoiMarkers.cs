@@ -1,8 +1,8 @@
 using System.Collections.Generic;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 using UnityEngine;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>Ein POI (Spot) als GameObject – sichtbar als Marker, mit Infos im Inspector.</summary>
     public sealed class PoiMarker : MonoBehaviour
@@ -60,7 +60,7 @@ namespace TDU2.Map.World
                 m.SecondPosition = s.Position2;
                 m.AreaSector = $"area {s.AreaX}-{s.AreaZ}, sector {s.SectorX}-{s.SectorZ}";
                 m.TypeA = s.TypeA; m.TypeB = s.TypeB;
-                m.KeyHex = TDU2.Map.IO.Bin.KeyHex(s.Key);
+                m.KeyHex = TDU2.IO.Bin.KeyHex(s.Key);
                 if (ShowMarkerMeshes) AddPin(go);
                 _markers.Add(m);
             }

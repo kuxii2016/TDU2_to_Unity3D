@@ -2,13 +2,13 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using TDU2.Map.Flash;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Flash;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Minimap wie im Spiel (HudMap.cpp): Straßennetz aus &lt;Insel&gt;.bnk / &lt;Insel&gt;_ROAD_DETAIL.IA wird in ein
@@ -93,7 +93,6 @@ namespace TDU2.Map.Vehicles
                         string dir = Path.Combine(Path.GetDirectoryName(Application.dataPath) ?? ".", "Logs");
                         Directory.CreateDirectory(dir);
                         File.WriteAllText(Path.Combine(dir, "tdu2_minimap.txt"), sb.ToString());
-                        Debug.Log("[TDU2] Minimap: Diagnose geschrieben (" + _lines.Count + " Zeilen, Logs/tdu2_minimap.txt)");
                     }
                     catch (Exception ex) { Debug.LogWarning("[TDU2] Minimap-Diagnose: " + ex.Message); }
                 }
@@ -705,7 +704,7 @@ namespace TDU2.Map.Vehicles
                 if (!grid.TryGetValue(k, out var l)) grid[k] = l = new List<int>();
                 l.Add(i);
             }
-            bool Style(Vector2 p, out float half, out Color col) => StyleIdx(p, out half, out col, out _);
+            //bool Style(Vector2 p, out float half, out Color col) => StyleIdx(p, out half, out col, out _);
             bool StyleIdx(Vector2 p, out float half, out Color col, out int endIdx)
             {
                 half = 4f * _wMul; col = RoadTown; float best = 3f * 3f * _wMul * _wMul; bool ok = false; endIdx = -1;
@@ -977,11 +976,11 @@ namespace TDU2.Map.Vehicles
         {
             if (_task != null && _task.IsCompleted)
             {
-                if (_task.IsFaulted) { Error = _task.Exception?.GetBaseException().Message; Debug.LogWarning("[TDU2] Minimap: " + Error); }
+                if (_task.IsFaulted) { Error = _task.Exception?.GetBaseException().Message; Debug.LogWarning("Minimap: " + Error); }
                 else
                 {
-                    try { BuildMesh(_task.Result); BuildRoadIndex(_task.Result); Debug.Log($"[TDU2] Minimap: {_task.Result.Count} Straßensegmente, {_nameIndex?.NameCount ?? 0} Straßennamen"); }
-                    catch (Exception ex) { Error = ex.Message; Debug.LogWarning("[TDU2] Minimap: " + ex); }
+                    try { BuildMesh(_task.Result); BuildRoadIndex(_task.Result); DebugManager.Debug($"Minimap: {_task.Result.Count} Straßensegmente, {_nameIndex?.NameCount ?? 0} Straßennamen"); }
+                    catch (Exception ex) { Error = ex.Message; Debug.LogWarning("Minimap: " + ex); }
                 }
                 _task = null;
             }

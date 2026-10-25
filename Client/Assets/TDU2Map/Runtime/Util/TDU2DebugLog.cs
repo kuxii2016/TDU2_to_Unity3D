@@ -3,12 +3,12 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
 using System.Threading;
-using TDU2.Map.Racing;
-using TDU2.Map.Vehicles;
-using TDU2.Map.World;
+using TDU2.Racing;
+using TDU2.Vehicles;
+using TDU2.World;
 using UnityEngine;
 
-namespace TDU2.Map
+namespace TDU2
 {
     /// <summary>
     /// Diagnose-Log für Rennschule/Interieur/Fahrzeug in eine Datei im Projekt (für die Fehlersuche ohne Unity-Konsole):

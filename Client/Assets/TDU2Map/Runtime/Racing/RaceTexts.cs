@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Texte der Spieldatenbank nach HashCode (database/db_&lt;sprache&gt;.cpr), z.B. Prüfungsnamen (ig2 "dbna"),

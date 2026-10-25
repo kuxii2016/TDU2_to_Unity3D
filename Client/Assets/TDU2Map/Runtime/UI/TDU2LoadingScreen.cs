@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using TDU2.Map.IO;
-using TDU2.Map.Online;
+using TDU2.IO;
+using TDU2.Online;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Ladebildschirm wie im Spiel bei Szenenwechseln (Interieur betreten/verlassen, Raumwechsel Garage/Wohnbereich, Inselwechsel):

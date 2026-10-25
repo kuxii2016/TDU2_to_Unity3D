@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Verschmutzung der Karosserie wie im Spiel (DBCarDirtData, Fälle DirtSun / DirtRain / NoDirtRain):

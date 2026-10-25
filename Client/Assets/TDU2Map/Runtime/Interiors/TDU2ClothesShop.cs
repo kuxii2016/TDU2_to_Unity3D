@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using TDU2.Map.Avatars;
-using TDU2.Map.Flash;
-using TDU2.Map.Online;
+using TDU2.Avatars;
+using TDU2.Flash;
+using TDU2.Online;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Kleidungsladen und Garderobe mit den Original-Filmen:
@@ -90,7 +90,7 @@ namespace TDU2.Map.Vehicles
         {
             if (_open) return true;
             if (string.IsNullOrEmpty(frontendBank) || !File.Exists(frontendBank)) return false;
-            if (!AvatarLibrary.Ready) { Debug.LogWarning("[TDU2] Kleidung: Avatar-Daten noch nicht geladen"); return false; }
+            if (!AvatarLibrary.Ready) { DebugManager.Warning("Avatar Clothes are not Loaded"); return false; }
             _mode = mode;
             _npcs = npcs;
             string bnk = Interiors != null && Interiors.Manager != null ? Interiors.Manager.BnkDir : null;
@@ -153,7 +153,7 @@ namespace TDU2.Map.Vehicles
                 _ui.GotoLabel("/", "dressing_in", true);
                 _ui.SetValue("/:Input", true);
             }
-            Debug.Log("[TDU2] " + (mode == ShopMode.Shop ? "Kleidungsladen" : "Garderobe") + " geöffnet: Kollektion " + _brand
+            DebugManager.Info((mode == ShopMode.Shop ? "Kleidungsladen" : "Garderobe") + " geöffnet: Kollektion " + _brand
                 + (_seller != null ? " (" + AvatarLibrary.PnjName(_seller.ConfigName) + ")" : "") + ", " + (_base.Sex == 1 ? "Frau" : "Mann")
                 + ", Avatar-Platz " + (_hasPlace ? "aus der Szene" : "vor der Kamera"));
             return true;
@@ -175,7 +175,7 @@ namespace TDU2.Map.Vehicles
                 _films[bank] = f;
                 return f;
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Kleidung: " + Path.GetFileName(bank) + " – " + ex.Message); return null; }
+            catch (Exception ex) { DebugManager.Error("Clothes: " + Path.GetFileName(bank) + " – " + ex.Message); return null; }
         }
 
         public void Close()
@@ -194,8 +194,7 @@ namespace TDU2.Map.Vehicles
             if (_ui != null) _ui.gameObject.SetActive(false);
             Interiors?.SetFirstPerson(true);
             _closedFrame = Time.frameCount;
-            Debug.Log("[TDU2] " + (_mode == ShopMode.Shop ? "Kleidungsladen" : "Garderobe") + " geschlossen");
-            try { Closed?.Invoke(); } catch (Exception ex) { Debug.LogException(ex); }
+            try { Closed?.Invoke(); } catch (Exception ex) { DebugManager.Error(ex.Message); }
         }
 
         /// <summary>Kollektion aus der Verkäuferin (DBPNJ "Clothes seller Highlife" …).</summary>
@@ -357,7 +356,6 @@ namespace TDU2.Map.Vehicles
                     if (_mode == ShopMode.Dressing && lc == "mcou") return;   // dressing_in meldet mcou beim Öffnen
                     Close(); return;
             }
-            Debug.Log("[TDU2] Kleidung: " + lc + (string.IsNullOrEmpty(args) ? "" : " " + args));
         }
 
         void OnCamera(string cam)
@@ -492,7 +490,7 @@ namespace TDU2.Map.Vehicles
             var sv = TDU2Session.Save;
             if (!e.Owned && sv != null)
             {
-                if (sv.money < e.Price) { Debug.Log("[TDU2] Kleidungsladen: zu wenig Geld"); return; }
+                if (sv.money < e.Price) { DebugManager.Error("No Money"); return; }
                 sv.money = Math.Max(0, sv.money - e.Price);
             }
             if (e.Item != null && sv != null)
@@ -501,7 +499,7 @@ namespace TDU2.Map.Vehicles
                 if (!sv.ownedClothes.Contains(e.Item.Hash)) sv.ownedClothes.Add(e.Item.Hash);
             }
             Wear(e);
-            Debug.Log("[TDU2] Kleidungsladen: gekauft " + (e.Item != null ? e.Item.File + " Farbe " + e.Color : "(ablegen)") + " für $" + (e.Owned ? 0 : e.Price));
+            DebugManager.Info("Kleidungsladen: gekauft " + (e.Item != null ? e.Item.File + " Farbe " + e.Color : "(ablegen)") + " für $" + (e.Owned ? 0 : e.Price));
             foreach (var x in _items) if (x.Item != null && e.Item != null && x.Item.Hash == e.Item.Hash) x.Owned = true;
             // Kauf-Kinematik (M_BUY_ITEM) gibt es hier nicht: nach der Bestätigungs-Animation das Stückmenü sauber schließen (Update)
         }

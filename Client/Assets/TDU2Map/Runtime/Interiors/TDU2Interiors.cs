@@ -3,15 +3,16 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using TDU2.Map.Flash;
-using TDU2.Map.Formats;
-using TDU2.Map.Online;
-using TDU2.Map.Racing;
-using TDU2.Map.World;
+using TDU2.Flash;
+using TDU2.Formats;
+using TDU2.Interior;
+using TDU2.Online;
+using TDU2.Racing;
+using TDU2.World;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Spots betreten wie im Spiel: an der Einfahrt eines Autohändlers / Hauses / Shops [Enter] → Interieur
@@ -1326,7 +1327,7 @@ namespace TDU2.Map.Vehicles
         string _uiBank;
         object _uiAim;
         /// <summary>Autos nur aus der Nähe anvisieren (m vom Auge bis zur Hülle) – wie im Spiel: man steht vor dem Auto.</summary>
-        const float CarAimDistance = 3.2f;
+        const float CarAimDistance = 0.5f;
         float _aimCarDist;
         float _aimInfoAt = -1f;
         object _infoHiddenFor;
@@ -2005,7 +2006,7 @@ namespace TDU2.Map.Vehicles
                 ExitInterior(_lastCar);
                 return;
             }
-            Debug.Log("GUI Id: " + s.Type + " kind: " + _kind);
+            DebugManager.Debug("GUI Id: " + s.Type + " kind: " + _kind);
             switch (s.Type)
             {
                 case 5: LoadScene(_spotBanks.Garage, Kind.Garage, null); break;
@@ -2015,10 +2016,10 @@ namespace TDU2.Map.Vehicles
                 case 1 when _ui != null:
                 case 12 when _ui != null:
                 case 9 when _ui != null && GuestHost == 0:   // Tagebuch (home.vmf diary_in) – nur der Besitzer
-                    OpenDiary(); break;
+                    {
+                        OpenDiary(); break;
+                    }
                 case 9 when _ui != null: break;            // Gast: kein Tagebuch
-                case 57 when _ui != null:
-                    break;   // im Original eigene Flash-Menüs (noch nicht angebunden)
                 case 1:
                     {
                         var list = new List<CarPhysics>();
@@ -2062,7 +2063,24 @@ namespace TDU2.Map.Vehicles
                     }
                 case 10: OpenDressing(); break;      // Garderobe -> Interieur idr_* + home.vmf dressing_in
                 case 9: ShowInfo($"GUI {s.Type} - {_kind} not Implemented"); break;
-                case 57: ShowInfo($"GUI {s.Type} - {_kind} not Implemented"); break;
+                case 57:
+                    {
+                        #if UNITY_2023_1_OR_NEWER
+                        var menu = FindFirstObjectByType<TDU2TDUMedia>();
+                        #else
+                        var menu = FindObjectOfType<TDU2TDUMedia>();
+                        #endif
+                        if (menu == null)
+                        {
+                            var go = new GameObject("TDUMedia");
+                            go.transform.SetParent(transform, false);
+                            menu = go.AddComponent<TDU2TDUMedia>();
+                            menu.Manager = Manager;
+                        }
+                        DebugManager.Debug("Try open TDUMedia");
+                        menu.Open();
+                    } 
+                    break;
                 case 22: if (!OpenClothesShop()) goto default; break;
                 case 29: OpenHairdresser(); break;  // Friseur (Hairdresser_area) -> shopsavatar.vmf "hairdresser"
                 case 28: OpenStickerShop(); break;    // Sticker-Shop-Verkäuferin -> shopscar.vmf StickersMenu()

@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.Avatars;
-using TDU2.Map.Flash;
-using TDU2.Map.Formats;
-using TDU2.Map.Vehicles;
+using TDU2.Avatars;
+using TDU2.Flash;
+using TDU2.Formats;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.Online
+namespace TDU2.Online
 {
     /// <summary>
     /// Mitspieler beitreten und einladen (Spielerliste im Pausemenü, große Karte) und Mitfahren als Beifahrer ("Co-Driving").

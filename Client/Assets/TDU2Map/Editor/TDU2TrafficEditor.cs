@@ -1,4 +1,4 @@
-using TDU2.Map.Traffic;
+using TDU2.Traffic;
 using UnityEditor;
 using UnityEngine;
 

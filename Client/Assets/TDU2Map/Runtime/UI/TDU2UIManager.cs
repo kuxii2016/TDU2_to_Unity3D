@@ -1,10 +1,10 @@
 using System;
 using System.Collections;
 using System.Globalization;
-using TDU2.Map.Flash;
-using TDU2.Map.Online;
-using TDU2.Map.Racing;
-using TDU2.Map.Vehicles;
+using TDU2.Flash;
+using TDU2.Online;
+using TDU2.Racing;
+using TDU2.Vehicles;
 using UnityEngine;
 
 /// <summary>
@@ -55,7 +55,7 @@ public class TDU2UIManager : MonoBehaviour
         {
             var m = VehicleManager;
             if (m != null && !string.IsNullOrEmpty(m.BnkDir)) return m.BnkDir;
-            return TDU2.Map.Avatars.AvatarLibrary.BnkDir;
+            return TDU2.Avatars.AvatarLibrary.BnkDir;
         }
     }
 

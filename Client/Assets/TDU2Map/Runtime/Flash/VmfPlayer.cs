@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Flash
+namespace TDU2.Flash
 {
     /// <summary>
     /// Spielt einen VMF-Film (Eden-Flash) als Bildschirm-Overlay ab.

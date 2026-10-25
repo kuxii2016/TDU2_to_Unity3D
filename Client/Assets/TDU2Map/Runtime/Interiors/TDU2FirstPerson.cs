@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>
     /// Laufen in Interieurs wie im Spiel (Ich-Perspektive, "FirstPerson"-Entity der Szene):

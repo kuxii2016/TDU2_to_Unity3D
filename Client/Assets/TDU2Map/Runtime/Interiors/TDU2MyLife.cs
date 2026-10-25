@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using TDU2.Map.Avatars;
-using TDU2.Map.Online;
-using TDU2.Map.Racing;
+using TDU2.Avatars;
+using TDU2.Online;
+using TDU2.Racing;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// MyTDULife (Tagebuch -> "My Life", home.vmf Clip /mylf) wie im Spiel:
@@ -182,7 +182,6 @@ namespace TDU2.Map.Vehicles
             _lifeDirty = false;
             ReadLifeBoxes();
             TDU2Session.SaveAsync();
-            Debug.Log("[TDU2] MyTDULife gespeichert");
         }
 
         /// <summary>Kästen ed1..ed7 aus dem Film (der Film tauscht/verschiebt sie selbst).</summary>
@@ -316,7 +315,6 @@ namespace TDU2.Map.Vehicles
                 _ui.SetVariable("/:" + li.Var, LifeText(li, next));
                 return;
             }
-            Debug.Log("[TDU2] MyTDULife: unbekannte Liste '" + id + "'");
         }
 
         void RestoreLifeSnapshot()
@@ -495,7 +493,7 @@ namespace TDU2.Map.Vehicles
                 _lifeAvatar.InCar = false;
                 _lifeAvatar.Built += PoseLifeAvatar;
             }
-            Debug.Log("[TDU2] MyTDULife Foto: Szene " + (act != null ? "M_MYLIFE" : "Ersatz") + ", Pose " + (_lifeClip != null ? clip : "keine"));
+            DebugManager.Debug("MyTDULife Foto: Szene " + (act != null ? "M_MYLIFE" : "Ersatz") + ", Pose " + (_lifeClip != null ? clip : "keine"));
         }
 
         static readonly string[] LifePhotoHide = { "diary", "title_bar", "club_money", "mylf_book", "help" };
@@ -572,7 +570,7 @@ namespace TDU2.Map.Vehicles
                 _lifeDirty = true;
                 SaveLifeIfDirty();
                 ApplyLifePhoto();
-                Debug.Log("[TDU2] MyTDULife Foto gespeichert (" + jpg.Length / 1024 + " KB)");
+                DebugManager.Debug("MyTDULife Foto gespeichert (" + jpg.Length / 1024 + " KB)");
             }
             FreezeLifePhoto(true);
             _ui.SetValue("/:photoUploaded", true);
@@ -647,12 +645,12 @@ namespace TDU2.Map.Vehicles
             if (_loaderKick1 > 0f && Time.unscaledTime >= _loaderKick1)
             {
                 _loaderKick1 = -1f;
-                if (_ui.GetVariable(L + ":isLoading") == "true") { Debug.Log("[TDU2] MyTDULife: Ladeanzeige geschlossen"); _ui.CallClip(L, "closeLoading"); }
+                if (_ui.GetVariable(L + ":isLoading") == "true") { DebugManager.Debug("[TDU2] MyTDULife: Ladeanzeige geschlossen"); _ui.CallClip(L, "closeLoading"); }
             }
             if (_loaderKick2 > 0f && Time.unscaledTime >= _loaderKick2)
             {
                 _loaderKick2 = -1f;
-                if (_ui.GetVariable(L + ":isLoading") == "true") { Debug.Log("[TDU2] MyTDULife: Ladeanzeige beendet"); _ui.CallClip(L, "endLoading"); _ui.SetValue("/:Input", true); }
+                if (_ui.GetVariable(L + ":isLoading") == "true") { DebugManager.Debug("[TDU2] MyTDULife: Ladeanzeige beendet"); _ui.CallClip(L, "endLoading"); _ui.SetValue("/:Input", true); }
             }
         }
 

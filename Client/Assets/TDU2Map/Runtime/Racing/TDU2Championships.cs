@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using TDU2.Map.Flash;
-using TDU2.Map.Formats;
-using TDU2.Map.Vehicles;
+using TDU2.Flash;
+using TDU2.Formats;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Einzelspieler-Meisterschaften (DBLicense mit _isachampionship):
@@ -73,6 +73,7 @@ namespace TDU2.Map.Racing
         readonly Dictionary<string, (Cup cup, RaceDefinition race, Spot spot)> _spots = new Dictionary<string, (Cup, RaceDefinition, Spot)>();
         readonly Dictionary<string, GameObject> _beacons = new Dictionary<string, GameObject>();
         readonly Dictionary<string, (Cup cup, Spot spot)> _hubs = new Dictionary<string, (Cup, Spot)>();
+        readonly List<RaceDefinition> multiplayer = new List<RaceDefinition>();
         Cup _nearHub;
         float _nextRefresh;
         int _lastSpotCount = -1;
@@ -191,6 +192,14 @@ namespace TDU2.Map.Racing
                 _bnk = man.BnkDir;
                 _island = isl;
                 _repo = RaceRepository.Load(_bnk);
+                var other = _repo.BuildUnlicensedRaces();
+
+                foreach (var r in other)
+                {
+                    if (r == null) continue;
+                    Debug.Log($"{r.Name} - {r.Island} {r.Mode}");
+                }
+
                 RaceTexts.Ensure(_bnk, TDU2PauseMenu.SavedLanguage());
                 _cups.Clear();
                 foreach (var l in _repo.Database.Championships(isl))
@@ -202,14 +211,16 @@ namespace TDU2.Map.Racing
                         var d = _repo.Build(f, l);
                         if (d != null && d.Checkpoints.Count > 0) c.Races.Add(d);
                     }
+
+
                     if (c.Races.Count > 0) _cups.Add(c);
                 }
-                Debug.Log("[TDU2] Meisterschaften: " + _cups.Count + " auf Insel " + isl + " (" + string.Join(", ", _cups.ConvertAll(c => c.Lic.ChallengeFiles[0].Substring(0, 5) + (IsAvailable(c) ? "*" : ""))) + ")");
+                DebugManager.Debug("Meisterschaften: " + _cups.Count + " auf Insel " + isl + " (" + string.Join(", ", _cups.ConvertAll(c => c.Lic.ChallengeFiles[0].Substring(0, 5) + (IsAvailable(c) ? "*" : ""))) + ")");
                 ClearSpots();
                 _nextRefresh = 0f;
                 return true;
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Meisterschaften: " + ex.Message); _repo = null; return false; }
+            catch (Exception ex) { Debug.LogWarning("Meisterschaften: " + ex.Message); _repo = null; return false; }
         }
 
         // ------------------------------------------------------------------ Freischaltung
@@ -617,7 +628,7 @@ namespace TDU2.Map.Racing
             if (!EnsureData() || index < 0 || index >= _cups.Count) return list;
             var c = _cups[index];
             var total = CupTotals(c, out _);
-            list.Add((TDU2.Map.Online.TDU2Session.Nick ?? "Du", total[0], true));
+            list.Add((TDU2.Online.TDU2Session.Nick ?? "Du", total[0], true));
             for (int i = 0; i < c.Lic.Bots.Count && i + 1 < total.Length; i++)
             {
                 int pnj = c.Lic.Bots[i].pnj;
@@ -813,7 +824,7 @@ namespace TDU2.Map.Racing
             foreach (int k in def.TargetSequence()) _cpDist.Add(DistanceAlong(def.Checkpoints[k].Position));
             _rows = null; _resultAt = -1f;
 
-            Debug.Log("[TDU2] Meisterschaft " + cup.Lic.ChallengeFiles[0].Substring(0, 5) + " – " + ModeName(def) + " " + def.Name + " (" + RaceName(def) + "): " +
+            DebugManager.Debug("Meisterschaft " + cup.Lic.ChallengeFiles[0].Substring(0, 5) + " – " + ModeName(def) + " " + def.Name + " (" + RaceName(def) + "): " +
                       def.Opponents.Count + " Gegner, Strecke " + (_finishLen / 1000f).ToString("0.0", CultureInfo.InvariantCulture) + " km, " + (def.IsCircuit ? def.Laps + " Runden" : "Punkt-zu-Punkt"));
 
             if (def.Kind == RaceMode.Speed)
@@ -1024,7 +1035,7 @@ namespace TDU2.Map.Racing
             // Reihenfolge (Ziel zuerst, dann nach Weg) für die Namen vor/hinter mir (-1 = ich)
             var order = new List<(string name, float key, int bot)>();
             for (int i = 0; i < st.Count; i++) order.Add((st[i].Name ?? "?", st[i].Finished ? 1e9f - st[i].FinishTime : st[i].Traveled, i));
-            order.Add((TDU2.Map.Online.TDU2Session.Nick ?? "Du", _pProgress, -1));
+            order.Add((TDU2.Online.TDU2Session.Nick ?? "Du", _pProgress, -1));
             order.Sort((a, b) => b.key.CompareTo(a.key));
             int me = order.FindIndex(o => o.bot < 0);
             // Abstand zu Vorder-/Hintermann (Sekunden) über die 25-m-Abschnitte
@@ -1038,7 +1049,7 @@ namespace TDU2.Map.Racing
                 if (g < 0.05f) return "";
                 return "  " + (ahead ? "-" : "+") + g.ToString("0.0", CultureInfo.GetCultureInfo("de-DE")) + "s";
             }
-            h.SetVariable("/HUD/position/player:PlayerName", TDU2.Map.Online.TDU2Session.Nick ?? "Du");
+            h.SetVariable("/HUD/position/player:PlayerName", TDU2.Online.TDU2Session.Nick ?? "Du");
             h.SetVariable("/:PosPlayer", pos.ToString(CultureInfo.InvariantCulture)); h.SetVariable("/:ExpPlayer", ".");
             string before = me > 0 ? order[me - 1].name + GapText(order[me - 1].bot, true) : null;
             string after = me >= 0 && me + 1 < order.Count ? order[me + 1].name + GapText(order[me + 1].bot, false) : null;
@@ -1086,7 +1097,7 @@ namespace TDU2.Map.Racing
                 int bin = _binMe.Count - 1;
                 float lt = LeaderAt(bin);
                 float gap = bin >= 0 && lt < float.MaxValue ? _binMe[bin] - lt : 0f;
-                rows.Add((TDU2.Map.Online.TDU2Session.Nick ?? "Du", _pProgress, gap, true));
+                rows.Add((TDU2.Online.TDU2Session.Nick ?? "Du", _pProgress, gap, true));
             }
             rows.Sort((x, y) => y.key.CompareTo(x.key));
             if (!_versusOpen)
@@ -1266,7 +1277,7 @@ namespace TDU2.Map.Racing
                 if (place == 1 && _cup.Lic.ChampMoneyReward > 0 && AddMoney(_cup.Lic.ChampMoneyReward))
                     _cupInfo += " Preisgeld Meisterschaft: +" + Money(_cup.Lic.ChampMoneyReward);
             }
-            Debug.Log("[TDU2] Meisterschaftsrennen " + _def.Name + ": " + _resultInfo + " | " + _cupInfo.Replace("\n", " | "));
+            DebugManager.Debug("Meisterschaftsrennen " + _def.Name + ": " + _resultInfo + " | " + _cupInfo.Replace("\n", " | "));
             _phase = Phase.Results;
             _resultAt = Time.unscaledTime + 1.2f;
             _nextRefresh = 0f;
@@ -1282,10 +1293,10 @@ namespace TDU2.Map.Racing
         /// <summary>Geld auf den Spielstand (Server) buchen. Ohne Anmeldung kein Geld.</summary>
         static bool AddMoney(long amount)
         {
-            if (amount <= 0 || !TDU2.Map.Online.TDU2Session.LoggedIn || TDU2.Map.Online.TDU2Session.Save == null) return false;
-            TDU2.Map.Online.TDU2Session.Save.money += amount;
-            TDU2.Map.Online.TDU2Session.SaveAsync();
-            TDU2DebugLog.Event("Preisgeld +" + amount + " $ -> " + TDU2.Map.Online.TDU2Session.Save.money + " $");
+            if (amount <= 0 || !TDU2.Online.TDU2Session.LoggedIn || TDU2.Online.TDU2Session.Save == null) return false;
+            TDU2.Online.TDU2Session.Save.money += amount;
+            TDU2.Online.TDU2Session.SaveAsync();
+            TDU2DebugLog.Event("Preisgeld +" + amount + " $ -> " + TDU2.Online.TDU2Session.Save.money + " $");
             return true;
         }
 
@@ -1294,7 +1305,7 @@ namespace TDU2.Map.Racing
             var rows = new List<Row>();
             var opp = _race != null ? _race.Opponents : null;
             var st = opp != null ? opp.Standings() : new List<RaceOpponents.Standing>();
-            var me = new Row { Name = TDU2.Map.Online.TDU2Session.Nick ?? "Du", Car = Man.Current?.Car?.ModelName ?? "", Player = true, Finished = !failed };
+            var me = new Row { Name = TDU2.Online.TDU2Session.Nick ?? "Du", Car = Man.Current?.Car?.ModelName ?? "", Player = true, Finished = !failed };
             rows.Add(me);
             switch (_def.Kind)
             {
@@ -1491,16 +1502,16 @@ namespace TDU2.Map.Racing
             if (on == _privateOn) return;
             _privateOn = on;
 #if UNITY_2023_1_OR_NEWER
-            var tr = FindFirstObjectByType<TDU2.Map.Traffic.TDU2Traffic>();
+            var tr = FindFirstObjectByType<TDU2.Traffic.TDU2Traffic>();
 #else
-            var tr = FindObjectOfType<TDU2.Map.Traffic.TDU2Traffic>();
+            var tr = FindObjectOfType<TDU2.Traffic.TDU2Traffic>();
 #endif
             if (tr != null)
             {
                 if (on) { _trafficWas = tr.EnableTraffic; tr.EnableTraffic = false; }
                 else tr.EnableTraffic = _trafficWas;
             }
-            TDU2.Map.Online.TDU2Multiplayer.Hidden = on && TDU2.Map.Online.TDU2OnlineSettings.HidePlayersInCups;
+            TDU2.Online.TDU2Multiplayer.Hidden = on && TDU2.Online.TDU2OnlineSettings.HidePlayersInCups;
         }
 
         // ------------------------------------------------------------------ Oberfläche

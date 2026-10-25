@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
-using TDU2.Map.Online;
-using TDU2.Map.Vehicles;
+using TDU2.Formats;
+using TDU2.IO;
+using TDU2.Online;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.Traffic
+namespace TDU2.Traffic
 {
     /// <summary>
     /// Verkehr wie im Spiel (tdu2-specs §8.2, §12.5):
@@ -705,7 +705,7 @@ namespace TDU2.Map.Traffic
             }
 
             // Ampel voraus (Rot / Gelb mit genug Bremsweg): vor der Ampel anhalten
-            if (TDU2.Map.World.TDU2TrafficLights.MustStop(c.Pos, fwdH, look, v, out float dLight))
+            if (TDU2.World.TDU2TrafficLights.MustStop(c.Pos, fwdH, look, v, out float dLight))
             {
                 float g = dLight - c.HalfLen - 2.5f;
                 if (g < gap) { gap = g; leadV = 0f; }
@@ -1154,11 +1154,11 @@ namespace TDU2.Map.Traffic
                 if (c.Lights != null)
                 {
                     // Nachts/bei Regen immer Licht an (TDU2Weather, car_headlights_intensity), sonst wie das eigene Auto
-                    c.Lights.Headlights = TDU2.Map.World.TDU2Weather.HeadlightsWanted || (mine != null && mine.Headlights > 0) ? 1 : 0;
+                    c.Lights.Headlights = TDU2.World.TDU2Weather.HeadlightsWanted || (mine != null && mine.Headlights > 0) ? 1 : 0;
                     c.Lights.ExtBrake = c.Brake;
                     c.Lights.IndicatorLeft = c.IndL; c.Lights.IndicatorRight = c.IndR; c.Lights.Hazard = c.Hazard;
                     if (mine != null) { c.Lights.Brightness = mine.Brightness; c.Lights.LensBrightness = mine.LensBrightness; }
-                    if (TDU2.Map.World.TDU2Weather.Instance != null) c.Lights.Brightness = Mathf.Max(c.Lights.Brightness, Mathf.Lerp(0.3f, 1.1f, TDU2.Map.World.TDU2Weather.Night));
+                    if (TDU2.World.TDU2Weather.Instance != null) c.Lights.Brightness = Mathf.Max(c.Lights.Brightness, Mathf.Lerp(0.3f, 1.1f, TDU2.World.TDU2Weather.Night));
                 }
                 // Sound für die nächsten Autos
                 bool wantSnd = Sounds && d < SoundRadius && snd < SoundMax && Time.timeScale > 0f && c.Type.Assets?.Sound != null;

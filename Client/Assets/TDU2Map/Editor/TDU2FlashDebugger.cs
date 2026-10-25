@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using TDU2.Map.Flash;
-using TDU2.Map.Vehicles;
+using TDU2.Flash;
+using TDU2.Vehicles;
 using UnityEditor;
 using UnityEngine;
 

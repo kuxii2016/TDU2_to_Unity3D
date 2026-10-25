@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
 
-namespace TDU2.Map.Online
+namespace TDU2.Online
 {
     // ------------------------------------------------------------------ Datenklassen (Feldnamen = JSON-Namen, identisch im Server TDU2Server/Program.cs)
     [Serializable]
@@ -322,7 +322,7 @@ namespace TDU2.Map.Online
         {
             if (Client != null && Client.Host == host && Client.Port == port) return;
             Client?.Dispose();
-            Debug.Log($"TDU2Session.Connect({host}:{port})");
+            DebugManager.Info($"TDU2Session.Connect({host}:{port})");
             Client = new TDU2NetClient(host, port);
         }
 

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using UnityEngine;
 
-namespace TDU2.Map.Flash
+namespace TDU2.Flash
 {
     /// <summary>
     /// Ruckelfreies erstes Anzeigen der Flash-Filme:

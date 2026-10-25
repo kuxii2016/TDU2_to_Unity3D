@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
-using TDU2.Map.Online;
+using TDU2.Formats;
+using TDU2.IO;
+using TDU2.Online;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     // =====================================================================================================================
     //  Lackierung + Beklebung eines Autos (Sticker-Shop ESTICK, MngCarPainting / StickerMap.cpp im Original)
@@ -36,7 +36,7 @@ namespace TDU2.Map.Vehicles
 
     public sealed class CarLivery
     {
-        public const int MaxStickers = 120;
+        public static int MaxStickers = Gameconfig.MaxStickers;
         public bool HasPaint;
         public Color32 Paint = new Color32(200, 200, 200, 255);
         public Color32 Paint2 = new Color32(30, 30, 30, 255);
@@ -181,7 +181,7 @@ namespace TDU2.Map.Vehicles
                     }
                 }
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Lackierungen (lokal): " + ex.Message); }
+            catch (Exception ex) { Debug.LogWarning("Lackierungen (lokal): " + ex.Message); }
             // 2) Spielstand des Servers hat Vorrang (wenn er die Felder kennt)
             var sv = TDU2Session.Save;
             if (sv != null)
@@ -300,7 +300,7 @@ namespace TDU2.Map.Vehicles
             if (_bnkDir == bnkDir) return;
             _bnkDir = bnkDir; _dbReady = false; Boards.Clear();
             var db = CarDatabase.FindDatabase(bnkDir);
-            if (db == null) { Debug.LogWarning("[TDU2] Sticker: db_data.cpr fehlt"); return; }
+            if (db == null) { Debug.LogWarning("Sticker: db_data.cpr fehlt"); return; }
             _dbTask = System.Threading.Tasks.Task.Run(() => XmbFile.Parse(CprCrypto.Decrypt(File.ReadAllBytes(db))));
         }
 
@@ -309,7 +309,7 @@ namespace TDU2.Map.Vehicles
             if (_dbTask != null && _dbTask.IsCompleted)
             {
                 var t = _dbTask; _dbTask = null;
-                if (t.IsFaulted) Debug.LogWarning("[TDU2] Sticker-Datenbank: " + t.Exception?.GetBaseException().Message);
+                if (t.IsFaulted) Debug.LogWarning("Sticker-Datenbank: " + t.Exception?.GetBaseException().Message);
                 else ReadDb(t.Result);
                 _dbReady = true;
             }
@@ -320,7 +320,7 @@ namespace TDU2.Map.Vehicles
                 if (t.IsFaulted || t.Result == null || t.Result.Count == 0)
                 {
                     b.Failed = true;
-                    Debug.LogWarning("[TDU2] Sticker-Planche " + b.BankFile + ": " + (t.Exception?.GetBaseException().Message ?? "keine Texturen"));
+                    Debug.LogWarning("Sticker-Planche " + b.BankFile + ": " + (t.Exception?.GetBaseException().Message ?? "keine Texturen"));
                     continue;
                 }
                 var tex = new Texture2D[t.Result.Count];
@@ -331,7 +331,7 @@ namespace TDU2.Map.Vehicles
                 }
                 b.Textures = tex; b.Loaded = true;
                 Version++;
-                Debug.Log("[TDU2] Sticker-Planche " + b.BankFile + ": " + tex.Length + " Sticker");
+                DebugManager.Info("Sticker-Planche " + b.BankFile + ": " + tex.Length + " Sticker");
             }
         }
 
@@ -366,7 +366,7 @@ namespace TDU2.Map.Vehicles
                     else if (n == "paint") PaintPrice = r.I("_price", PaintPrice);
                     else if (n == "erase") ErasePrice = r.I("_price", ErasePrice);
                 }
-            Debug.Log("[TDU2] Sticker-Planchen: " + Boards.Count);
+            DebugManager.Info("Sticker-Planchen: " + Boards.Count);
         }
 
         public static Board ById(int id)

@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Instrumentennadeln aus der Interieur-Bank: ND_SPD_1 / ND_RPM_1 sind die Nadel-Meshes in Ruhelage (0),

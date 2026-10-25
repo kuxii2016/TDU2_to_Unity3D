@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace TDU2.Map.IO
+namespace TDU2.IO
 {
     /// <summary>
     /// Little-endian Lesehilfen. Alle TDU2-PC-Dateien sind little-endian.

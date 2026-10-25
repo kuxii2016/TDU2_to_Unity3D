@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TDU2.Map
+namespace TDU2
 {
     /// <summary>Thread-sichere Mathe-Helfer (keine nativen Unity-Aufrufe).</summary>
     public static class MathUtil

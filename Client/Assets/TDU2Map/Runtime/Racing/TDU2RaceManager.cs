@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.Vehicles;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     public enum RaceState { Idle, Preparing, Countdown, Running, Finished }
 

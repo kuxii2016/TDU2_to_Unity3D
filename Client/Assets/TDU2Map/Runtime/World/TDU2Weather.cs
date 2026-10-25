@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>Wetterarten wie im Spiel (Tabelle der exe: Sunny Cloudy Rainny Before_rain After_rain Tempest).</summary>
     public enum WeatherKind { Sunny = 0, Cloudy = 1, Rainy = 2, BeforeRain = 3, AfterRain = 4, Tempest = 5 }
@@ -247,7 +247,7 @@ namespace TDU2.Map.World
             _streamer = streamer;
             try
             {
-                if (File.Exists(weatherFile)) { _data = TDU2WeatherData.Load(weatherFile); Debug.Log($"[TDU2] Wetter: {_data.Keys.Count} Zeitpunkte aus {Path.GetFileName(weatherFile)}"); }
+                if (File.Exists(weatherFile)) { _data = TDU2WeatherData.Load(weatherFile); DebugManager.Info($"Wetter: {_data.Keys.Count} Zeitpunkte aus {Path.GetFileName(weatherFile)}"); }
                 else _error = "game_weathers.xmb fehlt: " + weatherFile;
             }
             catch (Exception ex) { _error = ex.Message; }
@@ -347,7 +347,7 @@ namespace TDU2.Map.World
         }
 
         // ------------------------------------------------------------------ Zeit und Wetterfolge (deterministisch)
-        double Now => TDU2.Map.Online.TDU2Session.ServerSeconds;
+        double Now => TDU2.Online.TDU2Session.ServerSeconds;
 
         static uint Hash(long x)
         {
@@ -381,25 +381,25 @@ namespace TDU2.Map.World
         }
 
         /// <summary>Radio: passende Wettermeldung (Regen / Gewitter / Sonne) oder null bei Wolken/vor dem Regen.</summary>
-        public static TDU2.Map.Vehicles.RadioMessageType? RadioWeather()
+        public static TDU2.Vehicles.RadioMessageType? RadioWeather()
         {
             switch (Kind)
             {
-                case WeatherKind.Rainy: return TDU2.Map.Vehicles.RadioMessageType.WeatherRain;
-                case WeatherKind.Tempest: return TDU2.Map.Vehicles.RadioMessageType.WeatherStorm;
+                case WeatherKind.Rainy: return TDU2.Vehicles.RadioMessageType.WeatherRain;
+                case WeatherKind.Tempest: return TDU2.Vehicles.RadioMessageType.WeatherStorm;
                 case WeatherKind.Sunny:
-                case WeatherKind.AfterRain: return Night < 0.5f ? TDU2.Map.Vehicles.RadioMessageType.WeatherSun : (TDU2.Map.Vehicles.RadioMessageType?)null;
+                case WeatherKind.AfterRain: return Night < 0.5f ? TDU2.Vehicles.RadioMessageType.WeatherSun : (TDU2.Vehicles.RadioMessageType?)null;
                 default: return null;
             }
         }
 
         /// <summary>Radio: Tageszeit-Moderation (Sonnenaufgang 5-9, Mittag 11-14:30, Abend 18:30-22) oder null.</summary>
-        public static TDU2.Map.Vehicles.RadioMessageType? RadioTime()
+        public static TDU2.Vehicles.RadioMessageType? RadioTime()
         {
             float h = Hour;
-            if (h >= 5f && h < 9f) return TDU2.Map.Vehicles.RadioMessageType.TimeSunrise;
-            if (h >= 11f && h < 14.5f) return TDU2.Map.Vehicles.RadioMessageType.TimeMidday;
-            if (h >= 18.5f && h < 22f) return TDU2.Map.Vehicles.RadioMessageType.TimeNightfall;
+            if (h >= 5f && h < 9f) return TDU2.Vehicles.RadioMessageType.TimeSunrise;
+            if (h >= 11f && h < 14.5f) return TDU2.Vehicles.RadioMessageType.TimeMidday;
+            if (h >= 18.5f && h < 22f) return TDU2.Vehicles.RadioMessageType.TimeNightfall;
             return null;
         }
 
@@ -511,7 +511,7 @@ namespace TDU2.Map.World
             if (rainingNow != _wasRaining)
             {
                 _wasRaining = rainingNow;
-                Debug.Log($"[TDU2Weather] Regen {(rainingNow ? "an" : "aus")}: Rain={Rain:0.00} Nässe={_wetShown:0.00} inside={inside} Kind={Kind} ForceKind={ForceKind}");
+                DebugManager.Debug($"Regen {(rainingNow ? "an" : "aus")}: Rain={Rain:0.00} Nässe={_wetShown:0.00} inside={inside} Kind={Kind} ForceKind={ForceKind}");
             }
 
             // ---------------- seltener: Lampen, Scheinwerfer, Schmutz
@@ -524,14 +524,14 @@ namespace TDU2.Map.World
             UpdateLamps(street, inside);
         }
 
-        TDU2.Map.Vehicles.TDU2Interiors[] _interiors;
+        TDU2.Vehicles.TDU2Interiors[] _interiors;
         float _nextInteriorScan;
 
         bool InsideInterior()
         {
             if (_interiors == null || Time.unscaledTime >= _nextInteriorScan)
             {
-                _interiors = FindObjectsByType<TDU2.Map.Vehicles.TDU2Interiors>(FindObjectsSortMode.None);
+                _interiors = FindObjectsByType<TDU2.Vehicles.TDU2Interiors>(FindObjectsSortMode.None);
                 _nextInteriorScan = Time.unscaledTime + 2f;
             }
             foreach (var i in _interiors) if (i != null && i.Inside) return true;
@@ -583,7 +583,7 @@ namespace TDU2.Map.World
             bool changed = !_headInit || want != _headOn;
             _headInit = true; _headOn = want;
             if (changed) _autoLit.Clear();
-            foreach (var l in FindObjectsByType<TDU2.Map.Vehicles.TDU2VehicleLights>(FindObjectsSortMode.None))
+            foreach (var l in FindObjectsByType<TDU2.Vehicles.TDU2VehicleLights>(FindObjectsSortMode.None))
             {
                 if (l == null) continue;
                 // Leuchtstärke der Gläser/Flares: tagsüber gedämpft, nachts voll
@@ -597,7 +597,7 @@ namespace TDU2.Map.World
         void UpdateCarDirt()
         {
             bool raining = Rain > 0.2f;
-            foreach (var d in FindObjectsByType<TDU2.Map.Vehicles.TDU2CarDirt>(FindObjectsSortMode.None))
+            foreach (var d in FindObjectsByType<TDU2.Vehicles.TDU2CarDirt>(FindObjectsSortMode.None))
                 if (d != null) d.Raining = raining;   // DBCarDirtData: im Regen wäscht sich der Schmutz ab
         }
 

@@ -1,13 +1,13 @@
-using Assets.TDU2Map.Runtime.Util;
+using TDU2;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using TDU2.Map.Flash;
-using TDU2.Map.Online;
+using TDU2.Flash;
+using TDU2.Online;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Original-Pausemenü (ESC) aus frontend/&lt;res&gt;/main.bnk (MAIN.vmf), gesteuert wie im Spiel:
@@ -198,8 +198,8 @@ namespace TDU2.Map.Vehicles
         /// </summary>
         void UpdateClock()
         {
-            if (!_open || TDU2.Map.World.TDU2Weather.Instance == null) return;
-            float h = TDU2.Map.World.TDU2Weather.Hour;
+            if (!_open || TDU2.World.TDU2Weather.Instance == null) return;
+            float h = TDU2.World.TDU2Weather.Hour;
             int hh = Mathf.FloorToInt(h) % 24, mm = Mathf.FloorToInt((h - Mathf.Floor(h)) * 60f) % 60;
             int code = hh * 100 + mm;
             if (code != _clockShown)
@@ -210,7 +210,7 @@ namespace TDU2.Map.Vehicles
                 _ui.SetValue("/:SDecade", 0); _ui.SetValue("/:SUnit", 0);
                 _ui.CallClip("/pause_menu/clock/time/disp", "setHour");
             }
-            int day = TDU2.Map.World.TDU2Weather.Night < 0.5f ? 1 : 0;
+            int day = TDU2.World.TDU2Weather.Night < 0.5f ? 1 : 0;
             if (day != _clockDay)
             {
                 bool first = _clockDay < 0;

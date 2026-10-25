@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using TDU2.Map.Flash;
-using TDU2.Map.Vehicles;
+using TDU2.Flash;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Ergebnisbildschirm einer Prüfung über den Original-Film frontend/&lt;res&gt;/results.bnk (results.vmf).

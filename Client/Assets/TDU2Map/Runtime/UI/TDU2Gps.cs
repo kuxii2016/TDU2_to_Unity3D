@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using TDU2.Map.Flash;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Flash;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// GPS wie im Spiel: Ziel auf der großen Karte setzen (Mini-Menü "Ziel GPS" bzw. Rechtsklick), kürzester Weg über das
@@ -257,7 +257,7 @@ namespace TDU2.Map.Vehicles
             _nextRoute = 0f; _lastCue = null; _arrivedSaid = false;
             ShowStatus(false);
             if (announce) Voice(TDU2GpsSettings.VoiceTargetSet);
-            Debug.Log("[TDU2] GPS: Ziel " + game);
+            DebugManager.Debug("GPS: Ziel " + game);
             try { Changed?.Invoke(); } catch (Exception ex) { Debug.LogException(ex); }
         }
 
@@ -268,7 +268,7 @@ namespace TDU2.Map.Vehicles
             HasTarget = false; Route.Clear(); Remaining = -1f;
             ShowStatus(true);
             if (arrived) Voice(TDU2GpsSettings.VoiceArrived);
-            Debug.Log("[TDU2] GPS: Ziel " + (arrived ? "erreicht" : "entfernt"));
+            DebugManager.Debug("GPS: Ziel " + (arrived ? "erreicht" : "entfernt"));
             try { Changed?.Invoke(); } catch (Exception ex) { Debug.LogException(ex); }
         }
 
@@ -291,8 +291,8 @@ namespace TDU2.Map.Vehicles
             EnsureGraph();
             if (_buildTask != null && _buildTask.IsCompleted)
             {
-                if (_buildTask.IsFaulted) Debug.LogWarning("[TDU2] GPS: Straßennetz: " + _buildTask.Exception?.GetBaseException().Message);
-                else Debug.Log("[TDU2] GPS: Straßennetz " + _roads.Count + " Straßen, " + _adj.Count + " Knoten");
+                if (_buildTask.IsFaulted) Debug.LogWarning("GPS: Straßennetz: " + _buildTask.Exception?.GetBaseException().Message);
+                else DebugManager.Debug("GPS: Straßennetz " + _roads.Count + " Straßen, " + _adj.Count + " Knoten");
                 _buildTask = null;
             }
             var hud = Minimap != null ? Minimap.HudPlayer : null;

@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>Stückweise lineare Kurve (x aufsteigend), außerhalb geklemmt.</summary>
     public sealed class Curve

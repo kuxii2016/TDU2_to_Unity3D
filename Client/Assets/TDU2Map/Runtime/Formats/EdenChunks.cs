@@ -1,7 +1,7 @@
 using System.Collections.Generic;
-using TDU2.Map.IO;
+using TDU2.IO;
 
-namespace TDU2.Map.Formats
+namespace TDU2.Formats
 {
     /// <summary>
     /// Eden-Ressourcen (.3dd/.3dg/.2dm/.2db/.pmi ...) bestehen aus Chunks:

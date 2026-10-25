@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
-using TDU2.Map.IO;
+using TDU2.IO;
 
-namespace TDU2.Map.Formats
+namespace TDU2.Formats
 {
     /// <summary>Knoten eines XMB-Baums. Objekte haben <see cref="Children"/>, Arrays <see cref="Items"/>, Werte <see cref="Value"/>.</summary>
     public sealed class XmbNode

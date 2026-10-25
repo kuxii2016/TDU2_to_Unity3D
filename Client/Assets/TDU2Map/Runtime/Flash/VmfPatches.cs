@@ -4,7 +4,7 @@ using System.Globalization;
 using System.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Flash
+namespace TDU2.Flash
 {
     /// <summary>
     /// Korrekturen für die Original-Flash-Oberflächen (falsche Positionen, Größen, Texte), ohne die Filme zu verändern.

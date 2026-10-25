@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>
     /// World Actor als umfallendes Objekt wie im Spiel (worldactors_*.dhk: dynamischer Körper an einer zerbrechlichen

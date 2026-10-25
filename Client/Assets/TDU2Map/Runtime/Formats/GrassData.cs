@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.Xml;
-using TDU2.Map.IO;
+using TDU2.IO;
 
-namespace TDU2.Map.Formats
+namespace TDU2.Formats
 {
     /// <summary>
     /// Sector-...pgr = Grastyp-Karte (RLE).

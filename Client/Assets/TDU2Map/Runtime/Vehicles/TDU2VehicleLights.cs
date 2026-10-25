@@ -1,8 +1,7 @@
-
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     public sealed class TDU2VehicleLights : MonoBehaviour
     {

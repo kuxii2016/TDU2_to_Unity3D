@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using TDU2.Map.IO;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Formats
+namespace TDU2.Formats
 {
     /// <summary>Kreuzung (NODE) des Verkehrsnetzes.</summary>
     public sealed class IaNode

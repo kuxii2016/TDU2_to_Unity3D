@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>
     /// Begehbare Interieurs (Euro/Bnk/interior/*.bnk): Autohändler (icd_*), Wohnbereich (lph_*/ich_*), Garage (gph_*/gch_*) ...

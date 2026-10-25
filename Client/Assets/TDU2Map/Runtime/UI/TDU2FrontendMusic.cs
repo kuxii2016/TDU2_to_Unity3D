@@ -4,7 +4,7 @@ using System.IO;
 using System.Threading.Tasks;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Menü-Musik wie im Spiel (FlashSounds::PlayFrontEndMusic, frontend/sounds/fe_snd.bnk sounds.ini "SetMusic"):
@@ -60,7 +60,7 @@ namespace TDU2.Map.Vehicles
                 var dir = Path.Combine(bnkDir, "sound", "musics");
                 if (Directory.Exists(dir)) foreach (var f in Directory.GetFiles(dir, "*.wav")) if (string.Equals(Path.GetFileNameWithoutExtension(f), e.file, StringComparison.OrdinalIgnoreCase)) { path = f; break; }
             }
-            if (!File.Exists(path)) { Debug.LogWarning("[TDU2] Menü-Musik fehlt: " + path); return; }
+            if (!File.Exists(path)) { Debug.LogWarning("Menü-Musik fehlt: " + path); return; }
             m._taskName = e.file;
             m._task = Task.Run(() => WavDecoder.TryDecode(File.ReadAllBytes(path), out var data, out int ch, out int rate) ? (data, ch, rate) : ((float[])null, 0, 0));
         }
@@ -97,7 +97,7 @@ namespace TDU2.Map.Vehicles
                     clip.SetData(data, 0);
                     _cache[_taskName] = clip;
                     Begin(clip);
-                    Debug.Log("[TDU2] Menü-Musik: " + _taskName + ".wav");
+                    DebugManager.Info("Menü-Musik: " + _taskName + ".wav");
                 }
             }
             float want = _target * _vol * Volume;

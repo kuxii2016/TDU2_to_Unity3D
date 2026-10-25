@@ -1,9 +1,9 @@
 using System;
 using System.IO;
-using TDU2.Map.Flash;
+using TDU2.Flash;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Flughafen (Interieur iair_a/iair_b, Hostess = FpSelectable Typ 32) mit dem Original-Film frontend/&lt;res&gt;/airport.bnk:
@@ -46,7 +46,7 @@ namespace TDU2.Map.Vehicles
                 _bank = CarDatabase.FindFile(Path.Combine(Manager.BnkDir, "frontend", res), "airport.bnk");
                 if (_bank != null) break;
             }
-            if (_bank == null) { Debug.LogWarning("[TDU2] airport.bnk nicht gefunden"); return false; }
+            if (_bank == null) { DebugManager.Error("airport.bnk not found"); return false; }
             try
             {
                 var go = new GameObject("TDU2 Airport UI");
@@ -62,7 +62,7 @@ namespace TDU2.Map.Vehicles
             }
             catch (Exception ex)
             {
-                Debug.LogWarning("[TDU2] airport.bnk: " + ex.Message);
+                DebugManager.Error("airport.bnk: " + ex.Message);
                 if (_film != null) { Destroy(_film.gameObject); _film = null; }
                 return false;
             }
@@ -84,7 +84,7 @@ namespace TDU2.Map.Vehicles
             _target = _choices != null ? _choices[0] : TDU2IslandTravel.OtherIsland(cur);
             if (!TDU2IslandTravel.CanTravelTo(_target, Manager.BnkDir))
             {
-                Debug.LogWarning("[TDU2] Flughafen: Insel " + _target + " fehlt in den Spieldaten");
+                DebugManager.Error("Airport: Island " + _target + " missing");
                 return;
             }
             _open = true;
@@ -122,7 +122,6 @@ namespace TDU2.Map.Vehicles
         {
             string c = (cmd ?? "").Trim().ToLowerInvariant();
             if (TDU2FrontendSounds.Command(c)) return;
-            Debug.Log("[TDU2] Flughafen FSCommand: " + c);
             switch (c)
             {
                 case "dbxo":
@@ -163,7 +162,7 @@ namespace TDU2.Map.Vehicles
             _film.SetVariable("/:destination", _target);
             ShowDestination();
             TDU2FrontendSounds.Command("sndp:move");
-            Debug.Log("[TDU2] Flughafen: Ziel " + TDU2IslandTravel.DisplayName(_target));
+            DebugManager.Info("Fly to: " + TDU2IslandTravel.DisplayName(_target));
         }
 
         /// <summary>Alle Clips "destination" (Bild der Zielinsel, Labels ibiza/hawai) auf das Ziel stellen.</summary>

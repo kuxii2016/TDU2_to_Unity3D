@@ -5,10 +5,10 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using TDU2.Map.Vehicles;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.Online
+namespace TDU2.Online
 {
     /// <summary>
     /// Spieler-Synchronisation über UDP (TDU2Server udpPort).

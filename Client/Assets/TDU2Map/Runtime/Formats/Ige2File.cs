@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.IO;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Formats
+namespace TDU2.Formats
 {
     /// <summary>Ein Einstellungs-Tag im MDSC-Block einer .ig2-Datei (z.B. "gmth" = Spielmodus, "nblp" = Runden).</summary>
     public sealed class Ige2Tag

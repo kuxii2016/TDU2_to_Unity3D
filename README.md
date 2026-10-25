@@ -8,6 +8,48 @@ The goal is to bring as much of the original game's functionality as possible in
 
 This project is more than just a map viewer or a simple graphics port. It is an ongoing attempt to rebuild the systems that make TDU2 what it is, using custom code and a more flexible foundation for future development.
 
+## Screenshots
+
+<p align="center">
+  <img src="./Screenshots/Unbenannt.PNG" width="49%" alt="Screenshot 1">
+  <img src="./Screenshots/Unbenannt1.PNG" width="49%" alt="Screenshot 2">
+</p>
+
+<p align="center">
+  <img src="./Screenshots/Unbenannt2.PNG" width="49%" alt="Screenshot 3">
+  <img src="./Screenshots/Unbenannt3.PNG" width="49%" alt="Screenshot 4">
+</p>
+
+<p align="center">
+  <img src="./Screenshots/Unbenannt4.PNG" width="49%" alt="Screenshot 5">
+  <img src="./Screenshots/Unbenannt5.PNG" width="49%" alt="Screenshot 6">
+</p>
+
+<p align="center">
+  <img src="./Screenshots/Unbenannt6.PNG" width="49%" alt="Screenshot 7">
+  <img src="./Screenshots/Unbenannt7.PNG" width="49%" alt="Screenshot 8">
+</p>
+
+<p align="center">
+  <img src="./Screenshots/Unbenannt8.PNG" width="49%" alt="Screenshot 9">
+  <img src="./Screenshots/bikes.PNG" width="49%" alt="bikes">
+</p>
+
+<p align="center">
+  <img src="./Screenshots/Unbenannt14.png" width="49%" alt="Screenshot 14">
+  <img src="./Screenshots/Unbenannt15.png" width="49%" alt="Screenshot 15">
+</p>
+
+<p align="center">
+  <img src="./Screenshots/Unbenannt16.png" width="49%" alt="Screenshot 16">
+  <img src="./Screenshots/Unbenannt17.png" width="49%" alt="Screenshot 17">
+</p>
+
+<p align="center">
+  <img src="./Screenshots/bikedealer.PNG" width="49%" alt="bikedealer">
+  <img src="./Screenshots/biketestdrive.PNG" width="49%" alt="biketestdrive">
+</p>
+
 ## Why This Project?
 
 Why put so much work into recreating an existing game?
@@ -195,43 +237,6 @@ The ongoing development goals include:
 - Making the codebase easier to extend and maintain.
 
 The ultimate goal is to bring as much of the original TDU2 experience as possible into Unity while retaining the freedom to develop new features using custom code.
-
-## Screenshots
-
-<p align="center">
-  <img src="./Screenshots/Unbenannt.PNG" width="49%" alt="Screenshot 1">
-  <img src="./Screenshots/Unbenannt1.PNG" width="49%" alt="Screenshot 2">
-</p>
-
-<p align="center">
-  <img src="./Screenshots/Unbenannt2.PNG" width="49%" alt="Screenshot 3">
-  <img src="./Screenshots/Unbenannt3.PNG" width="49%" alt="Screenshot 4">
-</p>
-
-<p align="center">
-  <img src="./Screenshots/Unbenannt4.PNG" width="49%" alt="Screenshot 5">
-  <img src="./Screenshots/Unbenannt5.PNG" width="49%" alt="Screenshot 6">
-</p>
-
-<p align="center">
-  <img src="./Screenshots/Unbenannt6.PNG" width="49%" alt="Screenshot 7">
-  <img src="./Screenshots/Unbenannt7.PNG" width="49%" alt="Screenshot 8">
-</p>
-
-<p align="center">
-  <img src="./Screenshots/Unbenannt8.PNG" width="49%" alt="Screenshot 9">
-  <img src="./Screenshots/Unbenannt9.PNG" width="49%" alt="Screenshot 10">
-</p>
-
-<p align="center">
-  <img src="./Screenshots/Unbenannt14.png" width="49%" alt="Screenshot 14">
-  <img src="./Screenshots/Unbenannt15.png" width="49%" alt="Screenshot 15">
-</p>
-
-<p align="center">
-  <img src="./Screenshots/Unbenannt16.png" width="49%" alt="Screenshot 16">
-  <img src="./Screenshots/Unbenannt17.png" width="49%" alt="Screenshot 17">
-</p>
 
 ## Disclaimer
 

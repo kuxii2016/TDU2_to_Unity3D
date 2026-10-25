@@ -1,14 +1,13 @@
-
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
-using TDU2.Map.Flash;
-using TDU2.Map.IO;
-using TDU2.Map.Online;
-using TDU2.Map.Vehicles;
+using TDU2.Flash;
+using TDU2.IO;
+using TDU2.Online;
+using TDU2.Vehicles;
 using UnityEngine;
 
 public enum RadioStation
@@ -158,7 +157,7 @@ public class TDU2Radio : MonoBehaviour
             Directory.CreateDirectory(radioFolderPath);
             LoadRadioTracks();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
         }
 
@@ -443,7 +442,7 @@ public class TDU2Radio : MonoBehaviour
         if (result != 0)
         {
             Debug.LogError(
-                "[TDU2 Radio] MP3 konnte nicht ge�ffnet werden: " +
+                "Track nor Readable: " +
                 track.FilePath
             );
 
@@ -465,7 +464,7 @@ public class TDU2Radio : MonoBehaviour
         if (result != 0)
         {
             Debug.LogError(
-                "[TDU2 Radio] Wiedergabe fehlgeschlagen: " +
+                "Play Audio failed: " +
                 track.Title
             );
 
@@ -485,7 +484,7 @@ public class TDU2Radio : MonoBehaviour
         nextMarqueeUpdate = Time.unscaledTime + MarqueeSpeed;
 
         Debug.Log(
-            "[TDU2 Radio] Jetzt l�uft: " +
+            "Current Track: " +
             track.Artist + " - " + track.Title
         );
 
@@ -664,7 +663,7 @@ public class TDU2Radio : MonoBehaviour
 
             if (t.IsFaulted)
             {
-                Debug.LogError("[TDU2 Radio] Radio-Daten nicht lesbar: " + t.Exception?.GetBaseException().Message);
+                Debug.LogError("Radio-Daten nicht lesbar: " + t.Exception?.GetBaseException().Message);
             }
             else
             {
@@ -672,7 +671,7 @@ public class TDU2Radio : MonoBehaviour
                 if (!string.IsNullOrEmpty(_radioData.Error))
                     Debug.LogWarning("[TDU2 Radio] " + _radioData.Error);
                 else
-                    Debug.Log("[TDU2 Radio] " + _radioData.Stations.Count + " Sender, " + _radioData.Messages.Count + " Nachrichten, " + _radioData.BankPaths.Count + " Bänke.");
+                    DebugManager.Debug("Radio" + _radioData.Stations.Count + " Sender, " + _radioData.Messages.Count + " Nachrichten, " + _radioData.BankPaths.Count + " Bänke.");
             }
 
             if (IsGameStation(CurrentStation) && _pendingRestart)
@@ -810,11 +809,11 @@ public class TDU2Radio : MonoBehaviour
     private RadioMessage FitConditions(TDU2RadioData.RadioSegment seg, int stationHash, double cycle)
     {
         var m = seg.Message;
-        if (m == null || TDU2.Map.World.TDU2Weather.Instance == null) return m;
+        if (m == null || TDU2.World.TDU2Weather.Instance == null) return m;
         bool isWeather = m.Type == RadioMessageType.WeatherRain || m.Type == RadioMessageType.WeatherStorm || m.Type == RadioMessageType.WeatherSun;
         bool isTime = m.Type == RadioMessageType.TimeMidday || m.Type == RadioMessageType.TimeNightfall || m.Type == RadioMessageType.TimeSunrise;
         if (!isWeather && !isTime) return m;
-        RadioMessageType? want = isWeather ? TDU2.Map.World.TDU2Weather.RadioWeather() : TDU2.Map.World.TDU2Weather.RadioTime();
+        RadioMessageType? want = isWeather ? TDU2.World.TDU2Weather.RadioWeather() : TDU2.World.TDU2Weather.RadioTime();
         if (want.HasValue && want.Value == m.Type) return m;
         long key = ((long)cycle << 24) ^ (long)(seg.Start * 10f) ^ ((long)(want.HasValue ? (int)want.Value : 99) << 56);
         if (_fitCache.TryGetValue(key, out var hit)) return hit;
@@ -905,7 +904,7 @@ public class TDU2Radio : MonoBehaviour
             bool forceJingle = _tracksSinceJingle >= 3;
             float roll = UnityEngine.Random.value;
 
-            if (TDU2.Map.World.TDU2Weather.NewsPending)
+            if (TDU2.World.TDU2Weather.NewsPending)
                 m = PickComment(info.Hashcode);   // Wetterwechsel: Wetternachricht als nächstes Zwischenstück
             if (m != null) { }
             else if (forceJingle || roll < JingleChance)
@@ -970,13 +969,13 @@ public class TDU2Radio : MonoBehaviour
     /// </summary>
     private RadioMessage PickComment(int stationHashcode)
     {
-        var weather = TDU2.Map.World.TDU2Weather.Instance;
+        var weather = TDU2.World.TDU2Weather.Instance;
         if (weather != null)
         {
-            RadioMessageType? wt = TDU2.Map.World.TDU2Weather.RadioWeather(), tt = TDU2.Map.World.TDU2Weather.RadioTime();
-            if (TDU2.Map.World.TDU2Weather.NewsPending)
+            RadioMessageType? wt = TDU2.World.TDU2Weather.RadioWeather(), tt = TDU2.World.TDU2Weather.RadioTime();
+            if (TDU2.World.TDU2Weather.NewsPending)
             {
-                TDU2.Map.World.TDU2Weather.NewsPending = false;
+                TDU2.World.TDU2Weather.NewsPending = false;
                 if (wt.HasValue)
                 {
                     var news = _radioData.ForStation(stationHashcode, wt.Value);
@@ -1177,7 +1176,7 @@ public class TDU2Radio : MonoBehaviour
         catch (Exception ex)
         {
             Debug.LogWarning(
-                "[TDU2 Radio] ID3-Lesefehler: " + ex.Message
+                "ID3-Lesefehler: " + ex.Message
             );
         }
     }

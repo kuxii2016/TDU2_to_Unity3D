@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TDU2.Map
+namespace TDU2
 {
     public static class UnityUtil
     {

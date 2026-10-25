@@ -3,11 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
-using TDU2.Map.Flash;
-using TDU2.Map.IO;
+using TDU2.Flash;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Oberflächen-Sounds wie im Spiel: die Flash-Filme melden "FSCommand:sndp:&lt;id&gt;" (z.B. HUD: chptpass beim Checkpoint,
@@ -70,7 +70,7 @@ namespace TDU2.Map.Vehicles
                 string dir = man != null ? man.BnkDir : null;
                 if (string.IsNullOrEmpty(dir)) dir = Path.Combine(Application.streamingAssetsPath, "Euro", "Bnk");
                 string path = Path.Combine(dir, "frontend", "sounds", "fe_snd.bnk");
-                if (!File.Exists(path)) { Debug.LogWarning("[TDU2] Oberflächen-Sounds: " + path + " fehlt"); return false; }
+                if (!File.Exists(path)) { Debug.LogWarning("Oberflächen-Sounds: " + path + " fehlt"); return false; }
                 _bank = BnkArchive.Open(path);
                 var ini = _bank.Find("sounds.ini");
                 if (ini != null)
@@ -82,10 +82,10 @@ namespace TDU2.Map.Vehicles
                         _map[m.Groups[1].Value.Trim()] = (m.Groups[2].Value.Trim(), v <= 0f ? 1f : v);
                     }
                 }
-                Debug.Log("[TDU2] Oberflächen-Sounds: " + _map.Count + " Einträge (fe_snd.bnk)");
+                DebugManager.Info("Oberflächen-Sounds: " + _map.Count + " Einträge (fe_snd.bnk)");
                 return true;
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Oberflächen-Sounds: " + ex.Message); _bank = null; return false; }
+            catch (Exception ex) { Debug.LogWarning("Oberflächen-Sounds: " + ex.Message); _bank = null; return false; }
         }
 
         static AudioClip Clip(string id, out float vol)

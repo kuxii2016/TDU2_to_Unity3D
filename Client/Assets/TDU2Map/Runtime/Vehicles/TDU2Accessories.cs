@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.Flash;
+using TDU2.Flash;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>Anklickbare Teile eines Autos (Händler/Garage: Türen und Fenster, im Auto auch Lenkrad = Hupe).</summary>
     public enum CarPart { None, DoorL, DoorR, WindowL, WindowR, Steering }

@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TDU2.Map
+namespace TDU2
 {
     /// <summary>Einfache Freiflug-Kamera: rechte Maustaste halten + WASD/QE, Shift = schneller, Mausrad = Tempo.</summary>
     public sealed class FlyCamera : MonoBehaviour

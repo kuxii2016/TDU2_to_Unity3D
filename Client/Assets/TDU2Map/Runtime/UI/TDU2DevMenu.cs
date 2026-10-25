@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using TDU2.Map.Online;
-using TDU2.Map.Traffic;
-using TDU2.Map.World;
+using TDU2.Online;
+using TDU2.Traffic;
+using TDU2.World;
 using UnityEngine;
 using UProfiler = UnityEngine.Profiling.Profiler;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Developer menu modeled after the debug menu of the original EXE (edDebug “DEBUG MENU LIBRARIES”: text menu with

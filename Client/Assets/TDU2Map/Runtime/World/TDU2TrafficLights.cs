@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>
     /// Ampeln (World Actor SF_Xin_*, Entity__Actor__TrafficLights): das Modell hat die Leuchten HALO_R, HALO_O, HALO_G
@@ -34,7 +34,7 @@ namespace TDU2.Map.World
         static readonly List<Signal> _all = new List<Signal>();
         public static int Count => _all.Count;
 
-        public static double Clock => TDU2.Map.Online.TDU2Session.ServerSeconds;
+        public static double Clock => TDU2.Online.TDU2Session.ServerSeconds;
 
         /// <summary>0 = Grün, 1 = Gelb, 2 = Rot.</summary>
         public static int StateOf(Signal s)

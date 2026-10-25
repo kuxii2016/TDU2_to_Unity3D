@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using TDU2.Map.IO;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Cinematic-Szene (.sce, "SCE!", Spezifikation §10.5): Objekte (Kameras, Darsteller) mit dem ersten Schlüssel ihrer Kanäle
@@ -130,7 +130,7 @@ namespace TDU2.Map.Vehicles
             foreach (var e in bank.All(".sce"))
             {
                 try { var s = Parse(bank.Read(e), e.Name); res[System.IO.Path.GetFileNameWithoutExtension(e.Name)] = s; }
-                catch (Exception ex) { Debug.LogWarning("[TDU2] .sce " + e.Name + ": " + ex.Message); }
+                catch (Exception ex) { DebugManager.Error(".sce " + e.Name + ": " + ex.Message); }
             }
             return res;
         }
@@ -140,7 +140,7 @@ namespace TDU2.Map.Vehicles
         {
             if (bank == null || string.IsNullOrEmpty(name)) return null;
             try { var e = bank.Find(name + ".anm"); return e != null ? Avatars.AnmClip.Parse(bank.Read(e), name) : null; }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Clip " + name + ": " + ex.Message); return null; }
+            catch (Exception ex) { DebugManager.Error("Clip " + name + ": " + ex.Message); return null; }
         }
 
         /// <summary>Weltlage eines Objekts der Szene (Rahmen = Interieur-Szene, Spielraum).</summary>

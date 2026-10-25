@@ -1,5 +1,5 @@
 using System.Globalization;
-using TDU2.Map.Online;
+using TDU2.Online;
 using UnityEditor;
 using UnityEngine;
 

@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Flash
+namespace TDU2.Flash
 {
     /// <summary>CPU-Pixel einer .2db-Textur (DXT1/DXT5 dekodiert), für Bitmapfüllungen beim Rastern.</summary>
     public sealed class PixelImage

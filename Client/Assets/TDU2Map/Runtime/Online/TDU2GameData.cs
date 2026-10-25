@@ -3,11 +3,11 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
-using TDU2.Map.Flash;
-using TDU2.Map.Vehicles;
+using TDU2.Flash;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.Online
+namespace TDU2.Online
 {
     /// <summary>Ein Spieler (online oder zuletzt gesehen) – Daten für Pausemenü-Listen, Spielerkarte und Karten-Blips.</summary>
     public sealed class PlayerInfo
@@ -63,7 +63,7 @@ namespace TDU2.Map.Online
         [Tooltip("Eigenes Land (Flagge im Ausweis/Spielerlisten): Nummer wie im Spiel (24 = Deutschland). 0 = aus den Windows-Regionseinstellungen")]
         public int Nationality = 0;
         /// <summary>Ländernummer für die Flaggen (Inspector oder System).</summary>
-        public int NationalityId => Nationality > 0 ? Nationality : Assets.TDU2Map.Runtime.Util.TDU2CountryHelper.GetSystemCountryId();
+        public int NationalityId => Nationality > 0 ? Nationality : TDU2.TDU2CountryHelper.GetSystemCountryId();
         [Tooltip("Anmeldung mit Profilmenü (log_in2.bnk + main.bnk). Aus = Offline wie früher (kein Server, keine Mitspieler)")]
         public bool UseLogin = true;
 

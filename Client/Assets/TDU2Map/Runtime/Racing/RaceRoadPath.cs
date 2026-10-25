@@ -1,8 +1,8 @@
 using System.Collections.Generic;
-using TDU2.Map.Traffic;
+using TDU2.Traffic;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Route einer Prüfung entlang der Straßen (Verkehrsnetz _ROAD_MAP/_ROAD_DETAIL.IA, <see cref="TrafficLanes"/>):

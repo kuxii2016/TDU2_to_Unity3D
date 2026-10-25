@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     public enum DrivingAids { Secure, Sport, HyperSport, Off }
 
@@ -590,7 +590,7 @@ namespace TDU2.Map.Vehicles
             // _offroad_(dirt|grass)_(lat|long)_friction_percent ihren Grip (80..100 %), normale Autos verlieren mehr.
             SurfaceGrip(w.Surface, out float sgLat, out float sgLong);
             // Regen (TDU2Weather.GroundWet 0..1): Reibwert -> WetFrictionPercent der Fahrzeugdatenbank (z.B. 80 %)
-            float wet = TDU2.Map.World.TDU2Weather.GroundWet;
+            float wet = TDU2.World.TDU2Weather.GroundWet;
             if (wet > 0f && Car != null)
             {
                 float wf = Car.WetFrictionPercent > 1.5f ? Car.WetFrictionPercent / 100f : Car.WetFrictionPercent > 0f ? Car.WetFrictionPercent : 0.8f;

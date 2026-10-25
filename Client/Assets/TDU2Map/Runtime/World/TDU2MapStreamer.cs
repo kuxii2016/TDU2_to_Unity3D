@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
-using TDU2.Map.World;
+using TDU2.Formats;
+using TDU2.IO;
+using TDU2.World;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace TDU2.Map
+namespace TDU2
 {
     /// <summary>
     /// Lädt und streamt eine TDU2-Insel (Ibiza / Hawaii) direkt aus den entpackten Spieldateien.
@@ -217,7 +217,7 @@ namespace TDU2.Map
             catch (Exception ex)
             {
                 _status = "Fehler: " + ex.Message;
-                Debug.LogError("[TDU2] " + ex);
+                DebugManager.Error("" + ex);
                 enabled = false;
             }
         }
@@ -239,20 +239,20 @@ namespace TDU2.Map
                 var house = gp.FindHouse(SpotsFile.Parse(File.ReadAllBytes(_index.SpotsFile)).Spots);
                 if (house == null) return false;
                 start = house.Position + Vector3.up * 30f;
-                Debug.Log("[TDU2] Startpunkt (GamePC.cpr): Haus " + string.Join("/", gp.Houses) + " bei " + house.Position);
+                DebugManager.Info("Startpunkt (GamePC.cpr): Haus " + string.Join("/", gp.Houses) + " bei " + house.Position);
                 return true;
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] GamePC.cpr Startpunkt: " + ex.Message); return false; }
+            catch (Exception ex) { DebugManager.Error("GamePC.cpr Startpunkt: " + ex.Message); return false; }
         }
 
         void Initialize()
         {
             try
             {
-                Debug.Log("Initialization started.");
-                Debug.Log("Application.dataPath: " + Application.dataPath);
-                Debug.Log("StreamingAssets: " + Application.streamingAssetsPath);
-                Debug.Log("Configured Game Root: " + GameRoot);
+                DebugManager.Info("Initialization started.");
+                DebugManager.Debug("Application.dataPath: " + Application.dataPath);
+                DebugManager.Debug("StreamingAssets: " + Application.streamingAssetsPath);
+                DebugManager.Debug("Configured Game Root: " + GameRoot);
                 if (AutoAddVehicleLoader && GetComponent<Vehicles.TDU2VehicleManager>() == null)
                     gameObject.AddComponent<Vehicles.TDU2VehicleManager>().Streamer = this;
                 Shaders.Resolve();
@@ -284,14 +284,14 @@ namespace TDU2.Map
                 if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
                     throw new DirectoryNotFoundException("Euro folder not found. GameRoot: " + GameRoot + ", Application.dataPath: " + Application.dataPath);
 
-                Debug.Log("Game Root: " + root);
-                Debug.Log("Scan Island: " + Island);
+                DebugManager.Debug("Game Root: " + root);
+                DebugManager.Debug("Scan Island: " + Island);
                 _index = IslandIndex.Scan(root, Island);
 
                 if (_index == null)
                     throw new InvalidOperationException("IslandIndex.Scan did not return an index. Root: " + root + ", Island: " + Island);
 
-                Debug.Log("Island-Index: " + _index);
+                DebugManager.Debug("Island-Index: " + _index);
                 _root = new GameObject("TDU2_" + _index.IslandName).transform;
                 if (Weather && OriginalLighting)
                 {
@@ -341,7 +341,7 @@ namespace TDU2.Map
                 {
                     string p = _index.CommonWorldBank;
                     var tex = _textures;
-                    Debug.Log("Load CommonWorldBank: " + p);
+                    DebugManager.Debug("Load CommonWorldBank: " + p);
                     if (!File.Exists(p))
                         Debug.LogError("“CommonWorldBank” does not exist: " + p);
                     else
@@ -365,7 +365,7 @@ namespace TDU2.Map
                 {
                     try
                     {
-                        Debug.Log("Loading Spots: " + _index.SpotsFile);
+                        DebugManager.Debug("Loading Spots: " + _index.SpotsFile);
                         if (!File.Exists(_index.SpotsFile))
                         {
                             Debug.LogWarning("Spot file not found: " + _index.SpotsFile);
@@ -381,30 +381,30 @@ namespace TDU2.Map
                     }
                 }
                 //World Building
-                Debug.Log("Build Island LOD...");
+                DebugManager.Debug("Build Island LOD...");
                 BuildIslandLod();
 
                 if (ShowWater)
                 {
-                    Debug.Log("Build Water...");
+                    DebugManager.Debug("Build Water...");
                     BuildWater(center);
                 }
 
                 if (LoadGrass)
                 {
-                    Debug.Log("Initialize Grass...");
+                    DebugManager.Debug("Initialize Grass...");
                     SetupGrass();
                 }
 
                 if (LoadPois && !string.IsNullOrEmpty(_index.SpotsFile))
                 {
-                    Debug.Log("Buidl POIs...");
+                    DebugManager.Debug("Buidl POIs...");
                     BuildPois();
                 }
 
                 _status = "ready";
 
-                Debug.Log("Initialization completed successfully.");
+                DebugManager.Info("Initialization completed successfully.");
             }
             catch (Exception ex)
             {
@@ -442,7 +442,6 @@ namespace TDU2.Map
             {
                 try
                 {
-                    Debug.Log("Check Game-Root: " + candidate);
                     if (!Directory.Exists(candidate))
                     {
                         Debug.LogWarning("The directory does not exist: " + candidate);
@@ -452,8 +451,6 @@ namespace TDU2.Map
                     if (!string.IsNullOrEmpty(islandsDir) && Directory.Exists(islandsDir))
                     {
                         string result = Path.GetFullPath(candidate);
-                        Debug.Log("Game-Root found: " + result);
-                        Debug.Log("Island directory: " + islandsDir);
                         return result;
                     }
                 }
@@ -587,7 +584,7 @@ namespace TDU2.Map
                 if (g != null) { _grassMat = MaterialFactory.CreateGrassMaterial(g, 0.4f); _grassCells = iniGrass > 0 ? iniGrass : Mathf.Max(1, g.width / Mathf.Max(1, g.height)); }
                 if (b != null) { _bushMat = MaterialFactory.CreateGrassMaterial(b, 0.4f); _bushCells = iniBush > 0 ? iniBush : Mathf.Max(1, b.width / Mathf.Max(1, b.height)); }
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Gras konnte nicht geladen werden: " + ex.Message); }
+            catch (Exception ex) { Debug.LogWarning("Gras konnte nicht geladen werden: " + ex.Message); }
         }
 
         /// <summary>
@@ -693,9 +690,9 @@ namespace TDU2.Map
                                              : MaterialFactory.CreateTerrainMaterial(color, null, null, null, DetailTiling, 0f);
                 color.anisoLevel = 4;
                 _mapTiles.Add(new MapTile { Key = it.key, Mesh = it.mesh.ToMesh(), Material = mat, Color = color, Origin = WorldLayout.AreaOrigin(it.key) });
-                if (_mapTask != null && _mapTask.IsCompleted && _mapQueue.IsEmpty) Debug.Log("[TDU2] Kartengelände: " + _mapTiles.Count + " Areas");
+                if (_mapTask != null && _mapTask.IsCompleted && _mapQueue.IsEmpty) DebugManager.Debug("Kartengelände: " + _mapTiles.Count + " Areas");
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Kartengelände " + it.key + ": " + ex.Message); }
+            catch (Exception ex) { Debug.LogWarning("Kartengelände " + it.key + ": " + ex.Message); }
         }
 
         /// <summary>Ganzes Area-Raster als ein Gitter, jede step-te Zelle (UV wie die LOD1-Stücke: 0..1 über die Area-Colormap).</summary>
@@ -837,7 +834,7 @@ namespace TDU2.Map
                 var payload = new AreaPayload { Model = model, Pieces = pieces };
                 foreach (var (spot, file) in exteriors)
                 {
-                    try { var em = BankModel.Load(file, BankKind.Exterior); tex.IndexBank(em.Bank); TDU2.Map.Vehicles.InteriorFx.PrepareUva(em.Bank); payload.Exteriors.Add((spot, em)); }
+                    try { var em = BankModel.Load(file, BankKind.Exterior); tex.IndexBank(em.Bank); TDU2.Interior.InteriorFx.PrepareUva(em.Bank); payload.Exteriors.Add((spot, em)); }
                     catch (Exception) { }
                 }
                 return payload;
@@ -861,7 +858,7 @@ namespace TDU2.Map
                 var model = BankModel.Load(path, BankKind.Sector, objs, place, grass);
                 // Sektortexturen global bekannt machen (Library-Objekte wie Felsen nutzen Texturen aus der Sektorbank)
                 tex.IndexBank(model.Bank);
-                if (objs) { try { TDU2.Map.Vehicles.InteriorFx.PrepareUva(model.Bank); } catch (Exception) { } }   // Textur-Animationen (.uva)
+                if (objs) { try { TDU2.Interior.InteriorFx.PrepareUva(model.Bank); } catch (Exception) { } }   // Textur-Animationen (.uva)
                 bool[] holes = null, driveHoles = null;
                 if (cutTunnels && model.Heights != null)
                 {
@@ -885,17 +882,17 @@ namespace TDU2.Map
                             for (int z = 0; z < hc; z++)
                                 for (int x = 0; x < hc; x++)
                                     if (holes[z * hc + x]) { n++; if (x < minx) minx = x; if (x > maxx) maxx = x; if (z < minz) minz = z; if (z > maxz) maxz = z; }
-                            if (n > 0) Debug.Log($"[TDU2] CutTunnel {k}: {n} Zellen (Sicht), X{minx}..{maxx} Z{minz}..{maxz}, Nachbar-Dreiecke={extraTris}");
+                            if (n > 0) DebugManager.Debug($"CutTunnel {k}: {n} Zellen (Sicht), X{minx}..{maxx} Z{minz}..{maxz}, Nachbar-Dreiecke={extraTris}");
                         }
                     }
-                    catch (Exception ex) { model.Log.Add("TerrainHoles: " + ex.Message); Debug.LogWarning($"[TDU2] TerrainHoles {k}: {ex}"); }
+                    catch (Exception ex) { model.Log.Add("TerrainHoles: " + ex.Message); Debug.LogWarning($"TerrainHoles {k}: {ex}"); }
                 }
                 var terrain = model.Heights != null ? TerrainMeshBuilder.BuildSector(model.Heights, skirt, holes) : null;
                 var terrainCollider = model.Heights != null && driveHoles != null ? TerrainMeshBuilder.BuildSector(model.Heights, skirt, driveHoles) : null;
                 var payload = new SectorPayload { Model = model, Terrain = terrain, TerrainCollider = terrainCollider };
                 foreach (var (spot, file) in exteriors)
                 {
-                    try { var em = BankModel.Load(file, BankKind.Exterior); tex.IndexBank(em.Bank); TDU2.Map.Vehicles.InteriorFx.PrepareUva(em.Bank); payload.Exteriors.Add((spot, em)); }
+                    try { var em = BankModel.Load(file, BankKind.Exterior); tex.IndexBank(em.Bank); TDU2.Interior.InteriorFx.PrepareUva(em.Bank); payload.Exteriors.Add((spot, em)); }
                     catch (Exception) { }
                 }
                 return payload;
@@ -977,7 +974,7 @@ namespace TDU2.Map
             {
                 st.ExtraModels.Add(em);
                 var go = BuildExterior(spot, em, st.Root.transform, origin, st.Res, "_low");
-                if (go != null) { TDU2.Map.Vehicles.InteriorFx.ApplyUva(em.Bank?.FilePath, go.transform); Register(st, SpotSector(spot), go); }
+                if (go != null) { TDU2.Interior.InteriorFx.ApplyUva(em.Bank?.FilePath, go.transform); Register(st, SpotSector(spot), go); }
             }
             st.Built = true;
             if (_islandPieces.TryGetValue(st.Key, out var ip) && ip != null) ip.SetActive(false);
@@ -1098,7 +1095,7 @@ namespace TDU2.Map
                 var objRoot = new GameObject("Objects").transform;
                 objRoot.SetParent(st.Root.transform, false);
                 ObjectBuilder.BuildObjects(st.Model, objRoot, _textures, st.Res, _opt);
-                TDU2.Map.Vehicles.InteriorFx.ApplyUva(st.Model.Bank?.FilePath, objRoot);   // Textur-Animationen wie im Spiel
+                TDU2.Interior.InteriorFx.ApplyUva(st.Model.Bank?.FilePath, objRoot);   // Textur-Animationen wie im Spiel
             }
 
             if (LoadGrass && st.Model.Grass != null && _grassTypes != null && _grassMat != null && st.Model.Heights != null)
@@ -1125,7 +1122,7 @@ namespace TDU2.Map
             {
                 st.ExtraModels.Add(em);
                 var ego = BuildExterior(spot, em, st.Root.transform, origin, st.Res, "");
-                if (ego != null) TDU2.Map.Vehicles.InteriorFx.ApplyUva(em.Bank?.FilePath, ego.transform);
+                if (ego != null) TDU2.Interior.InteriorFx.ApplyUva(em.Bank?.FilePath, ego.transform);
             }
             if (GenerateColliders) AddColliders(st.Root);
             st.Built = true;
@@ -1139,12 +1136,12 @@ namespace TDU2.Map
             if (_actors != null || _actorsTask == null || !_actorsTask.IsCompleted) return;
             if (_actorsTask.IsFaulted)
             {
-                Debug.LogWarning("[TDU2] worldactors.bnk: " + _actorsTask.Exception?.GetBaseException().Message);
+                Debug.LogWarning("worldactors.bnk: " + _actorsTask.Exception?.GetBaseException().Message);
                 _actorsTask = null;
                 return;
             }
             _actors = _actorsTask.Result;
-            Debug.Log($"[TDU2] World Actors: {_actors.ByHc.Count} Modelle" + (_actors.Log.Count > 0 ? " – " + string.Join("; ", _actors.Log.Take(8)) : ""));
+            DebugManager.Debug($"World Actors: {_actors.ByHc.Count} Modelle" + (_actors.Log.Count > 0 ? " – " + string.Join("; ", _actors.Log.Take(8)) : ""));
             foreach (var st in _sectors.Values) if (st.Built) TryAddActors(st);
         }
 
@@ -1160,13 +1157,13 @@ namespace TDU2.Map
             {
                 int n = _actors.Build(st.Model.Actors, holder.transform, _textures, st.Res, _opt, _root);
                 if (n == 0) { UnityUtil.SafeDestroy(holder); return; }
-                TDU2.Map.Vehicles.InteriorFx.ApplyUva(_actors.Model?.Bank?.FilePath, holder.transform, true);
+                TDU2.Interior.InteriorFx.ApplyUva(_actors.Model?.Bank?.FilePath, holder.transform, true);
                 // wie im Spiel: Poller, Schilder, Ampeln, Mülleimer fallen beim Anfahren um (Bänke bleiben fest)
                 foreach (Transform grp in holder.transform)
                     foreach (Transform inst in grp)
                         WorldActorBody.Physicalize(inst.gameObject, grp.name);
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] World Actors " + st.Key + ": " + ex.Message); }
+            catch (Exception ex) { Debug.LogWarning("World Actors " + st.Key + ": " + ex.Message); }
         }
 
         /// <summary>MeshCollider für alle opaken Meshes (LOD0) eines Sektors. Laub/Cutout und Transparentes werden ausgelassen.</summary>
@@ -1250,9 +1247,8 @@ namespace TDU2.Map
             {
                 MaterialFactory.Water.SetTexture("_NormalMap", wn);
                 MaterialFactory.Water.SetFloat("_HasNormalMap", 1f);
-                Debug.Log("[TDU2] Meer: Normalmap water_n.2db");
             }
-            Debug.Log($"Library Loadet: {_library.Scene?.InsHash.Count ?? 0} Objekte, {_textures.Count} Textures");
+            DebugManager.Debug($"Library Loadet: {_library.Scene?.InsHash.Count ?? 0} Objekte, {_textures.Count} Textures");
             foreach (var st in _sectors.Values) if (st.Built) TryAddVegetation(st);
         }
 
@@ -1455,7 +1451,7 @@ namespace TDU2.Map
                 {
                     if (obj.localPosition != Vector3.zero)
                     {
-                        Debug.LogWarning($"[TDU2] Fixe Objektposition: {obj.name} | Alt: {obj.localPosition}");
+                        DebugManager.Warning($"Fixe Objektposition: {obj.name} | Alt: {obj.localPosition}");
                         obj.localPosition = Vector3.zero;
                     }
                 }

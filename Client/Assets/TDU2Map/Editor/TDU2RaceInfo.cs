@@ -1,9 +1,9 @@
-using TDU2.Map.Formats;
-using TDU2.Map.Racing;
-using TDU2.Map.Vehicles;
+using TDU2.Formats;
+using TDU2.Racing;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.EditorTools
+namespace TDU2.EditorTools
 {
     /// <summary>Auswahlobjekt des Rennen-Fensters: zeigt ein geladenes Rennen im Inspector (siehe TDU2RaceInfoEditor).</summary>
     public sealed class TDU2RaceInfo : ScriptableObject

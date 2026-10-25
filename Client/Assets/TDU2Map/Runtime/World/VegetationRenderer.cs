@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>
     /// Zeichnet die .pmi-Platzierungen (Bäume, Büsche, Felsen) eines Sektors per GPU-Instancing

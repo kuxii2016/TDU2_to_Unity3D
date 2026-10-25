@@ -1,8 +1,8 @@
 using System.Collections.Generic;
-using TDU2.Map.IO;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Formats
+namespace TDU2.Formats
 {
     /// <summary>Verweis einer Instanz auf ein OBJ (eine LOD-Stufe).</summary>
     public struct LodRef

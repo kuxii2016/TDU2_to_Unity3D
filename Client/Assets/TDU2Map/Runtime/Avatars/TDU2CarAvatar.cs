@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using TDU2.Map.Vehicles;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.Avatars
+namespace TDU2.Avatars
 {
     /// <summary>
     /// Fahrer bzw. Beifahrer im Auto wie im Spiel (anims/car, driveiklayer): Sitzpose "stance_turn", darÃ¼ber "turn" beim

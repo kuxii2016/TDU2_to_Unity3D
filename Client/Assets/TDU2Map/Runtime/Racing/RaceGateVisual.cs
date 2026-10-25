@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     public enum RaceGateState { Pending, Next, Passed }
 

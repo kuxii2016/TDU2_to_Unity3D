@@ -1,4 +1,4 @@
-namespace TDU2.Map.Online
+namespace TDU2.Online
 {
     /// <summary>
     /// Einstellungen für den Mehrspieler-Teil an einer Stelle: einfach die Werte hier ändern (true/false).

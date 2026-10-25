@@ -1,12 +1,12 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     public sealed class ObjectBuildOptions
     {

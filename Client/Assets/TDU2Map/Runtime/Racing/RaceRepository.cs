@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Lädt Renn-/Rennschul-Definitionen aus einem Bnk-Verzeichnis:
@@ -25,6 +25,7 @@ namespace TDU2.Map.Racing
             var r = new RaceRepository { BnkDir = bnkDir, Database = RaceDatabase.Load(bnkDir) };
             string sp = Path.Combine(bnkDir, "scenarics", "spotworld.bin");
             if (File.Exists(sp)) r.SpotWorld = SpotWorldFile.Parse(File.ReadAllBytes(sp));
+
             return r;
         }
 
@@ -35,7 +36,7 @@ namespace TDU2.Map.Racing
             string path = Path.Combine(Ige2Dir, name.ToLowerInvariant() + ".ig2");
             Ige2File f = null;
             try { if (File.Exists(path)) f = Ige2File.Parse(File.ReadAllBytes(path)); }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] " + name + ".ig2: " + ex.Message); }
+            catch (Exception ex) { Debug.LogWarning(name + ".ig2: " + ex.Message); }
             _ig2[name] = f;
             return f;
         }
@@ -123,7 +124,7 @@ namespace TDU2.Map.Racing
             {
                 var def = Build(cf, license);
                 if (def != null) list.Add(def);
-                else Debug.LogWarning("[TDU2] Rennschule: Prüfung " + cf + " (ig2) fehlt");
+                else Debug.LogWarning("Rennschule: Prüfung " + cf + " (ig2) fehlt");
             }
             return list;
         }
@@ -133,6 +134,52 @@ namespace TDU2.Map.Racing
         {
             var list = new List<RaceDefinition>();
             foreach (var lic in Database.RacingSchools(island, school)) list.AddRange(BuildForLicense(lic));
+            return list;
+        }
+
+        /// <summary>
+        /// Gibt spezial rennen zurück, Missionen etc.
+        /// </summary>
+        public List<RaceDefinition> BuildUnlicensedRaces()
+        {
+            var list = new List<RaceDefinition>();
+
+            if (Database == null || !Directory.Exists(Ige2Dir))
+                return list;
+
+            // Alle Prüfungsnamen sammeln, die einer Lizenz zugeordnet sind.
+            var licensedChallenges = new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var license in Database.Licenses)
+            {
+                if (license == null || license.ChallengeFiles == null)
+                    continue;
+
+                foreach (var challenge in license.ChallengeFiles)
+                {
+                    if (!string.IsNullOrEmpty(challenge))
+                        licensedChallenges.Add(
+                            Path.GetFileNameWithoutExtension(challenge));
+                }
+            }
+
+            // Alle IG2-Dateien durchsuchen.
+            foreach (var path in Directory.GetFiles(Ige2Dir, "*.ig2"))
+            {
+                string name = Path.GetFileNameWithoutExtension(path);
+
+                // Bereits einer Lizenz zugeordnet? Dann überspringen.
+                if (licensedChallenges.Contains(name))
+                    continue;
+
+                // Rennen ohne Lizenz laden.
+                var def = Build(name, null);
+
+                if (def != null)
+                    list.Add(def);
+            }
+
             return list;
         }
     }

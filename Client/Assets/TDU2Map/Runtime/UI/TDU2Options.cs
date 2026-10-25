@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.Flash;
+using TDU2.Flash;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Spielseite der Original-Optionsmenüs (MAIN.vmf, "options"). Die Flash-Seiten legen ihre Zeilen selbst fest

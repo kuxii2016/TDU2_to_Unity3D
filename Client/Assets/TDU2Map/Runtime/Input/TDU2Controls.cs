@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Tastenbelegung fürs Fahren (je Aktion zwei Tasten), gespeichert in PlayerPrefs "TDU2.Key.&lt;Aktion&gt;.0/1".
@@ -18,33 +18,33 @@ namespace TDU2.Map.Vehicles
             public KeyCode Key1, Key2;
         }
 
+        //A("accessories", "Zubehör (Verdeck/Fenster/Blinker)", "Accessories", KeyCode.V, KeyCode.None), Bugged Menue for now no option
         public static readonly List<Action> All = new List<Action>
         {
-            A("accel",    "Gas",                    "Accelerate",       KeyCode.W, KeyCode.UpArrow),
-            A("brake",    "Bremse / Rückwärts",     "Brake / Reverse",  KeyCode.S, KeyCode.DownArrow),
-            A("left",     "Lenken links",           "Steer left",       KeyCode.A, KeyCode.LeftArrow),
-            A("right",    "Lenken rechts",          "Steer right",      KeyCode.D, KeyCode.RightArrow),
-            A("handbrake","Handbremse",             "Handbrake",        KeyCode.Space, KeyCode.None),
-            A("gearup",   "Hochschalten",           "Gear up",          KeyCode.E, KeyCode.LeftShift),
-            A("geardown", "Runterschalten",         "Gear down",        KeyCode.Q, KeyCode.LeftControl),
-            A("horn",     "Hupe",                   "Horn",             KeyCode.H, KeyCode.None),
-            A("starter",  "Motor an/aus (Händler)", "Engine on/off",    KeyCode.I, KeyCode.None),
-            A("accessories", "Zubehör (Verdeck/Fenster/Blinker)", "Accessories", KeyCode.V, KeyCode.None),
-            A("doors",    "Türen öffnen/schließen", "Open/close doors", KeyCode.K, KeyCode.None),
-            A("windows",  "Fenster öffnen/schließen", "Open/close windows", KeyCode.N, KeyCode.None),
-            A("lookback", "Nach hinten schauen",    "Look back",        KeyCode.B, KeyCode.None),
-            A("camera",   "Kamera wechseln",        "Change camera",    KeyCode.C, KeyCode.None),
-            A("lights",   "Licht",                  "Headlights",       KeyCode.L, KeyCode.None),
-            A("flash",    "Lichthupe",              "Flash headlights", KeyCode.F, KeyCode.None),
-            A("blinkl",   "Blinker links",          "Indicator left",   KeyCode.Q, KeyCode.None),
-            A("blinkr",   "Blinker rechts",         "Indicator right",  KeyCode.Y, KeyCode.None),   // M ist die Karte
-            A("hazard",   "Warnblinker",            "Hazard lights",    KeyCode.X, KeyCode.None),
-            A("reset",    "Fahrzeug zurücksetzen",  "Reset vehicle",    KeyCode.R, KeyCode.None),
-            A("gearbox",  "Automatik / Manuell",    "Gearbox mode",     KeyCode.G, KeyCode.None),
-            A("aids",     "Fahrhilfen wechseln",    "Driving aids",     KeyCode.U, KeyCode.None),   // T ist der Chat
-            A("minimap",  "GPS-Karte ein/aus",      "Minimap on/off",   KeyCode.J, KeyCode.None),
-            A("map",      "Karte",                  "Map",              KeyCode.M, KeyCode.None),
-            A("chat",     "Chat",                   "Chat",             KeyCode.T, KeyCode.None),
+            A("accel",      "Gas",                        "Accelerate",           KeyCode.W, KeyCode.UpArrow),
+            A("brake",      "Bremse / Rückwärts",         "Brake / Reverse",      KeyCode.S, KeyCode.DownArrow),
+            A("left",       "Lenken links",               "Steer left",           KeyCode.A, KeyCode.LeftArrow),
+            A("right",      "Lenken rechts",              "Steer right",          KeyCode.D, KeyCode.RightArrow),
+            A("handbrake",  "Handbremse",                 "Handbrake",            KeyCode.Space, KeyCode.None),
+            A("gearup",     "Hochschalten",               "Gear up",              KeyCode.E, KeyCode.LeftShift),
+            A("geardown",   "Runterschalten",             "Gear down",            KeyCode.Q, KeyCode.LeftControl),
+            A("horn",       "Hupe",                       "Horn",                 KeyCode.H, KeyCode.None),
+            A("starter",    "Motor an/aus",               "Engine on/off",        KeyCode.I, KeyCode.None),
+            A("doors",      "Türen öffnen/schließen",     "Open/close doors",     KeyCode.K, KeyCode.None),
+            A("windows",    "Fenster öffnen/schließen",   "Open/close windows",   KeyCode.N, KeyCode.None),
+            A("lookback",   "Nach hinten schauen",        "Look back",            KeyCode.B, KeyCode.None),
+            A("camera",     "Kamera wechseln",            "Change camera",        KeyCode.C, KeyCode.None),
+            A("lights",     "Licht",                      "Headlights",           KeyCode.L, KeyCode.None),
+            A("flash",      "Lichthupe",                  "Flash headlights",     KeyCode.F, KeyCode.None),
+            A("blinkl",     "Blinker links",              "Indicator left",       KeyCode.Q, KeyCode.None),
+            A("blinkr",     "Blinker rechts",             "Indicator right",      KeyCode.Y, KeyCode.None),   // M ist die Karte
+            A("hazard",     "Warnblinker",                "Hazard lights",        KeyCode.X, KeyCode.None),
+            A("reset",      "Fahrzeug zurücksetzen",      "Reset vehicle",        KeyCode.R, KeyCode.None),
+            A("gearbox",    "Automatik / Manuell",        "Gearbox mode",         KeyCode.G, KeyCode.None),
+            A("aids",       "Fahrhilfen wechseln",        "Driving aids",         KeyCode.U, KeyCode.None),   // T ist der Chat
+            A("minimap",    "GPS-Karte ein/aus",          "Minimap on/off",       KeyCode.J, KeyCode.None),
+            A("map",        "Karte",                      "Map",                  KeyCode.M, KeyCode.None),
+            A("chat",       "Chat",                       "Chat",                 KeyCode.T, KeyCode.None),
         };
 
         static Action A(string id, string de, string en, KeyCode k1, KeyCode k2) => new Action { Id = id, Name = de, NameEn = en, Default1 = k1, Default2 = k2, Key1 = k1, Key2 = k2 };

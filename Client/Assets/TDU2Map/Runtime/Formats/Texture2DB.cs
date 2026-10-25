@@ -1,8 +1,8 @@
 using System;
-using TDU2.Map.IO;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Formats
+namespace TDU2.Formats
 {
     /// <summary>
     /// .2db = Textur ("BMAP"-Chunk).

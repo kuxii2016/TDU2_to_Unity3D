@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using TDU2.Map.Avatars;
-using TDU2.Map.Flash;
-using TDU2.Map.Online;
+using TDU2.Avatars;
+using TDU2.Flash;
+using TDU2.Online;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Friseur (Spots EHD_*, Interieur ihd_b bzw. ihair_ca, FpSelectable "Hairdresser_area" Typ 29) mit dem Original-Film
@@ -74,7 +74,7 @@ namespace TDU2.Map.Vehicles
                     _ui.FSCommand += OnCommand;
                     FlashLocalization.Apply(_ui, FlashLocalization.Load(bnk, TDU2PauseMenu.SavedLanguage()));
                 }
-                catch (Exception ex) { Debug.LogWarning("[TDU2] Friseur: " + ex.Message); if (_ui != null) Destroy(_ui.gameObject); _ui = null; return false; }
+                catch (Exception ex) { DebugManager.Error("Friseur: " + ex.Message); if (_ui != null) Destroy(_ui.gameObject); _ui = null; return false; }
             }
             _orig = AvatarConfigs.Local.Clone() ?? AvatarConfig.Default();
             _edit = _orig.Clone();
@@ -100,7 +100,6 @@ namespace TDU2.Map.Vehicles
             UpdateMoney();
             _ui.GotoLabel("/", "hairdresser", true);
             _startAt = Time.unscaledTime + 0.6f;
-            Debug.Log("[TDU2] Friseur geöffnet (" + (_orig.Sex == 1 ? "Frau" : "Mann") + ")");
             return true;
         }
 
@@ -119,7 +118,6 @@ namespace TDU2.Map.Vehicles
             if (_ui != null) _ui.gameObject.SetActive(false);
             Interiors?.SetFirstPerson(true);
             _closedFrame = Time.frameCount;
-            Debug.Log("[TDU2] Friseur geschlossen");
         }
 
         void StartMenu()
@@ -296,13 +294,12 @@ namespace TDU2.Map.Vehicles
             _orig = _edit.Clone();
             AvatarConfigs.SetLocal(_orig);
             UpdateMoney();
-            Debug.Log("[TDU2] Friseur: neue Frisur gespeichert, bezahlt $" + price);
+            DebugManager.Info("Friseur: neue Frisur gespeichert, bezahlt $" + price);
         }
 
         void AnswerDialog()
         {
             string dc = _ui.GetVariable("/:DgbxCase") ?? "";
-            Debug.Log("[TDU2] Friseur: Dialog '" + dc + "' -> ja");
             _ui.SetVariable("/:PlayerAnswer", "a");
             var owners = _ui.FunctionOwners("DialogBox");
             string target = owners.Contains("/") ? "/" : owners.Count > 0 ? owners[owners.Count - 1] : "/";

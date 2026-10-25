@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Bodenschatten (wie im Spiel: Schattentextur "shadow.2db" aus common_car.bnk unter dem Auto, auf den Boden projiziert)

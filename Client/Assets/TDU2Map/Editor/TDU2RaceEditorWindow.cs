@@ -2,14 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using TDU2.Map.Formats;
-using TDU2.Map.Racing;
-using TDU2.Map.Vehicles;
-using TDU2.Map.World;
+using TDU2.Formats;
+using TDU2.Racing;
+using TDU2.Vehicles;
+using TDU2.World;
 using UnityEditor;
 using UnityEngine;
 
-namespace TDU2.Map.EditorTools
+namespace TDU2.EditorTools
 {
     /// <summary>
     /// Fenster "TDU2/Rennen (ig2)": Renn-/Prüfungsdateien (Bnk/ig2/*.ig2) laden, auf der Karte (SceneView) anzeigen

@@ -38,7 +38,7 @@ namespace TDU2.Map.EditorTools
             // kurz warten, bis alle Dateien eines Pakets geschrieben sind; im Play-Modus bis zum Ende warten
             if (EditorApplication.timeSinceStartup - _dirtySince < 1.5 || EditorApplication.isPlayingOrWillChangePlaymode || EditorApplication.isCompiling) return;
             _dirty = false; _dirtySince = 0;
-            Debug.Log("[TDU2] Geänderte Dateien erkannt – lade neu ...");
+            DebugManager.Debug("Script Changes dedected, Compile new...");
             AssetDatabase.Refresh();
         }
     }

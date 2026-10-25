@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using TDU2.Map.IO;
+using TDU2.IO;
 
-namespace TDU2.Map.Formats
+namespace TDU2.Formats
 {
     /// <summary>
     /// Eden "VMF" – in ein eigenes Containerformat transkodiertes Flash/SWF (Engine "edFlash" in TestDrive2.exe).
@@ -64,7 +64,7 @@ namespace TDU2.Map.Formats
         public static VmfFile Parse(byte[] d)
         {
             if (d == null || d.Length < 19 || d[0] != (byte)'F' || d[1] != (byte)'M' || d[2] != (byte)'V')
-                throw new FormatException("keine VMF-Datei (Signatur 'FMV' fehlt)");
+                throw new FormatException("no valid VMF file");
             var f = new VmfFile { Data = d };
             f.Version = d[3];
             f.HeaderWord = Bin.U16(d, 4);

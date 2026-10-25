@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.IO;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>Eine Rennserie aus DBLicense: entweder eine Rennschul-Lizenz oder eine Meisterschaft.</summary>
     public sealed class LicenseInfo

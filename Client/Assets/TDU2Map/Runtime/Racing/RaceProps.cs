@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
-using TDU2.Map.World;
+using TDU2.Formats;
+using TDU2.IO;
+using TDU2.World;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Props einer Prüfung: Kegel und Absperrungen (ig2 DEC2) sowie die Tor-Optik der Checkpoints.

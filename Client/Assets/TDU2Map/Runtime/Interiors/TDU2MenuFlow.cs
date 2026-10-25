@@ -1,9 +1,9 @@
 using System.Text;
-using TDU2.Map.Online;
-using TDU2.Map.Racing;
+using TDU2.Online;
+using TDU2.Racing;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Sauberes Verlassen aller Interieur-Menüs (Casino, Händler, Tagebuch, MyTDULife, My House) über EINE Stelle:
@@ -122,7 +122,6 @@ namespace TDU2.Map.Vehicles
         /// <summary>Normaler Weg zurück (wie die B-Taste im Spiel).</summary>
         void MenuBack(MenuLayer l)
         {
-            Debug.Log("[TDU2] Menü zurück: " + l);
             if (_ui != null) _ui.SetValue("/:Input", true);
             switch (l)
             {
@@ -157,7 +156,6 @@ namespace TDU2.Map.Vehicles
         /// <summary>Ebene ohne Mitwirkung des Films schließen und einen sauberen Zustand herstellen.</summary>
         void ForceCloseLayer(MenuLayer l, string why)
         {
-            Debug.Log("[TDU2] Menü " + l + " vom Spiel geschlossen (" + why + ")");
             _backLayer = MenuLayer.None;
             RacingSchoolMenu.NoteUiClosed();
             switch (l)
@@ -249,7 +247,7 @@ namespace TDU2.Map.Vehicles
             if (now < _nextHeal || now - _noMenuSince < 1f) return;
             _nextHeal = now + 1f;
             if (_houseRestoreAt > 0f || TDU2StickerShop.Busy || TDU2ClothesShop.Busy || TDU2Hairdresser.Busy || _menuOpen) return;
-            if (CasinoMenuOpen) { CasinoMenuOpen = false; Debug.Log("[TDU2] Menüsperre ohne offenes Menü aufgehoben"); }
+            if (CasinoMenuOpen) { CasinoMenuOpen = false; DebugManager.Warning("Menüsperre ohne offenes Menü aufgehoben"); }
             if (TDU2GameData.ExternalTextInput) TDU2GameData.ExternalTextInput = false;
             if (!TestDriveActive && TDU2Minimap.HudOverlay) TDU2Minimap.HudOverlay = false;
             if (_carIn != CarIn.None) EndDealerCar();

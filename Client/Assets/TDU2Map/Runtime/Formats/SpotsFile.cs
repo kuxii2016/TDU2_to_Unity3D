@@ -1,8 +1,8 @@
 using System.Collections.Generic;
-using TDU2.Map.IO;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Formats
+namespace TDU2.Formats
 {
     public sealed class Spot
     {

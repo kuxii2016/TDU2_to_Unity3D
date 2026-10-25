@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
-using TDU2.Map.Online;
-using TDU2.Map.World;
+using TDU2.Formats;
+using TDU2.IO;
+using TDU2.Online;
+using TDU2.World;
 using UnityEngine;
 
-namespace TDU2.Map.Avatars
+namespace TDU2.Avatars
 {
     /// <summary>DBClothe._parttype</summary>
     public enum ClothePart { None = 0, Bottom = 1, Glasses = 2, Hair = 3, Gloves = 4, Helmet = 5, Shoes = 6, Top = 7, Dress = 8, Beard = 9, Accessories = 10, Belt = 11 }

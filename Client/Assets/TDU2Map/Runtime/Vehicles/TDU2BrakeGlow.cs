@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Glühende Bremsscheiben wie im Spiel (Material der Scheibe, z.B. Mat_TS_Disk_03, hat den Parameter HEATCOLOR): nach langem,

@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>Testart einer Rennschul-Prüfung (ig2 "rsl2"). Reihenfolge = Zeigertabelle der EXE (0x1674d04),
     /// die Namen sind die Frame-Labels des Typ-Symbols in r_school.vmf (/tests/lineN/icons/type).</summary>

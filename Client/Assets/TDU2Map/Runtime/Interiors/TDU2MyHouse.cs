@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using TDU2.Map.Formats;
-using TDU2.Map.Online;
-using TDU2.Map.World;
+using TDU2.Formats;
+using TDU2.Interior;
+using TDU2.Online;
+using TDU2.World;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// My House (Haus einrichten) wie im Spiel, mit den Original-Oberflächen aus home.vmf:
@@ -78,8 +79,8 @@ namespace TDU2.Map.Vehicles
             {
                 if (_furnCat != null) return true;
                 if (_catTask == null || !_catTask.IsCompleted) return false;
-                if (_catTask.IsFaulted) { Debug.LogWarning("[TDU2] My House: Katalog: " + _catTask.Exception?.GetBaseException().Message); _furnCat = new List<FurnItem>(); _matCat = new List<MatItem>(); }
-                else { _furnCat = _catTask.Result.Item1; _matCat = _catTask.Result.Item2; Debug.Log("[TDU2] My House: " + _furnCat.Count + " Möbel, " + _matCat.Count + " Böden/Tapeten"); }
+                if (_catTask.IsFaulted) { DebugManager.Error("My House: Katalog: " + _catTask.Exception?.GetBaseException().Message); _furnCat = new List<FurnItem>(); _matCat = new List<MatItem>(); }
+                else { _furnCat = _catTask.Result.Item1; _matCat = _catTask.Result.Item2; DebugManager.Debug("My House: " + _furnCat.Count + " Möbel, " + _matCat.Count + " Böden/Tapeten"); }
                 _catTask = null;
                 return true;
             }
@@ -197,7 +198,7 @@ namespace TDU2.Map.Vehicles
                 bool same = o == target || (target.Group != 0 && o.Group == target.Group && o.Type == target.Type);
                 if (!same || string.Equals(o.LoadingBank ?? o.Bank, bank, StringComparison.OrdinalIgnoreCase)) continue;
                 string path = CarDatabase.FindFile(Path.Combine(InteriorDir, "myhouse"), bank + ".bnk");
-                if (path == null) { Debug.LogWarning("[TDU2] My House: Bank fehlt: " + bank); continue; }
+                if (path == null) { DebugManager.Error("My House: Bank fehlt: " + bank); continue; }
                 var st = Manager.Streamer;
                 o.LoadingBank = bank;
                 o.Loading = Task.Run(() => st.LoadSceneModel(path));
@@ -212,7 +213,7 @@ namespace TDU2.Map.Vehicles
             {
                 if (o.Loading == null || !o.Loading.IsCompleted) continue;
                 var t = o.Loading; o.Loading = null;
-                if (t.IsFaulted || t.Result == null) { Debug.LogWarning("[TDU2] My House: " + o.LoadingBank + ": " + t.Exception?.GetBaseException().Message); o.LoadingBank = null; continue; }
+                if (t.IsFaulted || t.Result == null) { DebugManager.Warning("My House: " + o.LoadingBank + ": " + t.Exception?.GetBaseException().Message); o.LoadingBank = null; continue; }
                 if (o.Anchor == null) { t.Result.Release(); continue; }
                 if (o.Handle != null) { _furniture.Remove(o.Handle); o.Handle.Destroy(); }
                 bool glow = MaterialFactory.ShowGlowMaterials;
@@ -398,7 +399,7 @@ namespace TDU2.Map.Vehicles
             }
             LockCursor(true);
             if (_fp != null) _fp.LookEnabled = true;
-            Debug.Log("[TDU2] My House: Einrichten (Zonen " + (Zones?.Count ?? 0) + ", Möbel " + _houseObjs.Count + ")");
+            DebugManager.Debug("My House: Einrichten (Zonen " + (Zones?.Count ?? 0) + ", Möbel " + _houseObjs.Count + ")");
         }
 
         void EndMyHouse()
@@ -410,7 +411,6 @@ namespace TDU2.Map.Vehicles
             _houseRestoreAt = Time.unscaledTime + 1.2f;   // Film spielt living_in -> danach die Laufmodus-Oberfläche wiederherstellen
             LockCursor(true);
             if (_fp != null) _fp.LookEnabled = true;
-            Debug.Log("[TDU2] My House beendet");
         }
 
         void SetMoneyVars()
@@ -435,7 +435,7 @@ namespace TDU2.Map.Vehicles
                 if (_ui != null && _myHouse == HouseMode.None && !_diaryOpen)
                 {
                     // Wohnbereich wie nach dem Tagebuch: Film auf living_stop, Eingabe frei, Laufmodus mit Maus-Umsicht
-                    Debug.Log("[TDU2] My House verlassen: Wurzel " + _ui.Label("/") + ", Input " + _ui.GetVariable("/:Input") + ", Cursor " + _ui.Label("/cursor"));
+                    DebugManager.Debug("My House verlassen: Wurzel " + _ui.Label("/") + ", Input " + _ui.GetVariable("/:Input") + ", Cursor " + _ui.Label("/cursor"));
                     _ui.GotoLabel("/", _kind == Kind.Garage ? "garage_stop" : "living_stop", false);
                     foreach (var d in _ui.Root.List.Values) d.Visible = d.Name != null && UiVisible.Contains(d.Name);
                     _ui.GotoLabel("/myhs_editor", "default", false);
@@ -502,7 +502,6 @@ namespace TDU2.Map.Vehicles
             _ui.GotoLabel("/myhs_editor", "myhs_wm", false);
             _ui.SetValue("/:Input", true);
             LockCursor(true);
-            Debug.Log("[TDU2] My House: Editor erzwungen geschlossen");
         }
 
         void UpdateHouseWalk()
@@ -891,7 +890,7 @@ namespace TDU2.Map.Vehicles
                                 Store(l.furn, o.Ent.Name ?? "", f.Bank);
                     }
                     SetFurnitureBank(_edit, f.Bank);
-                    Debug.Log("[TDU2] My House: " + _edit.Ent.Name + " -> " + f.Bank + " (" + f.Price + " $)");
+                    DebugManager.Debug("My House: " + _edit.Ent.Name + " -> " + f.Bank + " (" + f.Price + " $)");
                 }
             }
             else if (_myHouse == HouseMode.Material && _editZone != null && _mats != null)
@@ -907,7 +906,7 @@ namespace TDU2.Map.Vehicles
                 var l = Layout(true);
                 if (l != null) { l.mats ??= new List<HouseEntry>(); Store(l.mats, _editZone, m.Name); }
                 ApplyZone(_editZone, m.Name);
-                Debug.Log("[TDU2] My House: " + _editZone + " -> " + m.Name + " (" + m.Price + " $)");
+                DebugManager.Debug("My House: " + _editZone + " -> " + m.Name + " (" + m.Price + " $)");
             }
             _editOrigBank = null; _editOrigMat = null;
             _edit = null; _editZone = null;

@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 using UnityEngine;
 
-namespace TDU2.Map.Flash
+namespace TDU2.Flash
 {
     /// <summary>
     /// Texte der Flash-Menüs wie im Spiel:

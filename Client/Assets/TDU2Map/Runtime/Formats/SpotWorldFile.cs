@@ -1,8 +1,8 @@
 using System.Collections.Generic;
-using TDU2.Map.IO;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Formats
+namespace TDU2.Formats
 {
     /// <summary>Gruppenkopf einer Challenge (TNOC + ECIL): Lizenz und Startposition der Gruppe.</summary>
     public sealed class SpotGroup

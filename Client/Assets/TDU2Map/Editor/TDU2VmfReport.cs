@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEditor;
 using UnityEngine;
 

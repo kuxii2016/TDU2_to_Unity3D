@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 using UnityEngine;
 
-namespace TDU2.Map.Traffic
+namespace TDU2.Traffic
 {
     /// <summary>
     /// Ein befahrbarer Weg als Polylinie in Inselkoordinaten: eine Spur einer Straße (LaneTrack) oder die Fahrt durch eine

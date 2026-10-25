@@ -1,11 +1,11 @@
 using System;
 using System.IO;
-using TDU2.Map.Flash;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Flash;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Original-Instrumente aus GAUGES (Euro/Bnk/frontend/hires/gauges.bnk, VMF-Flash) wie im Spiel:

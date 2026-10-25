@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using TDU2.Map.Flash;
-using TDU2.Map.Online;
+using TDU2.Flash;
+using TDU2.Online;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Sticker-Shop (Spot ESTICK_*, Interieur istick_b, Verkäuferin = FpSelectable Typ 28 "StickersShop_area") mit dem
@@ -124,7 +124,7 @@ namespace TDU2.Map.Vehicles
             _ui.SetValue("/:Input", true);
             _ui.CallClip("/", "StickersMenu");
             int p2 = 0; foreach (var m in model.PaintMaterials) if (CarModel.IsPaint2(m)) p2++;
-            Debug.Log("[TDU2] Sticker-Shop geöffnet: " + car.FileName + " (" + _edit.Stickers.Count + " Sticker, Lack-Materialien " + model.PaintMaterials.Count + ", davon Paint2: " + p2 + ")");
+            DebugManager.Debug("Sticker-Shop geöffnet: " + car.FileName + " (" + _edit.Stickers.Count + " Sticker, Lack-Materialien " + model.PaintMaterials.Count + ", davon Paint2: " + p2 + ")");
             return true;
         }
 
@@ -257,7 +257,6 @@ namespace TDU2.Map.Vehicles
         void AnswerDialog()
         {
             string dc = _ui.GetVariable("/:DgbxCase") ?? "";
-            Debug.Log("[TDU2] Sticker-Shop: Dialog '" + dc + "' -> ja");
             _ui.SetVariable("/:PlayerAnswer", "a");
             _ui.CallClip("/", "DialogBox");
         }
@@ -482,7 +481,7 @@ namespace TDU2.Map.Vehicles
             _ui.SetValue("/:CategoryLoaded", give);
             _listPending = !ready && !b.Failed;
             if (give) _listSince = ready || b.Failed ? -1f : _listSince;
-            Debug.Log("[TDU2] Sticker-Liste: Planche " + (cur + 1) + "/" + nb + " " + b.BankFile + (ready ? " (" + b.Count + " Sticker)" : b.Failed ? " (Fehler)" : " (lädt …)"));
+            DebugManager.Debug("Sticker-Liste: Planche " + (cur + 1) + "/" + nb + " " + b.BankFile + (ready ? " (" + b.Count + " Sticker)" : b.Failed ? " (Fehler)" : " (lädt …)"));
             for (int i = 0; i < 24; i++)
                 _ui.SetClipTexture("/stickers/list/container/st" + i + "/lure", ready && i < b.Count ? b.Textures[i] : null);
         }
@@ -547,7 +546,7 @@ namespace TDU2.Map.Vehicles
                     mr.gameObject.layer = 2;
                     _cols.Add(mc);
                 }
-                catch (Exception ex) { Debug.LogWarning("[TDU2] Sticker-Shop Kollision: " + ex.Message); }
+                catch (Exception ex) { DebugManager.Error("Sticker-Shop Kollision: " + ex.Message); }
             }
         }
 
@@ -685,7 +684,7 @@ namespace TDU2.Map.Vehicles
             if (_mode != Mode.Place || _board == null) return;
             var list = PlacementsAtMouse();
             if (list.Count == 0) return;
-            if (_edit.Stickers.Count + list.Count > CarLivery.MaxStickers) { Debug.Log("[TDU2] Sticker-Shop: maximal " + CarLivery.MaxStickers + " Sticker"); return; }
+            if (_edit.Stickers.Count + list.Count > CarLivery.MaxStickers) { DebugManager.Warning("Sticker-Shop: maximal " + CarLivery.MaxStickers + " Sticker"); return; }
             _edit.Stickers.AddRange(list);
             _history.Add(list.Count);
             _redo.Clear();
@@ -778,7 +777,6 @@ namespace TDU2.Map.Vehicles
             if (boards.Count > 0) TDU2Liveries.AddBoards(boards);
             TDU2Liveries.Set(_car.FileName, _edit);   // speichert (Server + lokal) und meldet die Änderung (Mitspieler)
             _saved = _edit.Clone();
-            Debug.Log("[TDU2] Sticker-Shop: gespeichert " + _car.FileName + " – " + _edit.Stickers.Count + " Sticker, Lack " + (_edit.HasPaint ? ToRgb(_edit.Paint).ToString("X6") + " " + _edit.Finish : "original") + ", bezahlt $" + total);
         }
 
         // ================================================================== Eingabe + Kamera

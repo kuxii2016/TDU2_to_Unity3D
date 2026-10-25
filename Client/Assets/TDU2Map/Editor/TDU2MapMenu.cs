@@ -1,5 +1,5 @@
 using System.IO;
-using TDU2.Map.World;
+using TDU2.World;
 using UnityEditor;
 using UnityEngine;
 
@@ -47,7 +47,7 @@ namespace TDU2.Map.EditorTools
             RenderSettings.fogEndDistance = 45000;
             RenderSettings.fogColor = new Color(0.62f, 0.72f, 0.82f);
             QualitySettings.shadowDistance = Mathf.Max(QualitySettings.shadowDistance, 400f);
-            var vm = go.AddComponent<TDU2.Map.Vehicles.TDU2VehicleManager>();
+            var vm = go.AddComponent<TDU2.Vehicles.TDU2VehicleManager>();
             vm.Streamer = s;
             Selection.activeGameObject = go;
             Undo.RegisterCreatedObjectUndo(go, "TDU2 Map Streamer");
@@ -59,8 +59,8 @@ namespace TDU2.Map.EditorTools
         {
             var s = Object.FindObjectOfType<TDU2MapStreamer>();
             if (s == null) { EditorUtility.DisplayDialog("TDU2", "Zuerst 'TDU2/Map Streamer in Szene erstellen' ausführen.", "OK"); return; }
-            var vm = s.GetComponent<TDU2.Map.Vehicles.TDU2VehicleManager>();
-            if (vm == null) vm = Undo.AddComponent<TDU2.Map.Vehicles.TDU2VehicleManager>(s.gameObject);
+            var vm = s.GetComponent<TDU2.Vehicles.TDU2VehicleManager>();
+            if (vm == null) vm = Undo.AddComponent<TDU2.Vehicles.TDU2VehicleManager>(s.gameObject);
             vm.Streamer = s;
             Selection.activeGameObject = s.gameObject;
             EditorUtility.DisplayDialog("TDU2", "Fahrzeug-Loader hinzugefügt.\n\nIm Play-Modus: F2 = Auto spawnen/aussteigen, F5/F6 = Auto wechseln.", "OK");

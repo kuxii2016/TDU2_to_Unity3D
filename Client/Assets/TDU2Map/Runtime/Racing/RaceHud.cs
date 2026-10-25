@@ -1,9 +1,9 @@
 using System.Globalization;
-using TDU2.Map.Flash;
-using TDU2.Map.Vehicles;
+using TDU2.Flash;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Renn-/Prüfungsanzeige über das Original-HUD (frontend/&lt;res&gt;/hud.bnk → hud.vmf), Pfade und Variablen wie in der EXE

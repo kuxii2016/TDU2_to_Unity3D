@@ -1,9 +1,9 @@
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using TDU2.Map.Vehicles;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Fahrzeuge einer Prüfung (ig2 VEHI), z.B. die zu überholenden Autos der Überhol-Tests.

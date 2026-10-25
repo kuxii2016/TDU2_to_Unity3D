@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Text;
 using UnityEngine;
 
-namespace TDU2.Map.Flash
+namespace TDU2.Flash
 {
     /// <summary>
     /// ActionScript-1/2-Interpreter (Stackmaschine, SWF-DoAction-Bytecode) für die Eden-Flash-Screens.

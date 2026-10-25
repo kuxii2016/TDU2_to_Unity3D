@@ -1,6 +1,6 @@
 
 using UnityEngine;
-using TDU2.Map.Traffic;
+using TDU2.Traffic;
 
 public sealed class TrafficLanesDebug : MonoBehaviour
 {

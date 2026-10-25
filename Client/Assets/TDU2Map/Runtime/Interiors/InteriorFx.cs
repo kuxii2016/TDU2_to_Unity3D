@@ -1,13 +1,13 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
-using TDU2.Map.Racing;
-using TDU2.Map.World;
+using TDU2.Formats;
+using TDU2.IO;
+using TDU2.Racing;
+using TDU2.World;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Effekte der Interieur-Szenen, die beim Aufbau der Welt-Objekte fehlen:
@@ -111,7 +111,7 @@ namespace TDU2.Map.Vehicles
                     }
                 }
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Interieur-UVA: " + ex.Message); }
+            catch (Exception ex) { DebugManager.Error("Interieur-UVA: " + ex.Message); }
             if (list.Count > 0) _links[bank.FilePath] = list; else _links.TryRemove(bank.FilePath, out _);
         }
 
@@ -135,7 +135,7 @@ namespace TDU2.Map.Vehicles
                         prep.Lights.Add(new LightDef { Pos = pos, Color = col, Intensity = it.F("Intensity", 1f), Range = Mathf.Max(3f, it.F("DistanceCutOff", 15f)) });
                     }
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Interieur-Lichter: " + ex.Message); }
+            catch (Exception ex) { DebugManager.Error("Interieur-Lights: " + ex.Message); }
             // Nacht-Lightmaps: die Textur der NIGHTLIGHTMAP-Ebene jedes Materials (Semantik 0x47494CA489949D96).
             // Namen sind frei: lm_gph_l3a_night, lm_igamha_dlc, irs_a_night, lm_icd_us1 ... ; COLOR ist lm_*/fake_*/<bank>_day.
             // Dazu: Umgebungs-Cubemap der REFLECTION-Ebene (cubecar, cubemap_iorc ...) und Hilfsmaterialien ohne Oberfläche.
@@ -186,7 +186,7 @@ namespace TDU2.Map.Vehicles
                     if (t != null && t.IsCube) prep.Cube = t;
                 }
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Interieur-Lightmaps: " + ex.Message); }
+            catch (Exception ex) { DebugManager.Error("Interieur-Lightmaps: " + ex.Message); }
             // Shader-Parameter (MAT.-Nutzdaten ab Tag + 16: +768 Shader-Set, +778/+780 Parameterzahl, +832 Parameterköpfe, dann Werte)
             try
             {
@@ -220,7 +220,7 @@ namespace TDU2.Map.Vehicles
                     }
                 }
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Interieur-Materialparameter: " + ex.Message); }
+            catch (Exception ex) { DebugManager.Error("Interieur-Materialparameter: " + ex.Message); }
             _prep[bank.FilePath] = prep;
         }
 
@@ -265,9 +265,9 @@ namespace TDU2.Map.Vehicles
                           .Append(r.enabled ? "" : ", aus").Append(']').Append(tag).Append(meshInfo);
                     }
                 }
-                Debug.Log("[TDU2] Material-Inventar " + root.name + ": " + seen.Count + " Materialien, " + nTrans + " transparent/additiv, " + nOdd + " auffällige Meshes" + sb);
+                DebugManager.Info("Material-Inventar " + root.name + ": " + seen.Count + " Materialien, " + nTrans + " transparent/additiv, " + nOdd + " strange Meshes" + sb);
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Material-Inventar: " + ex.Message); }
+            catch (Exception ex) { DebugManager.Error("Material-Inventar: " + ex.Message); }
         }
 
         /// <summary>Diagnose der letzten Bodensuche (Höhenklassen mit Fläche).</summary>
@@ -481,8 +481,6 @@ namespace TDU2.Map.Vehicles
                 var im = mirrorFloor.GetComponent<InteriorMirror>();
                 if (im == null) im = mirrorFloor.gameObject.AddComponent<InteriorMirror>();
                 im.PlaneY = planeY;
-                Debug.Log("[TDU2] Bodenspiegelung " + root.name + ": " + mirrorCands.Count + " Kandidaten, Host " + mirrorFloor.name + ", Ebene y=" + planeY.ToString("0.00") +
-                          " (Raum-Ursprung y=" + root.position.y.ToString("0.00") + "), Mindestanteil " + MinFloorReflection.ToString("0.00") + "; " + LastPlaneInfo);
                 if (MinFloorReflection > 0.001f)
                 {
                     // alles, was auf Bodenhöhe liegt, spiegelt (der Shader begrenzt die Spiegelung selbst auf die Bodenebene)
@@ -508,10 +506,9 @@ namespace TDU2.Map.Vehicles
                         if (sbm.Length < 1500) sbm.Append(" | ").Append(r.name).Append('/').Append(m.name).Append(" [").Append(m.shader != null ? m.shader.name : "-").Append(can ? ", Refl " + m.GetFloat("_ReflMix").ToString("0.00") : ", KEIN Spiegel").Append(']');
                     }
                 }
-                Debug.Log("[TDU2] Bodenspiegelung Materialien auf Bodenhöhe (" + nNo + " ohne Spiegel-Shader):" + sbm);
             }
             else if (PlanarReflections)
-                Debug.Log("[TDU2] Bodenspiegelung " + root.name + ": keine Bodenebene (" + mirrorCands.Count + " Kandidaten; " + LastPlaneInfo + ")");
+                DebugManager.Error("Bodenspiegelung " + root.name + ": keine Bodenebene (" + mirrorCands.Count + " Kandidaten; " + LastPlaneInfo + ")");
             // Umgebungs-Cubemap des Interieurs (REFLECTION-Ebene, z.B. cubecar) als Reflection Probe: Autos spiegeln den Raum statt des Himmels
             bool probe = false;
             if (prep != null && prep.Cube != null)
@@ -555,7 +552,7 @@ namespace TDU2.Map.Vehicles
                     nLights++;
                 }
             LogInventory(root, prep);
-            Debug.Log("[TDU2] Interieur " + root.name + ": " + nUva + " Textur-Animation(en), " + nGlass + " Glas, " + nLm + " Lightmap-Material(ien)" + (night ? " (Nacht)" : "") + ", " + nRefl + " Spiegel-Material(ien)" + (mirrorFloor != null ? " (Boden " + mirrorFloor.name + ")" : "") + ", " + nHelper + " Hilfskörper ausgeblendet, Cubemap " + (probe ? prep.Cube.Name : "-") + ", " + nLights + " Licht(er)");
+            DebugManager.Info("Interieur " + root.name + ": " + nUva + " Textur-Animation(en), " + nGlass + " Glas, " + nLm + " Lightmap-Material(ien)" + (night ? " (Nacht)" : "") + ", " + nRefl + " Spiegel-Material(ien)" + (mirrorFloor != null ? " (Boden " + mirrorFloor.name + ")" : "") + ", " + nHelper + " Hilfskörper ausgeblendet, Cubemap " + (probe ? prep.Cube.Name : "-") + ", " + nLights + " Licht(er)");
         }
 
         /// <summary>
@@ -641,7 +638,7 @@ namespace TDU2.Map.Vehicles
                 cube.Apply(false, true);
                 return cube;
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Interieur-Cubemap " + t.Name + ": " + ex.Message); return null; }
+            catch (Exception ex) { DebugManager.Error("Interieur-Cubemap " + t.Name + ": " + ex.Message); return null; }
         }
 
         static bool IsGlass(string n)
@@ -739,7 +736,6 @@ namespace TDU2.Map.Vehicles
                 if (!_rendering && c != null && c == Camera.main && !IsGameCamera(c) && !_rejectLogged)
                 {
                     _rejectLogged = true;
-                    Debug.Log("[TDU2] Bodenspiegelung: Hauptkamera " + c.name + " wird NICHT gespiegelt (Typ " + c.cameraType + ", Zieltextur " + (c.targetTexture != null ? c.targetTexture.name : "-") + ")");
                 }
                 if (_rendering || !isActiveAndEnabled || _r == null || !PlanarReflections || !IsGameCamera(c)) return;
                 _rendering = true;
@@ -750,11 +746,9 @@ namespace TDU2.Map.Vehicles
                     if (Time.unscaledTime >= _nextLog)
                     {
                         _nextLog = Time.unscaledTime + 10f;
-                        Debug.Log("[TDU2] Bodenspiegelung läuft: " + name + ", Kamera " + c.name + ", Ebene y=" + PlaneY.ToString("0.00") + ", Bild " + (_rt != null ? _rt.width + "x" + _rt.height : "-") +
-                                  ", " + _renders + " Spiegelbilder seit Start, Kamera-y " + c.transform.position.y.ToString("0.00"));
                     }
                 }
-                catch (Exception ex) { Debug.LogWarning("[TDU2] Bodenspiegelung: " + ex.Message); enabled = false; }
+                catch (Exception ex) { DebugManager.Error("Bodenspiegelung: " + ex.Message); enabled = false; }
                 finally { _rendering = false; }
             }
 

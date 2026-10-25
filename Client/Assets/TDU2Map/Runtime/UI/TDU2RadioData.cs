@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>Kategorie einer Radio-Nachricht (Feld <c>_type</c> in DBRadioMessage).</summary>
     public enum RadioMessageType

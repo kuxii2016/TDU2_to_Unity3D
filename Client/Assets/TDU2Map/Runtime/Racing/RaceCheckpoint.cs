@@ -1,7 +1,7 @@
-using TDU2.Map.Formats;
+using TDU2.Formats;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>Ein Checkpoint / Tor eines Rennens (aus <see cref="Ige2Checkpoint"/>). Alle Koordinaten in Inselkoordinaten.</summary>
     public sealed class RaceCheckpoint

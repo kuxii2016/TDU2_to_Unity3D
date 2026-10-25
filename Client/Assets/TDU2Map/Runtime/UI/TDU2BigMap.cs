@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using TDU2.Map.Flash;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Flash;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Große Karte (Taste M) wie im Original (TestDrive2Dev.exe, Spielmodus GM_MAP):
@@ -425,11 +425,11 @@ namespace TDU2.Map.Vehicles
                 _savedLodBias = QualitySettings.lodBias; QualitySettings.lodBias = Mathf.Min(_savedLodBias, MapLodBias);
                 _perfDisabled.Clear();
 #if UNITY_2023_1_OR_NEWER
-                var grass = FindObjectsByType<TDU2.Map.World.GrassRenderer>(FindObjectsSortMode.None);
-                var veg = FindObjectsByType<TDU2.Map.World.VegetationRenderer>(FindObjectsSortMode.None);
+                var grass = FindObjectsByType<TDU2.World.GrassRenderer>(FindObjectsSortMode.None);
+                var veg = FindObjectsByType<TDU2.World.VegetationRenderer>(FindObjectsSortMode.None);
 #else
-                var grass = FindObjectsOfType<TDU2.Map.World.GrassRenderer>();
-                var veg = FindObjectsOfType<TDU2.Map.World.VegetationRenderer>();
+                var grass = FindObjectsOfType<TDU2.World.GrassRenderer>();
+                var veg = FindObjectsOfType<TDU2.World.VegetationRenderer>();
 #endif
                 foreach (var b in grass) if (b != null && b.enabled) { b.enabled = false; _perfDisabled.Add(b); }
                 foreach (var b in veg) if (b != null && b.enabled) { b.enabled = false; _perfDisabled.Add(b); }
@@ -668,7 +668,6 @@ namespace TDU2.Map.Vehicles
         {
             string c = (cmd ?? "").Trim().ToLowerInvariant();
             if (TDU2FrontendSounds.Command(c)) return;   // sndp:* = Menü-Sound
-            if (LogCommands) Debug.Log("[TDU2] Karten-Film -> " + c);
             if (c.StartsWith("bmap:fltr:icf"))
             {
                 // Reiter der Filterleiste gewechselt (presets.sendCmdIc): nur noch Spots dieser Gruppe zeigen

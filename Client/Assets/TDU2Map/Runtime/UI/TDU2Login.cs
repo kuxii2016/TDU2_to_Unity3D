@@ -4,12 +4,12 @@ using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using TDU2.Map.Flash;
-using TDU2.Map.Formats;
-using TDU2.Map.Online;
+using TDU2.Flash;
+using TDU2.Formats;
+using TDU2.Online;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Anmeldung wie im Spiel, mit der Original-Oberfläche:
@@ -593,7 +593,7 @@ namespace TDU2.Map.Vehicles
             var save = TDU2Session.Save;
             string island = Manager.Streamer?.Index?.IslandName ?? Manager.Streamer?.Island ?? "";
             if (string.IsNullOrEmpty(save.island)) save.island = island;
-            Debug.Log($"[TDU2] Angemeldet als {r.nick} – {save.ownedCars.Count} Autos, Startauto gewählt: {save.starterChosen}, {r.online} online");
+            DebugManager.Info($"Angemeldet als {r.nick} – {save.ownedCars.Count} Autos, Startauto gewählt: {save.starterChosen}, {r.online} online");
 
             // Spielstand auf der anderen Insel: dorthin wechseln (Szene mit der Insel neu laden, danach geht es hier weiter)
             if (!TDU2IslandTravel.Pending && save.starterChosen && save.hasPosition && !string.IsNullOrEmpty(save.island)
@@ -610,7 +610,7 @@ namespace TDU2.Map.Vehicles
                 // Autosave als aktuelles Auto gespeichert -> nur eigene Autos nehmen
                 if (save.ownedCars.Count > 0 && !save.ownedCars.Exists(c => string.Equals(c, save.currentCar, StringComparison.OrdinalIgnoreCase)))
                 {
-                    Debug.LogWarning("[TDU2] Spielstand: aktuelles Auto " + save.currentCar + " gehört nicht zu den eigenen Autos – nehme " + save.ownedCars[0]);
+                    Debug.LogWarning("Spielstand: aktuelles Auto " + save.currentCar + " gehört nicht zu den eigenen Autos – nehme " + save.ownedCars[0]);
                     save.currentCar = save.ownedCars[0];
                 }
                 car = Manager.FindCar(save.currentCar);
@@ -621,13 +621,13 @@ namespace TDU2.Map.Vehicles
             if (gp != null && !save.starterChosen && !TDU2IslandTravel.Pending && !string.IsNullOrEmpty(gp.StartIsland)
                 && !island.StartsWith(gp.StartIsland, StringComparison.OrdinalIgnoreCase) && TDU2IslandTravel.CanTravelTo(gp.StartIsland, Manager.BnkDir))
             {
-                Debug.Log("[TDU2] Neues Konto: Startinsel laut GamePC.cpr ist " + TDU2IslandTravel.DisplayName(gp.StartIsland));
+                DebugManager.Debug("Neues Konto: Startinsel laut GamePC.cpr ist " + TDU2IslandTravel.DisplayName(gp.StartIsland));
                 save.hasPosition = false;
                 TDU2IslandTravel.Go(gp.StartIsland, false);
                 return;
             }
             var home = gp?.FindHouse(Manager.Streamer?.Spots?.Spots);
-            if (gp != null && home == null && gp.Houses.Count > 0) Debug.LogWarning("[TDU2] GamePC.cpr: Standard-Haus " + string.Join("/", gp.Houses) + " liegt nicht auf " + island);
+            if (gp != null && home == null && gp.Houses.Count > 0) Debug.LogWarning("GamePC.cpr: Standard-Haus " + string.Join("/", gp.Houses) + " liegt nicht auf " + island);
             var dealer = FindSpot(string.IsNullOrEmpty(r.startSpot) ? "ESTOL_B" : r.startSpot);
             var spot = home ?? dealer;
             if (TDU2IslandTravel.Arriving)
@@ -635,14 +635,14 @@ namespace TDU2.Map.Vehicles
                 // Ankunft nach dem Flug: Flughafen der Insel (Spot EAIR*) bzw. Landeplatz (ELAND*), mit dem mitgenommenen Auto davor
                 var air = AirportSpot();
                 if (air != null) { spot = air; save.hasPosition = false; }
-                Debug.Log("[TDU2] Ankunft auf " + island + (air != null ? " am Flughafen " + air.Code : " (kein Flughafen-Spot gefunden)"));
+                DebugManager.Debug("Ankunft auf " + island + (air != null ? " am Flughafen " + air.Code : " (kein Flughafen-Spot gefunden)"));
             }
 
             // Gespeicherte Position muss auf dieser Insel liegen (nach einem Absturz während eines Inselwechsels konnten
             // Insel und Position auseinanderfallen -> Auto mitten im Nirgendwo / falsche Insel): sonst am Start-Spot beginnen
             if (save.hasPosition && string.Equals(save.island, island, StringComparison.OrdinalIgnoreCase) && !PositionOnIsland(new Vector3(save.px, save.py, save.pz)))
             {
-                Debug.LogWarning($"[TDU2] Spielstand: Position ({save.px:F0}, {save.pz:F0}) liegt nicht auf {island} – starte am Spot");
+                Debug.LogWarning($"Spielstand: Position ({save.px:F0}, {save.pz:F0}) liegt nicht auf {island} – starte am Spot");
                 save.hasPosition = false;
             }
 
@@ -661,7 +661,7 @@ namespace TDU2.Map.Vehicles
                     var inCar = car;
                     string stem = parts.Length > 1 ? parts[1] : "";
                     var at = last.Position2.sqrMagnitude > 1f ? last.Position2 : last.Position;
-                    Debug.Log("[TDU2] Spielstand: weiter im Interieur " + last.Code + (stem.Length > 0 ? " (" + stem + ")" : ""));
+                    DebugManager.Debug("Spielstand: weiter im Interieur " + last.Code + (stem.Length > 0 ? " (" + stem + ")" : ""));
                     BeginSpawn(at, new Vector3(Mathf.Sin(last.Heading2), 0f, Mathf.Cos(last.Heading2)), true, (p, q) =>
                     {
                         if (!interiors.EnterSpotRoom(last, stem, inCar)) SpawnCar(inCar, p, q);
@@ -717,7 +717,7 @@ namespace TDU2.Map.Vehicles
             var inter = Manager.GetComponent<TDU2Interiors>();
             if (spot == null || inter == null)
             {
-                Debug.LogWarning($"[TDU2] Start-Spot {r.startSpot} nicht gefunden – Startauto direkt");
+                Debug.LogWarning($"Start-Spot {r.startSpot} nicht gefunden – Startauto direkt");
                 OnStarterChosen(starters[0]);
                 BeginSpawn(Manager.Streamer.ViewerGamePosition, Vector3.forward, false, (p, q) => SpawnCar(starters[0], p, q));
                 return;
@@ -749,14 +749,14 @@ namespace TDU2.Map.Vehicles
             }
             if (cars.Count == 0)
             {
-                Debug.LogWarning("[TDU2] GamePC.cpr: weder DefaultCarConfig (" + string.Join(" ", gp.DefaultCar) + ") noch DefaultGarageConfig gefunden – Startauto beim Händler");
+                Debug.LogWarning("GamePC.cpr: weder DefaultCarConfig (" + string.Join(" ", gp.DefaultCar) + ") noch DefaultGarageConfig gefunden – Startauto beim Händler");
                 return false;
             }
             if (gp.DefaultMoney > 0) save.money = gp.DefaultMoney;
             for (int i = 1; i < cars.Count; i++) TDU2Session.AddOwned(cars[i].FileName);
             var car = cars[0];
             OnStarterChosen(car);
-            Debug.Log($"[TDU2] Neues Konto (GamePC.cpr): {car.FileName}" + (cars.Count > 1 ? " + Garage " + string.Join(", ", cars.GetRange(1, cars.Count - 1).ConvertAll(c => c.FileName)) : "") +
+            DebugManager.Debug($"Neues Konto (GamePC.cpr): {car.FileName}" + (cars.Count > 1 ? " + Garage " + string.Join(", ", cars.GetRange(1, cars.Count - 1).ConvertAll(c => c.FileName)) : "") +
                       $", {save.money} Geld, Start " + (home != null ? "im Haus " + string.Join("/", gp.Houses) : gp.HasStartPosition ? "an " + gp.StartPosition : "am Spot"));
 
             var interiors = Manager.GetComponent<TDU2Interiors>();
@@ -883,7 +883,7 @@ namespace TDU2.Map.Vehicles
             TDU2Session.AddOwned(car.FileName);
             TDU2Session.SetCurrentCar(car.FileName);
             TDU2Session.Save.starterChosen = true;
-            Debug.Log("[TDU2] Startauto gewählt: " + car.FileName);
+            DebugManager.Info("Startauto gewählt: " + car.FileName);
             _nextSave = Time.unscaledTime + 3f;   // kurz nach dem Losfahren speichern (dann mit Position)
             TDU2Session.SaveAsync();
         }

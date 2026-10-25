@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-namespace TDU2.Map.IO
+namespace TDU2.IO
 {
     /// <summary>Eintrag in einem TDU2-.bnk-Archiv.</summary>
     public sealed class BnkEntry

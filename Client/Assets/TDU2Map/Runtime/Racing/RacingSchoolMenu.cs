@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Reflection;
-using TDU2.Map.Flash;
-using TDU2.Map.Formats;
-using TDU2.Map.Online;
-using TDU2.Map.Vehicles;
+using TDU2.Flash;
+using TDU2.Formats;
+using TDU2.Online;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Rennschule (Interieur-Auslöser Typ 20 = Instruktor). Oberfläche ist der Original-Film frontend/&lt;res&gt;/r_school.bnk.
@@ -275,6 +275,7 @@ namespace TDU2.Map.Racing
             RaceTexts.Ensure(bnkDir, TDU2PauseMenu.SavedLanguage());
             _island = CurrentIsland();
             _school = SchoolFromSpot(_spotCode);
+
             if (_school == '\0' && !string.IsNullOrEmpty(FallbackSchool)) _school = char.ToUpperInvariant(FallbackSchool[0]);
             _licences.Clear();
             if (_repo?.Database != null) _licences.AddRange(_repo.Database.RacingSchools(_island, _school));
@@ -602,7 +603,7 @@ namespace TDU2.Map.Racing
         }
 
         // ------------------------------------------------------------------ Prüfung = private Sitzung
-        TDU2.Map.Traffic.TDU2Traffic _traffic; bool _trafficWas, _private;
+        TDU2.Traffic.TDU2Traffic _traffic; bool _trafficWas, _private;
 
         /// <summary>
         /// Während einer Prüfung: kein Verkehr (Rennschul-Prüfungen haben keinen), Mitspieler ausgeblendet und man selbst für
@@ -616,9 +617,9 @@ namespace TDU2.Map.Racing
             if (_traffic == null)
             {
 #if UNITY_2023_1_OR_NEWER
-                _traffic = FindFirstObjectByType<TDU2.Map.Traffic.TDU2Traffic>();
+                _traffic = FindFirstObjectByType<TDU2.Traffic.TDU2Traffic>();
 #else
-                _traffic = FindObjectOfType<TDU2.Map.Traffic.TDU2Traffic>();
+                _traffic = FindObjectOfType<TDU2.Traffic.TDU2Traffic>();
 #endif
             }
             if (_traffic != null)
@@ -626,7 +627,7 @@ namespace TDU2.Map.Racing
                 if (on) { _trafficWas = _traffic.EnableTraffic; _traffic.EnableTraffic = false; }
                 else _traffic.EnableTraffic = _trafficWas;
             }
-            TDU2.Map.Online.TDU2Multiplayer.Hidden = on && TDU2.Map.Online.TDU2OnlineSettings.HidePlayersInRacingSchool;
+            TDU2.Online.TDU2Multiplayer.Hidden = on && TDU2.Online.TDU2OnlineSettings.HidePlayersInRacingSchool;
         }
 
 

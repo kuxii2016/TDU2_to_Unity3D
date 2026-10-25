@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Text;
 using UnityEngine;
 
-namespace TDU2.Map.Flash
+namespace TDU2.Flash
 {
     /// <summary>
     /// Textsatz der Flash-Textfelder wie im Spiel:

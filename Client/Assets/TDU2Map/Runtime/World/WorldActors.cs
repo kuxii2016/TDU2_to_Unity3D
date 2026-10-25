@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>
     /// World Actors der Insel (islands/&lt;insel&gt;/scenarics/packs/worldactors.bnk): Ampeln (SF_Xin_*), Schilder (RS_*),
@@ -29,7 +29,7 @@ namespace TDU2.Map.World
             lib.Model = BankModel.Load(path, BankKind.Generic, false, false, false);
             var bank = lib.Model.Bank;
             textures?.IndexBank(bank);
-            try { TDU2.Map.Vehicles.InteriorFx.PrepareUva(bank); } catch (Exception) { }   // z.B. Pfeil-Schilder (fleche_*.uva)
+            try { TDU2.Interior.InteriorFx.PrepareUva(bank); } catch (Exception) { }   // z.B. Pfeil-Schilder (fleche_*.uva)
 
             var entEntry = bank.Find("entities.xmb");
             if (entEntry == null) { lib.Log.Add("entities.xmb fehlt"); return lib; }

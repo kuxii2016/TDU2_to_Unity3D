@@ -1,8 +1,8 @@
 using System.Collections.Generic;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 using UnityEngine;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>Ein Terrainstück (Teilrechteck eines Höhenrasters), zugeordnet zu einem Sektor oder einer Area.</summary>
     public sealed class TerrainPiece

@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.Avatars;
-using TDU2.Map.IO;
-using TDU2.Map.World;
+using TDU2.Avatars;
+using TDU2.IO;
+using TDU2.World;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Figuren eines Interieurs (Entity__PNJ: Verkäuferin, Friseur …) mit ihrem DBPNJ-Aussehen (ConfigName = DBPNJ._configid).
@@ -77,11 +77,11 @@ namespace TDU2.Map.Vehicles
             {
                 string cfgName = e.Node != null ? e.Node.S("ConfigName", "") : "";
                 var cfg = AvatarLibrary.PnjConfig(cfgName);
-                if (cfg == null) { Debug.Log("[TDU2] Interieur-Figur ohne DBPNJ: " + e.Name + " (" + cfgName + ")"); continue; }
+                if (cfg == null) { DebugManager.Debug("Interieur-Figur ohne DBPNJ: " + e.Name + " (" + cfgName + ")"); continue; }
                 // Nur Figuren mit einer Laufmodus-Szene (M_LIFE) stehen ständig im Raum; die übrigen treten nur in Cinematics
                 // auf (z.B. die Maklerin im Haus: M_REALTOR beim Kauf)
                 var life = FindActor(e.Hc, "LIFE");
-                if (life == null) { Debug.Log("[TDU2] Interieur-Figur " + e.Name + " (" + cfgName + ") nur in Cinematics – nicht aufgestellt"); continue; }
+                if (life == null) { DebugManager.Warning("Interieur-Figur " + e.Name + " (" + cfgName + ") nur in Cinematics – nicht aufgestellt"); continue; }
                 var npc = new Npc { ConfigName = cfgName, Name = e.Name, Hc = e.Hc };
                 var go = new GameObject("TDU2 Figur " + e.Name);
                 go.transform.SetParent(scene, false);
@@ -97,7 +97,6 @@ namespace TDU2.Map.Vehicles
                 }
                 npc.Avatar = TDU2Avatar.Create(go.transform, cfg, "TDU2 " + (AvatarLibrary.PnjName(cfgName) ?? e.Name));
                 Npcs.Add(npc);
-                Debug.Log("[TDU2] Interieur-Figur " + e.Name + ": " + cfgName + " (" + AvatarLibrary.PnjName(cfgName) + "), Pose " + (npc.Clip != null ? npc.Clip.Name : "-"));
             }
         }
 

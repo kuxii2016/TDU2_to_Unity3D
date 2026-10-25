@@ -3,10 +3,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 using UnityEngine;
 
-namespace TDU2.Map
+namespace TDU2
 {
     /// <summary>
     /// GamePC.cpr (Konfiguration der Original-exe, XTEA wie die übrigen .cpr) – nur die aktiven (nicht auskommentierten) Zeilen.
@@ -65,7 +65,7 @@ namespace TDU2.Map
                 {
                     var g = Parse(File.ReadAllBytes(f));
                     g.Path = f;
-                    Debug.Log($"[TDU2] GamePC.cpr: {f} – Start {g.StartIsland ?? "-"}, Haus {string.Join("/", g.Houses)}, " +
+                    DebugManager.Debug($"[TDU2] GamePC.cpr: {f} – Start {g.StartIsland ?? "-"}, Haus {string.Join("/", g.Houses)}, " +
                               $"Auto {string.Join(" ", g.DefaultCar)}, Garage {string.Join(" ", g.GarageCars)}, Geld {g.DefaultMoney}" +
                               (g.HasStartPosition ? $", Position {g.StartPosition}" : ""));
                     _cached = g; _cachedKey = key;

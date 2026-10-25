@@ -1,11 +1,11 @@
 using System;
 using System.Collections;
 using System.IO;
-using TDU2.Map.Online;
+using TDU2.Online;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Inselwechsel (Flug am Flughafen, oder Spielstand auf der anderen Insel beim Anmelden):

@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Avatars
+namespace TDU2.Avatars
 {
     /// <summary>
     /// .xsb – Skelett (Eden-Container ".XSB", Segment SKEL):

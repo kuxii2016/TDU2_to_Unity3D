@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Map.IO;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Flash
+namespace TDU2.Flash
 {
     /// <summary>
     /// Inhalt eines VMF-Films (siehe Docs/TDU2_VMF_Flash_Format.md): Charaktere (Shapes, Sprites, Bitmaps, Textfelder)

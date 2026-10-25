@@ -1,9 +1,9 @@
 using System.Collections.Generic;
-using TDU2.Map.Formats;
+using TDU2.Formats;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>
     /// Erzeugt Gras/Büsche um den Betrachter aus der Grastyp-Karte (.pgr) eines Sektors.

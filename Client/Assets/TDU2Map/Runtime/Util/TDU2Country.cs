@@ -1,6 +1,6 @@
 ﻿using System.Globalization;
 
-namespace Assets.TDU2Map.Runtime.Util
+namespace TDU2
 {
     public enum TDU2Country : byte
     {

@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using TDU2.Map.Formats;
-using TDU2.Map.IO;
+using TDU2.Formats;
+using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Ton in Interieurs wie im Spiel: Autoradio aus, stattdessen die Spot-Musik aus sound/musics (MngMusic, "%sSound/Musics/%s").
@@ -152,9 +152,9 @@ namespace TDU2.Map.Vehicles
                     var clip = AudioClip.Create("SpotMusic_" + name, data.Length / ch, ch, rate, false);
                     clip.SetData(data, 0);
                     Play(clip);
-                    Debug.Log("[TDU2] Spot-Musik: " + name + ".wav");
+                    DebugManager.Info("Spot-Musik: " + name + ".wav");
                 }
-                else if (!t.IsFaulted && _inside && t.Result.name != null) Debug.LogWarning("[TDU2] Spot-Musik " + t.Result.name + ".wav konnte nicht dekodiert werden");
+                else if (!t.IsFaulted && _inside && t.Result.name != null) DebugManager.Error("Spot-Musik " + t.Result.name + ".wav konnte nicht dekodiert werden");
             }
             if (_src != null)
             {

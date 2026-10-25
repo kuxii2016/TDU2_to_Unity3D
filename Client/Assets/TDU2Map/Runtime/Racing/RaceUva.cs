@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Textur-Animation (.uva, "ANM!", Docs/tdu2-specs.md §5.5): Spuren Rotation, U-/V-Versatz, U-/V-Skalierung, linear zwischen

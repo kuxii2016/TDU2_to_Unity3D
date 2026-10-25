@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace TDU2.Map.Flash
+namespace TDU2.Flash
 {
     /// <summary>
     /// Einfache Helfer für die Arbeit mit den Flash-Filmen (Pfade wie im Spiel: "/menus/profile/profile2", Variablen "/:Name"

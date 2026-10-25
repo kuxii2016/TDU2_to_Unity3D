@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace TDU2.Map
+namespace TDU2
 {
     /// <summary>
     /// Floating Origin gegen Zittern bei großen Koordinaten (Inseln ~35 km, float hat bei 16 km nur noch ~2 mm Auflösung):

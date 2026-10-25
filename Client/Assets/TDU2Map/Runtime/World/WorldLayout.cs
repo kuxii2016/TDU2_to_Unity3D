@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     public readonly struct AreaKey : IEquatable<AreaKey>
     {

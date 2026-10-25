@@ -2,13 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Threading.Tasks;
-using TDU2.Map.Flash;
-using TDU2.Map.Formats;
-using TDU2.Map.Online;
-using TDU2.Map.Racing;
+using TDU2.Flash;
+using TDU2.Formats;
+using TDU2.Online;
+using TDU2.Racing;
 using UnityEngine;
 
-namespace TDU2.Map.Vehicles
+namespace TDU2.Vehicles
 {
     /// <summary>
     /// Autohändler wie im Spiel (shopscar.vmf, WhatPage "car_dealer"):
@@ -96,7 +96,7 @@ namespace TDU2.Map.Vehicles
         void SetDealerPhase(DPhase p)
         {
             if (_dPhase == p) return;
-            Debug.Log("[TDU2] " + (_garageMenu ? "Garage" : "Autohändler") + ": " + _dPhase + " -> " + p + (p == DPhase.Idle ? " (BtValid " + (_ui?.GetVariable("/:BtValid") ?? "") + ")" : ""));
+            DebugManager.Debug((_garageMenu ? "Garage" : "Autohändler") + ": " + _dPhase + " -> " + p + (p == DPhase.Idle ? " (BtValid " + (_ui?.GetVariable("/:BtValid") ?? "") + ")" : ""));
             _dPhase = p; _dPhaseAt = Time.unscaledTime;
         }
 
@@ -198,8 +198,8 @@ namespace TDU2.Map.Vehicles
             if (!_ui.CallClip("/", fn)) { _dealerMenu = false; CasinoMenuOpen = false; LockCursor(true); return false; }
             _ui.SetVisible("/cursor/mini_menu", true);
             _ui.SetValue("/:Input", true);
-            if (garage) Debug.Log("[TDU2] Garage: Menü für " + dc.Car.FileName + (GuestGarageCars != null ? " (Gast)" : ""));
-            else Debug.Log("[TDU2] Autohändler: Menü für " + dc.Car.FileName + " (" + _dRims.Count + " Felgen, " + _dColors.Count + " Lackfarben, " + _dInts.Count + " Innenräume)");
+            if (garage) DebugManager.Debug("Garage: Menü für " + dc.Car.FileName + (GuestGarageCars != null ? " (Gast)" : ""));
+            else DebugManager.Debug("Autohändler: Menü für " + dc.Car.FileName + " (" + _dRims.Count + " Felgen, " + _dColors.Count + " Lackfarben, " + _dInts.Count + " Innenräume)");
             return true;
         }
 
@@ -244,7 +244,6 @@ namespace TDU2.Map.Vehicles
             }
             _uiAim = null; _dChanged = false; _dIdleSince = -1f;
             if (Inside) { LockCursor(true); if (_fp != null) _fp.LookEnabled = true; }
-            Debug.Log("[TDU2] " + (_garageMenu ? "Garage" : "Autohändler") + ": Menü geschlossen" + (_compareCar != null ? " (Vergleich mit " + _compareCar.FileName + ")" : ""));
         }
 
         /// <summary>Beim Verlassen/Neuaufbau der Szene: Händlerzustand ohne Film zurücksetzen.</summary>
@@ -501,7 +500,6 @@ namespace TDU2.Map.Vehicles
             _ui.SetValue("/:hasChangeOption", true);
             SetOptionVars(m);
             _ui.GotoLabel("/buy", "next", true);   // -> options_stop: Fenster neu befüllen (Titel, Preise, Farbfelder, Pfeile)
-            Debug.Log("[TDU2] Autohändler: Seite " + m + (m == 1 ? " (Felgen)" : m == 2 ? " (Lack)" : " (Innenraum)"));
         }
 
         // ================================================================== Befehle des Films
@@ -547,7 +545,6 @@ namespace TDU2.Map.Vehicles
                 case "comp":                                   // Vergleichen: dieses Auto ist jetzt das Vergleichsauto
                     _compareCar = _dealerCar?.Car;
                     if (_compareCar != null) { FillCarData(_compareCar, true); _ui.SetValue("/:IsCompare", true); }
-                    Debug.Log("[TDU2] Vergleich mit " + _compareCar?.FileName);
                     return true;
                 case "rsco":                                   // Vergleich aufheben
                     _compareCar = null; _ui.SetValue("/:IsCompare", false);
@@ -587,7 +584,6 @@ namespace TDU2.Map.Vehicles
             }
             if (kase == "vehicle_full") { EndDealerCar(); _ui.SetValue("/:Input", true); return; }   // Einsteigen-Zeitüberschreitung
             string answer = kase == "em_0" || kase == "em_2" ? "b" : "a";
-            Debug.Log("[TDU2] Autohändler: Dialog '" + kase + "' -> " + answer);
             _ui.SetVariable("/:PlayerAnswer", answer);
             if (!_ui.CallClip("/", "DialogBox")) _ui.SetValue("/:Input", true);
         }
@@ -627,7 +623,6 @@ namespace TDU2.Map.Vehicles
             TDU2CarChoices.Set(dc.Car.FileName, choice);
             RememberOwned(dc.Car);
             if (TDU2Session.LoggedIn) TDU2Session.SaveAsync();
-            Debug.Log("[TDU2] Autohändler: " + dc.Car.FileName + " gekauft für " + Money(total) + " (" + choice + ")");
             // wie im Spiel: Fenster schließt, danach fährt man mit dem neuen Auto hinaus
             EndLure();
             _driveOutCar = dc.Car;
@@ -682,7 +677,7 @@ namespace TDU2.Map.Vehicles
             bool up = Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W), down = Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S);
             bool left = Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A), right = Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D);
             if (ok || up || down || left || right)
-                Debug.Log("[TDU2] Menü-Taste " + (ok ? "OK" : up ? "hoch" : down ? "runter" : left ? "links" : "rechts") + " in " + phase + " (Mini " + (_ui.Label("/cursor/mini_menu") ?? "-") + ", Kauf " + (_ui.Label("/buy") ?? "-") + ", Input " + _ui.GetVariable("/:Input") + ")");
+                DebugManager.Debug("Menü-Taste " + (ok ? "OK" : up ? "hoch" : down ? "runter" : left ? "links" : "rechts") + " in " + phase + " (Mini " + (_ui.Label("/cursor/mini_menu") ?? "-") + ", Kauf " + (_ui.Label("/buy") ?? "-") + ", Input " + _ui.GetVariable("/:Input") + ")");
             if (phase == DPhase.Window)
             {
                 if (ok) { _ui.SetValue("/:Input", true); _ui.CallClip("/buy", "A"); }
@@ -783,8 +778,6 @@ namespace TDU2.Map.Vehicles
                 bool found = _ui.SetClipTexture(BuyLure, _lureShow, true);   // über den Fensterteilen des Films
                 _lureSnap = true;
                 _lureProbeAt = Time.unscaledTime + 0.8f;
-                Debug.Log("[TDU2] Händler-Vorschau: Kamera " + w + "x" + h + ", Clip " + BuyLure + (found ? " gefunden" : " NICHT gefunden") +
-                          ", Bildschirm " + (sr.HasValue ? sr.Value.ToString() : "-") + ", Hauptkamera " + main.name + " (Maske " + main.cullingMask + ", " + main.clearFlags + ")");
             }
             _lureCam.enabled = true;
             if (page != _lurePage) { _lurePage = page; }
@@ -820,10 +813,8 @@ namespace TDU2.Map.Vehicles
                 RenderTexture.active = prev;
                 Destroy(t);
                 var d = _ui?.Find(BuyLure);
-                Debug.Log("[TDU2] Händler-Vorschau: Mitte " + c + ", Kamera an " + (_lureCam != null && _lureCam.enabled) + " bei " + (_lureCam != null ? _lureCam.transform.position.ToString() : "-") +
-                          ", Clip " + (d == null ? "fehlt" : (d.Visible ? "sichtbar" : "unsichtbar") + ", Textur " + (d.DynTex != null ? d.DynTex.name : "keine")));
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Händler-Vorschau: " + ex.Message); }
+            catch (Exception ex) { DebugManager.Error("Dealer-Preview: " + ex.Message); }
         }
 
         void LurePose(DisplayCar dc, int page, out Vector3 pos, out Quaternion rot, out float fov)
@@ -927,7 +918,6 @@ namespace TDU2.Map.Vehicles
             _ui.SetVisible("/enter_car", true);   // Ladeanzeige / Innenansicht des Films (im Laufmodus ausgeblendet)
             _ui.SetValue("/:CanEnterCar", true);   // Lader (enter_car/cmon_loader) -> endLoading: Hilfeleiste "in_car", cain, shin
             LockCursor(true);
-            Debug.Log("[TDU2] Eingestiegen in " + dc.Car.FileName + " (I Motor, W Gas, H Hupe, B Rückblick, V Zubehör, K Türen, N Fenster, Klick auf Tür/Scheibe/Lenkrad, ESC aussteigen)");
         }
 
         /// <summary>Augenpunkt und Blickziel des Fahrers (camerasingame Modus 23 bzw. Rückblick).</summary>
@@ -1077,7 +1067,6 @@ namespace TDU2.Map.Vehicles
             if (cam != null) { cam.transform.SetPositionAndRotation(_inCamPos, _inCamRot); cam.fieldOfView = _inCamFov; cam.nearClipPlane = _inCamNear; }
             if (_fp != null && _inFpWas) { _fp.enabled = true; _fp.LookEnabled = false; }
             _inCar = null;
-            Debug.Log("[TDU2] Autohändler: ausgestiegen");
         }
 
         /// <summary>
@@ -1170,12 +1159,12 @@ namespace TDU2.Map.Vehicles
             {
                 var t = _previewTask; _previewTask = null;
                 var target = _previewFor;
-                if (t.IsFaulted) Debug.LogWarning("[TDU2] Autohändler-Vorschau: " + t.Exception?.GetBaseException().Message);
+                if (t.IsFaulted) DebugManager.Error("Autohändler-Vorschau: " + t.Exception?.GetBaseException().Message);
                 else if (target == null || !_cars.Contains(target) || _holder == null || _carIn != CarIn.None) t.Result?.DestroyTextures();
                 else
                 {
                     try { ReplaceDisplayCar(target, t.Result, _loadingChoice); }
-                    catch (Exception ex) { Debug.LogWarning("[TDU2] Autohändler-Vorschau: " + ex.Message); t.Result?.DestroyTextures(); }
+                    catch (Exception ex) { DebugManager.Error("Autohändler-Vorschau: " + ex.Message); t.Result?.DestroyTextures(); }
                 }
             }
             if (!_previewDirty || _previewTask != null || Time.unscaledTime < _previewAt || _carIn != CarIn.None) return;
@@ -1233,7 +1222,7 @@ namespace TDU2.Map.Vehicles
             _testCar = car; _testSpot = spot; _testPrev = prev;
             _testEnd = Time.time + Mathf.Max(10f, TestDriveSeconds);
             _testHud = false; _testLastSec = -1;
-            Debug.Log("[TDU2] Testfahrt: " + car.FileName + " (" + choice + "), " + TestDriveSeconds.ToString("0", CultureInfo.InvariantCulture) + " s");
+            DebugManager.Info("Testdrive: " + car.FileName + " (" + choice + "), " + TestDriveSeconds.ToString("0", CultureInfo.InvariantCulture) + " s");
             ExitInterior(car);
             _lastCar = prev;   // ExitInterior merkt sich sonst den Leihwagen
         }
@@ -1263,7 +1252,6 @@ namespace TDU2.Map.Vehicles
             if (left > 0f || Inside || Manager.IsLoadingCar) return;
             var spot = _testSpot; var prev = _testPrev;
             StopTestDrive();
-            Debug.Log("[TDU2] Testfahrt beendet – zurück zum Händler " + spot?.Code);
             if (spot != null && !EnterSpot(spot, prev) && prev != null && Manager.Current != null)
                 Manager.SpawnCar(prev, Manager.Current.transform.position, Manager.Current.transform.rotation);
         }
@@ -1291,7 +1279,6 @@ namespace TDU2.Map.Vehicles
             StopTestDrive();
             Manager.RemoveCar();
             _lastCar = prev;
-            Debug.Log("[TDU2] Testfahrt abgebrochen (Interieur betreten)");
         }
     }
 }

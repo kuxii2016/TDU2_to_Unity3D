@@ -2,7 +2,7 @@ using System;
 using System.Globalization;
 using UnityEngine;
 
-namespace TDU2.Map.Racing
+namespace TDU2.Racing
 {
     /// <summary>
     /// Fortschritt der Rennschule (lokal, PlayerPrefs): bestandene Prüfungen, Bestzeiten, erworbene Lizenzen mit Datum.

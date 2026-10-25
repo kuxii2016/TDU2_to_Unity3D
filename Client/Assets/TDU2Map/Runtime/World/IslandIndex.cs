@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>
     /// Findet alle Map-Dateien einer Insel:

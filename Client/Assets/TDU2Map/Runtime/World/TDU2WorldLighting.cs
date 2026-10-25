@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace TDU2.Map.World
+namespace TDU2.World
 {
     /// <summary>
     /// Welt-Beleuchtung wie im Original (TD_Building/TD_Vegetation/TD_HeightMap, Gamma-Raum):
