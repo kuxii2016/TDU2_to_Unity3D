@@ -256,10 +256,16 @@ namespace TDU2.Vehicles
     public static class CarMaterials
     {
         public static Shader Opaque, Glass;
+        /// <summary>Lackverlauf RAMPCLR1 -> RAMPCLR2 (RAMPPOW.x) im Shader TDU2/Car benutzen.</summary>
+        public static bool PaintRamp = true;
+        /// <summary>Wird während des Aufbaus von Felgen gesetzt (Rad-Materialien wie im Original: Farbe = RAMPCLR1, auch schwarz;
+        /// keine Chrom-Spiegelung bei ENVCOEFF 0).</summary>
+        public static bool WheelPass;
         static readonly ulong SemFlake = Bin.KeyFromString("FLAKE");
         static readonly ulong SemTexLight = Bin.KeyFromString("TEXLIGHT");
         /// <summary>lgt_g: Function mask for the light lenses – R = Brake light, G = Reverse light, B = Light (headlight/taillight), A = 0 → Turn signal.</summary>
         static readonly ulong SemGlossLight = MaterialDef.KeyFromName("GLOSSLIGHT");
+        static readonly ulong SemGloss = Bin.KeyFromString("GLOSS");
 
         public static Material Create(MaterialDef def, Func<ulong, TextureWrapMode, TextureWrapMode, Texture2D> getTex, MaterialDef paint, MaterialDef tint = null, bool interior = false)
         {
@@ -308,6 +314,11 @@ namespace TDU2.Vehicles
                 col = new Color(colorSrc.Diffuse.r, colorSrc.Diffuse.g, colorSrc.Diffuse.b, 1f);
             else if (tex == null && colorSrc.TryGetParam("RAMPCLR1", out var rc0)) col = new Color(rc0.x, rc0.y, rc0.z, 1f);
 
+            // Felgen: RAMPCLR1 gilt immer, auch (0,0,0) mit Textur (z.B. One_77_F_10: halbtransparente Schattenschicht über dem
+            // Stern – bisher weiß statt schwarz, dadurch wirkte die ganze Felge weiß).
+            bool wheel = WheelPass && !aoMask && tint == null && paint == null;
+            if (wheel && colorSrc.TryGetParam("RAMPCLR1", out var wc)) col = new Color(wc.x, wc.y, wc.z, 1f);
+
             float smooth = 0.35f, metal = 0f;
             if (src.TryGetParam("SPECPARM", out var sp) && sp.x > 0f) smooth = Mathf.Clamp01(Mathf.Log10(Mathf.Max(1f, sp.x)) / 3.1f);
             bool flake = src.TryGetLayer(SemFlake, out _);
@@ -315,12 +326,37 @@ namespace TDU2.Vehicles
             if (isPaint) { smooth = 0.88f; metal = flake ? 0.35f : 0.1f; }
             if (name.Contains("chrome") || name.Contains("metal") || name.Contains("alu")) { metal = 0.9f; smooth = Mathf.Max(smooth, 0.8f); }
             if (name.Contains("mirror")) { metal = 1f; smooth = 0.97f; col = new Color(0.8f, 0.8f, 0.8f); }
+            // Felge ohne Umgebungsspiegelung (ENVCOEFF 0, z.B. DBS "Metal"): kein Chrom – metallisch 0.9 spiegelte den hellen Himmel (weiß)
+            bool wheelNoEnv = wheel && (!src.TryGetParam("ENVCOEFF", out var env) || (env.x + env.y + env.z + env.w) < 0.001f);
+            if (wheelNoEnv) { metal = Mathf.Min(metal, 0.3f); smooth = Mathf.Min(smooth, 0.6f); }
 
             Material m;
+            // Außenspiegel: rechteckige Spiegel-Fläche, die Form steckt im Alpha der Detail-Textur (z.B. r8_v10_details: Spiegel-Umriss,
+            // Material-Flags Alpha-Test 0x7f). Unabhängig vom Blend-Zustand immer ausschneiden – sonst ragt die Fläche über das Gehäuse.
+            // Die Maske steht je nach Auto in DETAIL oder – bei leerer DETAIL-Ebene (California "Mirror"/"Mirror_Int") – in GLOSS:
+            // außen DXT5 (Alpha = Umriss im Detail-Atlas), innen DXT1 ohne Alpha (Umriss weiß auf schwarz -> Rotkanal).
+            Texture2D mirrorMask = null;
+            if (name.Contains("mirror"))
+            {
+                if (tex != null && tex.format != TextureFormat.DXT1) mirrorMask = tex;   // DETAIL mit Alpha-Umriss
+                if (mirrorMask == null && src.TryGetLayer(SemGloss, out var gll) && gll.TextureKey != 0)
+                    mirrorMask = getTex(gll.TextureKey, TextureDef.WrapFromEden(gll.AddressU), TextureDef.WrapFromEden(gll.AddressV));
+            }
+            bool mirrorCut = mirrorMask != null;
+            bool mirrorRed = mirrorCut && mirrorMask != tex && (mirrorMask.format == TextureFormat.DXT1 || mirrorMask.format == TextureFormat.RGB24);
+            if (mirrorCut) tex = mirrorMask;
             // Glass with an opaque render status (blending off, e.g., traffic cars without interiors): opaque and reflective, just like in the game
             bool opaqueGlass = name.Contains("glass") && !alphaBlend && !additive && f[10] == 6 && f[8] == 2 && f[9] == 1
                                && (tex == null || tex.format == TextureFormat.DXT1);   // Glastextur ohne Alpha
-            if (opaqueGlass)
+            if (mirrorCut)
+            {
+                m = new Material(Opaque);
+                m.SetFloat("_Glossiness", smooth);
+                m.SetFloat("_Metallic", metal);
+                if (m.HasProperty("_Cutoff")) m.SetFloat("_Cutoff", f[7] > 2 ? Mathf.Clamp(alphaRef, 0.05f, 0.9f) : 0.5f);
+                if (mirrorRed && m.HasProperty("_AlphaFromRed")) m.SetFloat("_AlphaFromRed", 1f);
+            }
+            else if (opaqueGlass)
             {
                 m = new Material(Opaque);
                 if (tex == null) col = new Color(0.08f, 0.09f, 0.1f, 1f);
@@ -348,6 +384,14 @@ namespace TDU2.Vehicles
             }
             m.color = col;
             if (m.HasProperty("_Color")) m.SetColor("_Color", col);
+            // Lackverlauf wie im Original: RAMPCLR1 frontal, RAMPCLR2 streifend, Exponent RAMPPOW.x (z.B. One-77 ohne Lack-
+            // Bibliothek: hellblau -> dunkelblau mit RAMPPOW 10; bisher nur hellblau)
+            if ((isPaint || wheel) && PaintRamp && m.HasProperty("_RampPow") && colorSrc.TryGetParam("RAMPPOW", out var rpw) && rpw.x >= 1f
+                && colorSrc.TryGetParam("RAMPCLR2", out var rc2) && (rc2.x + rc2.y + rc2.z) > 0.001f)
+            {
+                m.SetColor("_Color2", new Color(rc2.x, rc2.y, rc2.z, 1f));
+                m.SetFloat("_RampPow", Mathf.Min(rpw.x, 16f));
+            }
             if (tex != null) m.mainTexture = tex;
             if (aoMask && m.HasProperty("_MainGray")) { m.SetFloat("_MainGray", 1f); m.SetFloat("_Glossiness", 0.18f); m.SetFloat("_Metallic", 0f); }
             if (overlay != null && m.HasProperty("_StickerTex"))
@@ -385,6 +429,9 @@ namespace TDU2.Vehicles
                 else if (metal > 0.8f) m.SetFloat("_ClearCoat", 0.35f);
             }
             m.name = def.Name ?? "Car";
+            if (wheel)
+                TDU2Diag.Log("FELGE", $"{m.name}: Shader {m.shader.name}, Farbe ({col.r:0.00},{col.g:0.00},{col.b:0.00},{col.a:0.00}), Textur {(tex != null ? tex.name + " " + tex.format : "keine")}, "
+                    + $"metallisch {metal:0.00}, glatt {smooth:0.00}, Flags {f[5]}/{f[7]}/{f[8]}/{f[9]}/{f[10]}, Verlauf {(m.HasProperty("_RampPow") ? m.GetFloat("_RampPow") : 0f):0.#}");
             return m;
         }
 
@@ -688,7 +735,8 @@ namespace TDU2.Vehicles
                     if (rimNode == null) rimNode = cm.Find(front ? "WHR_F" : "WHR_R");
                     if (rimScene != null && rimNode != null)
                     {
-                        cm.BuildScene(rimScene, rimNode, getTex, matCache, d => null, n => false);
+                        CarMaterials.WheelPass = true;
+                        try { cm.BuildScene(rimScene, rimNode, getTex, matCache, d => null, n => false); } finally { CarMaterials.WheelPass = false; }
                         rimMeshR = RimRadius(rimScene) * Mathf.Abs(rimNode.localScale.y);
                     }
                     var tireScene = front ? a.Tire : (a.TireRear ?? a.Tire);
@@ -710,7 +758,8 @@ namespace TDU2.Vehicles
                     float rimMeshR = 0f;
                     if (rimScene != null && cm.Nodes.TryGetValue("D_RIM_" + w, out var rimNode))
                     {
-                        cm.BuildScene(rimScene, rimNode, getTex, matCache, d => null, n => false);
+                        CarMaterials.WheelPass = true;
+                        try { cm.BuildScene(rimScene, rimNode, getTex, matCache, d => null, n => false); } finally { CarMaterials.WheelPass = false; }
                         rimMeshR = RimRadius(rimScene) * Mathf.Abs(rimNode.localScale.y);
                     }
                     var tireScene = front ? a.Tire : (a.TireRear ?? a.Tire);

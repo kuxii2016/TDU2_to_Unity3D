@@ -6,8 +6,10 @@ Shader "TDU2/Car"
         _Color ("Farbe", Color) = (1,1,1,1)
         _Color2 ("Zweite Farbe (Bicolor-Lack)", Color) = (1,1,1,1)
         _Bicolour ("Bicolor-Lack", Range(0,1)) = 0
+        _RampPow ("Lackverlauf RAMPPOW.x (0 = aus)", Float) = 0
         _MainTex ("Textur (DETAIL)", 2D) = "white" {}
         _MainGray ("Textur nur Rotkanal als Helligkeit", Float) = 0
+        _AlphaFromRed ("Alpha aus dem Rotkanal (Spiegel-Maske ohne Alpha)", Float) = 0
 
         _Heat ("Hitze", Range(0,1)) = 0
         _HeatColor ("Glühfarbe", Color) = (1,0.25,0.04,1)
@@ -98,7 +100,9 @@ Shader "TDU2/Car"
         fixed4 _BlinkLightColor;
 
         half _Bicolour;
+        half _RampPow;
         half _MainGray;
+        half _AlphaFromRed;
         half _Heat;
         half _Glossiness;
         half _Metallic;
@@ -148,7 +152,16 @@ Shader "TDU2/Car"
         {
             fixed4 baseCol = _Color;
 
-            if (_Bicolour > 0.001)
+            // Original-Autolack (TD_CarPaint): Farbverlauf RAMPCLR1 (zur Kamera) -> RAMPCLR2 (streifend), Exponent RAMPPOW.x
+            if (_RampPow > 0.001)
+            {
+                float ndvR = saturate(dot(
+                    normalize(IN.worldNormal),
+                    normalize(_WorldSpaceCameraPos - IN.worldPos)
+                ));
+                baseCol.rgb = lerp(_Color2.rgb, _Color.rgb, pow(ndvR, _RampPow));
+            }
+            else if (_Bicolour > 0.001)
             {
                 float ndvB = saturate(dot(
                     normalize(IN.worldNormal),
@@ -163,6 +176,8 @@ Shader "TDU2/Car"
             }
 
             fixed4 tx = tex2D(_MainTex, IN.uv_MainTex);
+            // Innenspiegel (Mirror_Int): Umriss weiß auf schwarz in einer DXT1-Textur ohne Alpha (GLOSS-Ebene) -> Maske = Rotkanal
+            if (_AlphaFromRed > 0.5) { tx.a = tx.r; tx.rgb = 1; }
 
             if (_MainGray > 0.5)
                 tx.rgb = tx.rrr;

@@ -34,7 +34,7 @@ namespace TDU2.Vehicles
 
         enum Kind { Dealer, Living, Garage, StickerShop, Other }
 
-        sealed class SpotBanks { public bool Valid, IsClub, IsCasino; public Kind Kind; public string Living, Garage, Name; public string TravelTo; }
+        sealed class SpotBanks { public bool Valid, IsClub, IsCasino, CarWash; public Kind Kind; public string Living, Garage, Name; public string TravelTo; }
 
         sealed class DisplayCar
         {
@@ -88,6 +88,10 @@ namespace TDU2.Vehicles
 
         const string OwnedKey = "TDU2.OwnedCars";
         public bool Inside => _spot != null;
+        /// <summary>Im Garagen-Raum (Haus) – für TDU2GameMode.</summary>
+        public bool InGarageRoom => _spot != null && _kind == Kind.Garage;
+        /// <summary>Im Sticker-/Lackier-Shop – für TDU2GameMode.</summary>
+        public bool InStickerShop => _spot != null && _kind == Kind.StickerShop;
         /// <summary>Spot des Interieurs, in dem man gerade ist (null = draußen).</summary>
         public Spot CurrentSpot => _spot;
         /// <summary>Interieur betreten (Spot) bzw. verlassen – z.B. für Spot-Musik/Radio (TDU2SpotAudio).</summary>
@@ -168,7 +172,8 @@ namespace TDU2.Vehicles
             if (_nearSpot != null && !TDU2GameData.ChatTyping && (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)))
             {
                 if (mm != null) mm.ShowEnter(null);
-                if (!string.IsNullOrEmpty(_nearBanks.TravelTo)) Travel(_nearSpot, _nearBanks);
+                if (_nearBanks.CarWash) StartCarWash(_nearSpot);
+                else if (!string.IsNullOrEmpty(_nearBanks.TravelTo)) Travel(_nearSpot, _nearBanks);
                 else Enter(_nearSpot, _nearBanks);
             }
 #endif
@@ -243,11 +248,16 @@ namespace TDU2.Vehicles
                 {
                     b.Living = Bank("i" + code.Substring(1)); b.Kind = Kind.Dealer; b.Name = code.StartsWith("ebd") ? "Motorradhändler" : "Autohändler";
                 }
+                else if (code.StartsWith("ecw"))
+                {
+                    // Waschanlage (ECW_*): kein Interieur – Kinos/Menü aus der Exterior-Bank (TDU2CarWash)
+                    b.CarWash = TDU2CarWash.ExteriorBank(Manager, s) != null; b.Kind = Kind.Other; b.Name = "Waschanlage";
+                }
                 else if (code.Length > 1 && code[0] == 'e')
                 {
                     b.Living = Bank("i" + code.Substring(1)); b.Kind = Kind.Other; b.Name = SpotsFile.CategoryFromCode(s.Code);
                 }
-                b.Valid = b.Living != null || b.Garage != null;
+                b.Valid = b.Living != null || b.Garage != null || b.CarWash;
             }
             catch (Exception) { b.Valid = false; }
             _banks[code] = b;
@@ -265,6 +275,18 @@ namespace TDU2.Vehicles
             }
             catch (Exception) { }
             return null;
+        }
+
+        /// <summary>Waschanlage: nur mit Auto (Einfahrt), Ablauf in <see cref="TDU2CarWash"/>.</summary>
+        void StartCarWash(Spot s)
+        {
+            if (Manager.Current == null) { ShowInfo("Waschanlage: nur mit dem Auto"); return; }
+            var cw = GetComponent<TDU2CarWash>();
+            if (cw == null) cw = gameObject.AddComponent<TDU2CarWash>();
+            cw.Manager = Manager;
+            _nearSpot = null; _nearBanks = null;
+            if (!cw.Begin(s)) ShowInfo("Waschanlage nicht verfügbar");
+            _nextScan = Time.unscaledTime + 2f;
         }
 
         /// <summary>Landeplatz: Flug zur Casino-Insel bzw. zurück nach Hawaii (Szene mit der Zielinsel neu laden).</summary>
@@ -311,7 +333,7 @@ namespace TDU2.Vehicles
         {
             if (s == null || Manager == null) return false;
             var b = Resolve(s);
-            if (!b.Valid) return false;
+            if (!b.Valid || b.CarWash) return false;   // Waschanlage hat kein Interieur (Karte/Spielstand: Auto davor)
             if (Inside) ExitInterior(null, false);
             // gerade gefahrenes Auto (z.B. Prüfungsauto) NICHT als eigenes/aktuelles Auto speichern: vorher entfernen
             Manager.RemoveCar();
@@ -521,7 +543,7 @@ namespace TDU2.Vehicles
             if (_kind == Kind.Dealer && _starterCars != null) cars.AddRange(_starterCars);
             else if (_kind == Kind.Dealer)
             {
-                var shop = Manager.Database.ShopFor(_spot.Code);
+                var shop = Manager.Database.ShopForSpot(_spot, IslandOf());
                 if (shop != null)
                     foreach (int id in shop.CarIds)
                         if (id != 0 && Manager.Database.ById.TryGetValue(id, out var c)) { var av = Manager.FindCar(c.FileName); if (av != null && !cars.Contains(av)) cars.Add(av); }
@@ -552,7 +574,7 @@ namespace TDU2.Vehicles
                     foreach (var c in OwnedCars())
                         if (!cars.Contains(c)) cars.Add(c);
                 }
-                var house = Manager.Database.HouseFor(_spot.Code);
+                var house = Manager.Database.HouseForSpot(_spot, IslandOf());
                 int max = house != null && house.CarSlots > 0 ? house.CarSlots : data.CarSlots.Count;
                 if (cars.Count > max) cars.RemoveRange(max, cars.Count - max);
             }
@@ -1206,6 +1228,9 @@ namespace TDU2.Vehicles
             if (_casinoMenu) { UpdateCasinoMenu(); return; }
             if ((_myHouse != HouseMode.None || _houseRestoreAt > 0f) && UpdateMyHouse()) return;
             if (_diaryOpen) { UpdateDiary(); return; }
+            // TDU Media (Fernseher): Film hat Tastatur/Maus, Laufen und Umsehen ruhen bis zum Schließen
+            if (TDU2TDUMedia.IsOpen) { if (_fp != null && _fp.enabled) { _fp.enabled = false; _tvFroze = true; } return; }
+            if (_tvFroze) { _tvFroze = false; if (_fp != null) { _fp.enabled = true; _fp.LookEnabled = true; } LockCursor(true); }
             if (_dealerMenu)
             {
                 // Autohändler/Garage: Mini-Menü, Kauffenster, Daten, Einsteigen (TDU2CarDealer.cs). Ein Fehler darf das Spiel nicht
@@ -1276,14 +1301,21 @@ namespace TDU2.Vehicles
             // Hotspots (FpSelectable-Volumen, Spielraum der Szene)
             var o = _holder.InverseTransformPoint(ray.origin);
             var d = _holder.InverseTransformDirection(ray.direction);
+            if (!ReferenceEquals(_hotspotsLogged, _data)) { _hotspotsLogged = _data; LogHotspots(); }
+            InteriorScene.Selectable bestSel = null; float selT = 0f, selVol = 0f;
             foreach (var s in _data.Selectables)
             {
                 if (!s.Raycast(o, d, out float t) || t > bestT) continue;
                 // verdeckt durch Wände?
                 if (t > 0.3f && UnityEngine.Physics.Raycast(ray, out var wall, t, ~(1 << 2), QueryTriggerInteraction.Ignore) && wall.distance < t - 0.6f && _aimTarget == null) continue;
                 if (!IsUsable(s)) continue;
-                bestT = t; _aimTarget = s; _aimLabel = InteriorScene.Label(s);
+                // Überlappende Volumen (z.B. großes TV/TDU-Media-Volumen um das Tagebuch/MyTDULife, oder man steht schon in
+                // einem): das kleinere, genauere gewinnt, solange es nicht deutlich weiter weg ist
+                float vol = HotspotVolume(s);
+                if (bestSel != null && !(t < selT - 0.5f || (t <= selT + 0.5f && vol < selVol))) continue;
+                bestSel = s; selT = t; selVol = vol;
             }
+            if (bestSel != null) { bestT = selT; _aimTarget = bestSel; _aimLabel = InteriorScene.Label(bestSel); }
             UpdateUiAim(_aimTarget);
             // Fahrzeugdaten rechts (und Preis): öffnet der Film über Cursor "info"; ist danach noch nichts offen, selbst öffnen
             if (_infoHiddenFor != null && !ReferenceEquals(_infoHiddenFor, _uiAim)) _infoHiddenFor = null;
@@ -1327,7 +1359,7 @@ namespace TDU2.Vehicles
         string _uiBank;
         object _uiAim;
         /// <summary>Autos nur aus der Nähe anvisieren (m vom Auge bis zur Hülle) – wie im Spiel: man steht vor dem Auto.</summary>
-        const float CarAimDistance = 0.5f;
+        const float CarAimDistance = 1f;
         float _aimCarDist;
         float _aimInfoAt = -1f;
         object _infoHiddenFor;
@@ -1558,13 +1590,18 @@ namespace TDU2.Vehicles
             LoadScene(_spotBanks.Living, Kind.Living, null);
         }
 
+        string IslandOf() => Manager?.Streamer?.Index?.IslandName ?? "";
+
         string TitleFor(Kind kind)
         {
             if (_spotBanks != null && _spotBanks.IsCasino) return "Casino";
             if (kind == Kind.Garage) return "Garage";
             if (kind == Kind.Living) return "Wohnbereich";
             if (_spotBanks != null && _spotBanks.Name == "Gebrauchtwagenhändler") return _spotBanks.Name;
-            var shop = Manager.Database?.ShopFor(_spot?.Code);
+            // wie im Spiel: Name aus der Sprachdatenbank (DBCarShop._libelle_hc, z.B. "Audi (Norden)")
+            var shop = Manager.Database?.ShopForSpot(_spot, IslandOf());
+            var dbName = shop != null ? FlashLocalization.Text(Manager.BnkDir, TDU2PauseMenu.SavedLanguage(), shop.NameHash) : null;
+            if (!string.IsNullOrEmpty(dbName)) return dbName;
             string brand = null;
             if (shop != null)
                 foreach (int id in shop.CarIds)
@@ -1576,6 +1613,37 @@ namespace TDU2.Vehicles
         {
             if (_uiGo != null) UnityUtil.SafeDestroy(_uiGo);
             _uiGo = null; _ui = null; _uiBank = null; _uiAim = null;
+        }
+
+        object _hotspotsLogged;
+        bool _tvFroze;
+
+        /// <summary>Rauminhalt (m³) eines Hotspot-Volumens (Volume bildet auf [-1,1]³ ab).</summary>
+        static float HotspotVolume(InteriorScene.Selectable s)
+        {
+            float det = Mathf.Abs(s.Volume.determinant);
+            return det > 1e-12f ? 8f / det : float.MaxValue;
+        }
+
+        /// <summary>DIAG: alle Hotspots des Raums (Typ, Name, Mitte, halbe Ausdehnung, Rauminhalt) – für zu kleine/überlappende Volumen.</summary>
+        void LogHotspots()
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.Append("Hotspots in ").Append(Path.GetFileNameWithoutExtension(_pendingBank ?? "")).Append(" (").Append(_data.Selectables.Count).Append("):");
+                foreach (var s in _data.Selectables)
+                {
+                    var inv = s.Volume.inverse;
+                    var c = inv.MultiplyPoint3x4(Vector3.zero);
+                    sb.Append("\n  Typ ").Append(s.Type).Append(' ').Append(InteriorScene.Label(s)).Append(" '").Append(s.Name).Append("' Mitte ")
+                      .Append(TDU2Diag.F(c)).Append(" halb ").Append(inv.GetColumn(0).magnitude.ToString("0.00")).Append('/')
+                      .Append(inv.GetColumn(1).magnitude.ToString("0.00")).Append('/').Append(inv.GetColumn(2).magnitude.ToString("0.00"))
+                      .Append(" m, ").Append(HotspotVolume(s).ToString("0.00")).Append(" m³");
+                }
+                TDU2Diag.Log("HAUS", sb.ToString());
+            }
+            catch (Exception ex) { Debug.LogWarning("[TDU2] Hotspot-Diagnose: " + ex.Message); }
         }
 
         static string IconLabel(InteriorScene.Selectable s)
@@ -2024,7 +2092,7 @@ namespace TDU2.Vehicles
                     {
                         var list = new List<CarPhysics>();
                         foreach (var c in _cars) list.Add(c.Car);
-                        var shop = Manager.Database.ShopFor(_spot.Code);
+                        var shop = Manager.Database.ShopForSpot(_spot, IslandOf());
                         Debug.Log("Shop: " + _spot.Code + " -> " + (shop != null ? shop.SpotName : "(kein Shop)"));
                         if (shop != null)
                             foreach (int id in shop.CarIds)
@@ -2078,6 +2146,7 @@ namespace TDU2.Vehicles
                             menu.Manager = Manager;
                         }
                         DebugManager.Debug("Try open TDUMedia");
+                        UpdateUiAim(null);
                         menu.Open();
                     } 
                     break;

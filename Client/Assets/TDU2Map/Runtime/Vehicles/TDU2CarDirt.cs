@@ -50,6 +50,26 @@ namespace TDU2.Vehicles
             Apply(false);
         }
 
+        static string KeyOf(CarPhysics car) => car != null ? car.FileName + "#" + car.Id : null;
+
+        /// <summary>Gemerkte Schmutzstufe eines Fahrzeugs (0 = sauber/unbekannt).</summary>
+        public static float GetSaved(CarPhysics car)
+        {
+            var k = KeyOf(car);
+            return k != null && Saved.TryGetValue(k, out var l) ? l : 0f;
+        }
+
+        /// <summary>Schmutzstufe eines Fahrzeugs setzen (z.B. Waschanlage: 0), live = auch an gerade gefahrenen Autos.</summary>
+        public static void SetSaved(CarPhysics car, float level, bool live = false)
+        {
+            var k = KeyOf(car);
+            if (k == null) return;
+            Saved[k] = Mathf.Clamp01(level);
+            if (!live) return;
+            foreach (var d in FindObjectsByType<TDU2CarDirt>(FindObjectsSortMode.None))
+                if (d != null && d._key == k) { d.Level = Saved[k]; if (level <= 0f) d.Scratches = 0f; d.Apply(true); }
+        }
+
         /// <summary>Auto waschen (Stufe 0).</summary>
         [ContextMenu("Waschen")]
         public void Wash() { Level = 0f; Scratches = 0f; Apply(true); }

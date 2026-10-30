@@ -61,7 +61,7 @@ namespace TDU2.Vehicles
                 i => Application.targetFrameRate = i >= 5 ? -1 : new[] { 60, 75, 100, 120, 144 }[i]);
             Choice("opts:vide:vsyn", "VSync", () => OffOn, 1, i => QualitySettings.vSyncCount = i);
             Choice("opts:vide:praa", "anti_alias", () => new[] { Off, "2x", "4x", "8x" }, 2, i => QualitySettings.antiAliasing = new[] { 0, 2, 4, 8 }[i]);
-            Choice("opts:vide:prlo", "lod", () => LMH, 2, i => { QualitySettings.lodBias = new[] { 0.6f, 1f, 2f }[i]; });
+            Choice("opts:vide:prlo", "lod", () => LMH, 2, i => { TDU2.World.TDU2RenderDistance.SetBaseLodBias(new[] { 0.6f, 1f, 2f }[i]); });
             Choice("opts:vide:caop", "car_opponent", () => LMH, 2, null);
             Choice("opts:vide:txfl", "texture", () => LMH, 2, i => QualitySettings.globalTextureMipmapLimit = 2 - i);
             Choice("opts:vide:fxqu", "fx_qual", () => LMH, 2, i =>

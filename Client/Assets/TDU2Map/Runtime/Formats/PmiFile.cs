@@ -21,6 +21,8 @@ namespace TDU2.Formats
         public Matrix4x4[] Bones;
         public string SignName;
         public string SignTemplate;
+        /// <summary>Schilder (Art 4): Zusatzbytes = Vorlage + Glyphen-Codes (§7.7, siehe TDU2RoadSigns). null sonst.</summary>
+        public byte[] SignCodes;
     }
 
     public sealed class PmiGroup
@@ -138,7 +140,8 @@ namespace TDU2.Formats
                         Pre = pre,
                         Bones = bones,
                         SignName = "",
-                        SignTemplate = ""
+                        SignTemplate = "",
+                        SignCodes = g.Version == 4 && g.ExtraBytes > 1 && ip + 32 + g.ExtraBytes <= d.Length ? Slice(d, ip + 32, g.ExtraBytes) : null,
                     };
 
                     g.Instances.Add(instance);
@@ -147,6 +150,8 @@ namespace TDU2.Formats
             }
             return f;
         }
+
+        static byte[] Slice(byte[] d, int o, int n) { var r = new byte[n]; Buffer.BlockCopy(d, o, r, 0, n); return r; }
 
         /// <summary>
         /// Extrahiert den Text aus dem Schild (basierend auf der Formatbeschreibung)

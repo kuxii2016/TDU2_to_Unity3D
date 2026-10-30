@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
 using TDU2.Online;
 using TDU2.Traffic;
 using TDU2.World;
@@ -12,8 +13,9 @@ namespace TDU2.Vehicles
     /// <summary>
     /// Developer menu modeled after the debug menu of the original EXE (edDebug “DEBUG MENU LIBRARIES”: text menu with
     /// libraries, variables VAR/FVAR/BOOL/TABLE, buttons NEXT/PREV VARIABLE, INCREASE/DECREASE VALUE, INCREASE/DECREASE
-    /// STEP, NEXT/PREV 10, FIRST/LAST, RESET VALUE, colors BLUE/PURPLE/GREEN/CYAN/YELLOW) – in German, with the sections
-    /// Network, Cars, Weather, Load World, Streaming, Jobs, Traffic, Rendering, and Utilization.
+    /// STEP, NEXT/PREV 10, FIRST/LAST, RESET VALUE, colors BLUE/PURPLE/GREEN/CYAN/YELLOW) – in English, with the sections
+    /// Network, Cars, Weather, Load World, Streaming, Jobs, Traffic, Rendering, Performance, Avatar, Flash, GPS and the tools
+    /// Cutscene Tester, Animation Viewer and Savegame / Profile / Story (TDU2DebugTools.cs).
     /// Controls: F1 to open/close, ↑/↓ to select an entry, ←/→ to adjust value (Shift = large step), Enter to open/execute,
     /// Backspace to go back, Page Up/Page Down to scroll through 10 entries, Home/End to go to first/last entry, Delete to restore default value.
     /// As long as it is open, the drive/game buttons do not work in the game (TDU2Controls.Blocked).
@@ -23,8 +25,8 @@ namespace TDU2.Vehicles
         public static TDU2DevMenu Instance { get; private set; }
         public static bool IsOpen => Instance != null && Instance._open;
 
-        [Tooltip("Taste zum Öffnen/Schließen")] public KeyCode ToggleKey = KeyCode.F1;
-        [Tooltip("Größe der Schrift (Pixel bei 1080p)")] public int FontSize = 12;
+        [Tooltip("Key to open/close")] public KeyCode ToggleKey = KeyCode.F1;
+        [Tooltip("Font size (pixels at 1080p)")] public int FontSize = 12;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void AutoCreate()
@@ -74,6 +76,14 @@ namespace TDU2.Vehicles
             }
         }
 
+        // Network stats
+        float _netStatsNext;
+        int _netInCount, _netOutCount;
+        float _netInRate, _netOutRate;
+        int _netInLast, _netOutLast;
+        readonly List<float> _netInHist = new List<float>(200);
+        readonly List<float> _netOutHist = new List<float>(200);
+
         TDU2Traffic Traffic
         {
             get
@@ -101,9 +111,27 @@ namespace TDU2.Vehicles
         }
 
         // ------------------------------------------------------------------ Eingabe
+        float _autoFlashLogNext;
         void Update()
         {
             SampleFrame();
+            if (Time.unscaledTime >= _netStatsNext)
+            {
+                _netStatsNext = Time.unscaledTime + 0.5f;
+                int nin = _netInLast; int nout = _netOutLast;
+                _netInRate = nin * 2f;
+                _netOutRate = nout * 2f;
+                _netInLast = 0; _netOutLast = 0;
+                _netInHist.Add(_netInRate);
+                _netOutHist.Add(_netOutRate);
+                if (_netInHist.Count > 200) _netInHist.RemoveAt(0);
+                if (_netOutHist.Count > 200) _netOutHist.RemoveAt(0);
+            }
+            if (Time.unscaledTime >= _autoFlashLogNext)
+            {
+                _autoFlashLogNext = Time.unscaledTime + 0.5f;
+                try { Flash.VmfPlayer.AppendFlashLog(); } catch {}
+            }
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (Input.GetKeyDown(ToggleKey) && !TDU2GameData.ChatTyping)
             {
@@ -182,12 +210,12 @@ namespace TDU2.Vehicles
         {
             var p = _stack[_stack.Count - 1];
             try { _items = p.Build() ?? new List<Item>(); }
-            catch (Exception ex) { _items = new List<Item> { Info("Fehler: " + ex.Message) }; }
+            catch (Exception ex) { _items = new List<Item> { Info("Error: " + ex.Message) }; }
             if (p.Sel >= _items.Count) p.Sel = Math.Max(0, _items.Count - 1);
             if (_items.Count > 0 && _items[p.Sel].Header) Move(p, 1);
         }
 
-        void Toast(string s) { _toast = s; _toastUntil = Time.unscaledTime + 3f; Debug.Log("[TDU2] Entwicklermenü: " + s); }
+        void Toast(string s) { _toast = s; _toastUntil = Time.unscaledTime + 3f; Debug.Log("[TDU2] Dev menu: " + s); }
 
         // ------------------------------------------------------------------ Bausteine
         static Item Head(string t) => new Item { Label = t, Header = true };
@@ -204,7 +232,7 @@ namespace TDU2.Vehicles
         static Item Float(string label, Func<float> get, Action<float> set, float step, float min, float max, float def, string fmt = "0.##", string unit = "") => new Item
         {
             Label = label,
-            Value = () => get().ToString(fmt, CultureInfo.GetCultureInfo("de-DE")) + unit,
+            Value = () => get().ToString(fmt, CultureInfo.InvariantCulture) + unit,
             Change = d => set(Mathf.Clamp(get() + step * d, min, max)),
             Reset = () => set(def),
         };
@@ -239,14 +267,247 @@ namespace TDU2.Vehicles
             Menu("Streaming", StreamingMenu),
             Menu("Jobs & Threads", JobsMenu),
             Menu("Traffic", TrafficMenu),
-            Menu("Renderring", RenderingMenu),
-            Menu("Usage", UsageMenu),
+            Menu("Rendering", RenderingMenu),
+            Menu("Performance", UsageMenu),
             Menu("Avatar", AvatarMenu),
             Menu("Flash Debug", FlashMenu),
+            Menu("Flash Profiler", FlashProfilerMenu),
             Menu("GPS / Bookmarks", GpsMenu),
+            Head("TOOLS"),
+            Menu("Cutscene Tester", CutsceneMenu),
+            Menu("Animation Viewer", AnimViewerMenu),
+            Menu("Savegame / Profile / Story", SavegameMenu),
             Head(""),
             Info("Close F1 · ↑↓ Entry · ←→ Value (Shift x10) · Enter to open · Backspace to go back · Delete (default)"),
         };
+
+        // ------------------------------------------------------------------ Cutscene tester
+        static readonly string[] StageNames3 = { "Sky stage (1500 m up)", "Here (in front of the camera)", "At the bank's spot" };
+
+        List<Item> CutsceneMenu()
+        {
+            var m = Mgr;
+            var l = new List<Item> { Head("CUTSCENE TESTER") };
+            if (m == null || m.Streamer == null) { l.Add(Info("no vehicle manager / island loaded")); return l; }
+            var t = TDU2CutsceneTester.Get(m);
+            l.Add(Info("Status", () => t.Status));
+            l.Add(Info("Bank", () => t.BankPath != null ? TDU2DebugStage.Rel(m.BnkDir, t.BankPath) : "-"));
+            l.Add(Table("Stage", StageNames3, () => (int)t.Where, i => t.Where = (TDU2CutsceneTester.Stage)i, 0));
+            l.Add(Bool("Cast player avatar", () => t.CastAvatar, v => t.CastAvatar = v, true));
+            l.Add(Bool("Cast player car (PLAYER_CAR)", () => t.CastCar, v => t.CastCar = v, true));
+            l.Add(Bool("Auto-play first cinematic after loading", () => t.AutoPlay, v => t.AutoPlay = v, true));
+            l.Add(Bool("Show stage floor plane (Sky)", () => t.ShowFloor, v => t.ShowFloor = v, true));
+            l.Add(Menu("Choose bank …", CutsceneBankMenu));
+            if (t.Scene != null)
+            {
+                l.Add(Head("CINEMATICS  ▶ Enter = PLAY · ←/→ = play as background · Delete = stop"));
+                if (!t.Scene.Loaded) l.Add(Info("loading …"));
+                else
+                    foreach (var d in t.Scene.Definitions)
+                    {
+                        var dn = d.Name;
+                        string flags = (d.Loop ? "loop " : "") + (d.NoCamera ? "no camera " : "");
+                        l.Add(new Item
+                        {
+                            Label = "▶ " + dn,
+                            Value = () => (t.Scene != null && t.Scene.MainName == dn ? "PLAYING  " : "[Enter] ") + flags + (d.Cin != null ? d.Cin.Duration.ToString("0.0", CultureInfo.InvariantCulture) + " s" : ""),
+                            Activate = () => t.Play(dn, false),
+                            Change = _ => t.Play(dn, true),
+                            Reset = () => t.StopAll(),
+                        });
+                    }
+                l.Add(Head("CONTROL"));
+                l.Add(Float("Free view: orbit speed", () => t.ViewSpeed, v => t.ViewSpeed = v, 4f, -90f, 90f, 8f, "0", "°/s"));
+                l.Add(Float("Free view: distance", () => t.ViewDistance, v => t.ViewDistance = v, 1f, 2f, 80f, 14f, "0", " m"));
+                l.Add(Float("Free view: height", () => t.ViewHeight, v => t.ViewHeight = v, 0.5f, -5f, 40f, 5f, "0.0", " m"));
+                l.Add(Action_("Skip main cinematic", () => t.Skip()));
+                l.Add(Action_("Stop all", () => t.StopAll()));
+                l.Add(Float("Time scale", () => Time.timeScale, v => Time.timeScale = v, 0.25f, 0f, 4f, 1f, "0.00", "x"));
+                l.Add(Action_("Reload bank (with current stage)", () => { var b = t.BankPath; if (b != null) t.Load(b); }));
+                l.Add(Action_("Close tester (back to the game)", () => { Time.timeScale = 1f; t.Unload(true); Toast("Cutscene tester closed"); }));
+            }
+            return l;
+        }
+
+        List<Item> CutsceneBankMenu()
+        {
+            var m = Mgr;
+            var l = new List<Item> { Head("BANKS WITH CINEMATICS  (" + TDU2DebugStage.ScanState + ")") };
+            var banks = TDU2DebugStage.CinematicBanks(m);
+            if (banks == null) { l.Add(Info("scanning banks …  (reopen in a moment)")); return l; }
+            l.Add(Action_("Rescan", () => { TDU2DebugStage.Rescan(); Rebuild(); }));
+            string group = null;
+            foreach (var b in banks)
+            {
+                string rel = TDU2DebugStage.Rel(m.BnkDir, b);
+                string g = System.IO.Path.GetDirectoryName(rel)?.Replace('\\', '/') ?? "";
+                if (g != group) { group = g; l.Add(Head(g.ToUpperInvariant())); }
+                string path = b;
+                l.Add(Action_(System.IO.Path.GetFileNameWithoutExtension(b), () =>
+                {
+                    var t = TDU2CutsceneTester.Get(m);
+                    t.Load(path);
+                    Toast("Loading " + rel + " – " + TDU2CutsceneTester.StageName(t.Where));
+                    if (_stack.Count > 1) _stack.RemoveAt(_stack.Count - 1);
+                }));
+            }
+            return l;
+        }
+
+        // ------------------------------------------------------------------ Animation viewer
+        List<string> _pnjIds;
+
+        List<Item> AnimViewerMenu()
+        {
+            var m = Mgr;
+            var l = new List<Item> { Head("ANIMATION VIEWER") };
+            if (m == null || m.Streamer == null) { l.Add(Info("no vehicle manager / island loaded")); return l; }
+            if (!Avatars.AvatarLibrary.Ready) { l.Add(Info("avatar data not loaded yet")); return l; }
+            var v = TDU2AnimViewer.Get(m);
+            if (!v.Active) { l.Add(Action_("Open viewer (sky stage)", () => { v.Open(); Toast("Animation viewer open"); Rebuild(); })); return l; }
+            if (_pnjIds == null) { _pnjIds = Avatars.AvatarLibrary.PnjIds(); _pnjIds.Insert(0, ""); }
+            l.Add(new Item
+            {
+                Label = "Model  (←→ · Shift x10)",
+                Value = () => string.IsNullOrEmpty(v.Model) ? "Player avatar" : v.Model + "  (" + (Avatars.AvatarLibrary.PnjName(v.Model) ?? "") + ")",
+                Change = d => { int i = _pnjIds.IndexOf(v.Model ?? ""); int n = _pnjIds.Count; i = ((i + d) % n + n) % n; v.SetModel(_pnjIds[i]); },
+                Reset = () => v.SetModel(""),
+            });
+            l.Add(Menu("Choose model …", () =>
+            {
+                var ml = new List<Item> { Head("MODELS (DBPNJ)") };
+                foreach (var id in _pnjIds)
+                {
+                    string i2 = id;
+                    ml.Add(Action_(string.IsNullOrEmpty(i2) ? "Player avatar" : i2 + "  " + (Avatars.AvatarLibrary.PnjName(i2) ?? ""), () => { v.SetModel(i2); if (_stack.Count > 1) _stack.RemoveAt(_stack.Count - 1); }));
+                }
+                return ml;
+            }));
+            l.Add(Info("Clip source", () => string.IsNullOrEmpty(v.ClipBank) ? "scenarics/avatars/avatarsdriver.bnk" : TDU2DebugStage.Rel(m.BnkDir, v.ClipBank)));
+            l.Add(Menu("Choose clip source …", () =>
+            {
+                var bl = new List<Item> { Head("BANKS WITH ANIMATIONS  (" + TDU2DebugStage.ScanState + ")") };
+                bl.Add(Action_("avatarsdriver.bnk (driver/walk clips)", () => { v.SetBank(""); if (_stack.Count > 1) _stack.RemoveAt(_stack.Count - 1); }));
+                var banks = TDU2DebugStage.AnimationBanks(m);
+                if (banks == null) { bl.Add(Info("scanning banks …  (reopen in a moment)")); return bl; }
+                foreach (var b in banks) { string p = b; bl.Add(Action_(TDU2DebugStage.Rel(m.BnkDir, b), () => { v.SetBank(p); if (_stack.Count > 1) _stack.RemoveAt(_stack.Count - 1); })); }
+                return bl;
+            }));
+            l.Add(new Item
+            {
+                Label = "Clip  (←→ previous/next)",
+                Value = () => string.IsNullOrEmpty(v.ClipName) ? "rest pose" : v.ClipName,
+                Change = d => v.Step(Math.Sign(d)),
+                Reset = () => v.SetClip(""),
+            });
+            l.Add(Menu("Choose clip …", () =>
+            {
+                var cl = new List<Item> { Head("CLIPS") };
+                foreach (var c in v.Clips()) { string c2 = c; cl.Add(new Item { Label = c2, Value = () => v.ClipName == c2 ? "▶" : "", Activate = () => v.SetClip(c2) }); }
+                if (cl.Count == 1) cl.Add(Info("no clips in this bank"));
+                return cl;
+            }));
+            l.Add(Info("Time", () => v.Clip != null ? v.Time_.ToString("0.00", CultureInfo.InvariantCulture) + " / " + v.Clip.Length.ToString("0.00", CultureInfo.InvariantCulture) + " s" : "-"));
+            l.Add(Bool("Paused", () => v.Paused, x => v.Paused = x, false));
+            l.Add(Bool("Loop", () => v.Loop, x => v.Loop = x, true));
+            l.Add(Bool("Show floor plane", () => v.ShowFloor, x => v.ShowFloor = x, true));
+            l.Add(Float("Speed", () => v.Speed, x => v.Speed = x, 0.1f, -2f, 4f, 1f, "0.0", "x"));
+            l.Add(Float("Scrub (time)", () => v.Time_, x => { v.Time_ = x; v.Paused = true; }, 0.05f, 0f, 600f, 0f, "0.00", " s"));
+            l.Add(Head("CAMERA"));
+            l.Add(Float("Orbit angle", () => v.Orbit, x => v.Orbit = x, 10f, -3600f, 3600f, 30f, "0", "°"));
+            l.Add(Float("Orbit speed", () => v.OrbitSpeed, x => v.OrbitSpeed = x, 5f, -180f, 180f, 0f, "0", "°/s"));
+            l.Add(Float("Distance", () => v.Distance, x => v.Distance = x, 0.2f, 0.5f, 20f, 3.2f, "0.0", " m"));
+            l.Add(Float("Height", () => v.Height, x => v.Height = x, 0.1f, -1f, 3f, 1.1f, "0.0", " m"));
+            l.Add(Action_("Close viewer (back to the game)", () => { v.Close(); Toast("Animation viewer closed"); Rebuild(); }));
+            return l;
+        }
+
+        // ------------------------------------------------------------------ Savegame / profile
+        List<Item> SavegameMenu()
+        {
+            var m = Mgr;
+            var l = new List<Item> { Head("PROFILE") };
+            var save = TDU2Session.Save;
+            l.Add(Info("Nick", () => TDU2Session.Nick ?? "-"));
+            l.Add(Info("Logged in", () => TDU2Session.LoggedIn ? "YES" : "NO"));
+            if (save == null) { l.Add(Info("no savegame loaded (log in first)")); return l; }
+            l.Add(Info("Island / position", () => (string.IsNullOrEmpty(save.island) ? "-" : save.island) + (save.hasPosition ? $"  ({save.px:0}, {save.py:0}, {save.pz:0})" : "")));
+            l.Add(Info("Interior", () => string.IsNullOrEmpty(save.interior) ? "outside" : save.interior));
+            l.Add(Info("Saved at", () => save.savedAt ?? "-"));
+            l.Add(Head("MONEY"));
+            l.Add(new Item
+            {
+                Label = "Money  (←→ ±10 000 · Shift ±100 000)",
+                Value = () => "$ " + save.money.ToString("N0", CultureInfo.InvariantCulture),
+                Change = d => { save.money = Math.Max(0, save.money + d * 10000L); },
+                Reset = () => save.money = 0,
+            });
+            l.Add(Action_("+ $ 1 000 000", () => { save.money += 1000000; Toast("Money: $ " + save.money.ToString("N0", CultureInfo.InvariantCulture)); }));
+            l.Add(Head("CARS"));
+            l.Add(Info("Own cars", () => save.ownedCars.Count + "  (current: " + (string.IsNullOrEmpty(save.currentCar) ? "-" : save.currentCar) + ")"));
+            l.Add(Menu("Own cars (Delete = remove)", () =>
+            {
+                var cl = new List<Item> { Head("OWN CARS  (Enter = drive · Delete = remove from profile)") };
+                foreach (var f in new List<string>(save.ownedCars))
+                {
+                    string f2 = f; var car = m != null ? m.FindCar(f2) : null;
+                    cl.Add(new Item
+                    {
+                        Label = car != null ? ((car.Brand ?? "") + " " + car.ModelName).Trim() : f2,
+                        Value = () => f2 + (string.Equals(save.currentCar, f2, StringComparison.OrdinalIgnoreCase) ? "  (current)" : ""),
+                        Activate = () => { if (car != null) SwitchCar(car); },
+                        Reset = () => { save.ownedCars.Remove(f2); Toast(f2 + " removed from profile"); Rebuild(); },
+                    });
+                }
+                if (cl.Count == 1) cl.Add(Info("no own cars"));
+                return cl;
+            }));
+            l.Add(Bool("Starter car chosen", () => save.starterChosen, v => save.starterChosen = v, true));
+            l.Add(Head("STORY"));
+            l.Add(new Item
+            {
+                Label = "Story step  (←→)",
+                Value = () => { int s = Story.TDU2StoryProgress.Get(TDU2Session.Nick); return s + "  " + (s >= 0 ? Story.TDU2StoryProgress.StepName(s) : "never started"); },
+                Change = d =>
+                {
+                    int s = Mathf.Clamp(Story.TDU2StoryProgress.Get(TDU2Session.Nick) + Math.Sign(d), -1, Story.TDU2StoryProgress.Implemented);
+                    Story.TDU2StoryProgress.Set(TDU2Session.Nick, s); save.story = s;
+                },
+                Reset = () => { Story.TDU2StoryProgress.Set(TDU2Session.Nick, -1); save.story = -1; },
+            });
+            l.Add(Action_("Start the selected story step now", () =>
+            {
+                int s = Story.TDU2StoryProgress.Get(TDU2Session.Nick);
+                if (Story.TDU2Story.Instance != null) { Story.TDU2Story.Instance.Go(s); Toast("Story: step " + s); }
+                else Toast("Story not running – the step starts with the next login");
+            }));
+            l.Add(Bool("Story gave the California (step 4–5)", () => Story.TDU2StoryProgress.GaveStoryCar(TDU2Session.Nick), v => Story.TDU2StoryProgress.SetGaveStoryCar(TDU2Session.Nick, v), false));
+            l.Add(Head("OTHER"));
+            l.Add(Info("Houses with layout / furniture / materials", () => save.houses.Count + " / " + save.ownedFurniture.Count + " / " + save.ownedMaterials.Count));
+            l.Add(Info("Clothes / sticker boards / liveries", () => save.ownedClothes.Count + " / " + save.stickerBoards.Count + " / " + save.liveries.Count));
+            l.Add(Info("Bookmarks / favourite spots", () => save.bookmarks.Count + " / " + save.favoriteSpots.Count));
+            l.Add(Action_("Clear last interior (start outside next login)", () => { save.interior = ""; Toast("Interior cleared"); }));
+            l.Add(Head("SAVE / LOAD"));
+            l.Add(Action_("Save to server now", () => { if (!TDU2Session.LoggedIn) { Toast("Not logged in"); return; } TDU2Session.SaveAsync(); Toast("Saving to server"); }));
+            l.Add(Action_("Write local DATA (original savegame) now", () =>
+            {
+                if (m == null) return;
+                TDU2SaveGame.WriteAsync(TDU2Session.Nick, save, m.Database, "dev menu");
+                Toast("Writing " + TDU2SaveGame.PathFor(TDU2Session.Nick));
+            }));
+            l.Add(Info("Local DATA", () => TDU2SaveGame.Exists(TDU2Session.Nick) ? TDU2SaveGame.PathFor(TDU2Session.Nick) : "none"));
+            l.Add(Action_("Read local DATA (log only, no import)", () =>
+            {
+                if (m == null) return;
+                if (TDU2SaveGame.TryRead(TDU2Session.Nick, m.Database, out var s2, out var why))
+                {
+                    string info = $"DATA: money {s2.money}, cars {s2.ownedCars.Count}, island {s2.island}, story {s2.story}, interior '{s2.interior}'";
+                    Debug.Log("[TDU2] " + info); Toast(info);
+                }
+                else Toast("DATA not readable: " + why);
+            }));
+            return l;
+        }
 
         // ------------------------------------------------------------------ Flash-Filme (wie der Flash Debugger im Editor)
         List<Item> FlashMenu()
@@ -260,21 +521,91 @@ namespace TDU2.Vehicles
                 string file = System.IO.Path.GetFileName(p.BankPath ?? "");
                 l.Add(Menu(p.gameObject.name + "  (" + file + ")" + (p.Visible ? "" : "  [hidden]"), () => FlashPlayerMenu(pp)));
             }
-            if (players.Length == 0) l.Add(Info("kein Flash-Film aktiv"));
-            l.Add(Head("FILM LADEN (frontend)"));
-            l.Add(Menu("Frontend-Bank öffnen …", FlashLoadMenu));
+            if (players.Length == 0) l.Add(Info("no Flash movie active"));
+            l.Add(Head("LOAD MOVIE (frontend)"));
+            l.Add(Menu("Open frontend bank …", FlashLoadMenu));
             var viewers = new List<Flash.VmfPlayer>();
             foreach (var p in players) if (p != null && p.gameObject.name.StartsWith("FlashViewer ")) viewers.Add(p);
             if (viewers.Count > 0)
-                l.Add(Action_("Geladene Viewer schließen (" + viewers.Count + ")", () => { foreach (var v in viewers) if (v != null) Destroy(v.gameObject); Toast("Viewer geschlossen"); Rebuild(); }));
+                l.Add(Action_("Close loaded viewers (" + viewers.Count + ")", () => { foreach (var v in viewers) if (v != null) Destroy(v.gameObject); Toast("Viewers closed"); Rebuild(); }));
+            l.Add(Head("PROFILER"));
+            l.Add(Menu("Flash Profiler / Graph / Log", FlashProfilerMenu));
             return l;
+        }
+
+        bool _flashLogAuto = false;
+        float _flashLogNext;
+        List<float> _flashGraph = new List<float>(400);
+
+        List<Item> FlashProfilerMenu()
+        {
+            var l = new List<Item> { Head("FLASH PROFILER") };
+            l.Add(Info("Frame ms", () => Flash.VmfPlayer.LastFrameTimeMs.ToString("0.000")));
+            l.Add(Info("Update/Frame parts", () => "Tick " + Flash.VmfPlayer.LastTickTimeMs.ToString("0.000") + " / Mouse " + Flash.VmfPlayer.LastMouseTimeMs.ToString("0.000") + " / Apply " + Flash.VmfPlayer.LastApplyTimeMs.ToString("0.000")));
+            l.Add(Info("OnGUI Draw ms", () => Flash.VmfPlayer.LastDrawTimeMs.ToString("0.000")));
+            l.Add(Info("Raster integrate ms", () => Flash.VmfPlayer.LastRasterIntegrateTimeMs.ToString("0.000")));
+            l.Add(Info("Draws / Shapes / Texts", () => Flash.VmfPlayer.LastDrawCalls + " / " + Flash.VmfPlayer.LastShapeDraws + " / " + Flash.VmfPlayer.LastTextDraws));
+            l.Add(Info("Quad batches", () => Flash.VmfPlayer.LastQuadBatches.ToString()));
+            l.Add(Info("Raster pending bytes", () => (Flash.VmfPlayer.LastRasterPendingBytes / 1024f).ToString("0") + " KB"));
+            l.Add(Info("Raster queue / done", () => Flash.VmfPlayer.LastRasterQueueCount + " / " + Flash.VmfPlayer.LastRasterDoneCount));
+            l.Add(Bool("Auto-log to CSV (every 0.5s)", () => _flashLogAuto, v => { _flashLogAuto = v; _flashLogNext = Time.unscaledTime; }, false));
+            l.Add(Action_("Log now to CSV", () => { Flash.VmfPlayer.AppendFlashLog(); Toast("Logged to " + System.IO.Path.GetFileName(Flash.VmfPlayer.GetFlashLogPath())); }));
+            l.Add(Action_("Open log path", () => { try { System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + Flash.VmfPlayer.GetFlashLogPath() + "\""); } catch {} }));
+            l.Add(Action_("Clear graph history", () => { Flash.VmfPlayer.ClearFlashMetrics(); Toast("Cleared"); }));
+            l.Add(Head("GRAPH (Frame ms)"));
+            var hist = Flash.VmfPlayer.GetFrameHistory();
+            if (hist.Length == 0) l.Add(Info("no samples yet"));
+            else
+            {
+                float max = 0f;
+                for (int i = 0; i < hist.Length; i++) if (hist[i] > max) max = hist[i];
+                if (max < 0.01f) max = 0.01f;
+                l.Add(Info("Samples", () => hist.Length.ToString()));
+                l.Add(Info("Max / Avg", () => max.ToString("0.000") + " / " + (Average(hist)).ToString("0.000") + " ms"));
+                l.Add(Info("Graph", () => GraphStr(hist, 40, max)));
+            }
+            if (_flashLogAuto && Time.unscaledTime >= _flashLogNext)
+            {
+                _flashLogNext = Time.unscaledTime + 0.5f;
+                Flash.VmfPlayer.AppendFlashLog();
+            }
+            return l;
+        }
+
+        static float Average(float[] arr)
+        {
+            if (arr.Length == 0) return 0f;
+            float s = 0f;
+            for (int i = 0; i < arr.Length; i++) s += arr[i];
+            return s / arr.Length;
+        }
+
+        static string GraphStr(float[] arr, int width, float max)
+        {
+            if (arr.Length == 0) return "-";
+            System.Text.StringBuilder sb = new System.Text.StringBuilder(width + 2);
+            sb.Append('[');
+            for (int i = 0; i < width; i++)
+            {
+                int idx = arr.Length - width + i;
+                if (idx < 0) { sb.Append(' '); continue; }
+                float v = arr[idx] / max;
+                if (v >= 0.9f) sb.Append('#');
+                else if (v >= 0.7f) sb.Append('X');
+                else if (v >= 0.5f) sb.Append('=');
+                else if (v >= 0.3f) sb.Append('-');
+                else if (v >= 0.1f) sb.Append('.');
+                else sb.Append(' ');
+            }
+            sb.Append(']');
+            return sb.ToString();
         }
 
         List<Item> FlashLoadMenu()
         {
             var l = new List<Item>();
             var m = Mgr;
-            if (m == null || string.IsNullOrEmpty(m.BnkDir)) { l.Add(Info("Bnk-Ordner unbekannt")); return l; }
+            if (m == null || string.IsNullOrEmpty(m.BnkDir)) { l.Add(Info("Bnk folder unknown")); return l; }
             foreach (var res in new[] { "hires", "medres", "lowres" })
             {
                 string dir = System.IO.Path.Combine(m.BnkDir, "frontend", res);
@@ -302,15 +633,15 @@ namespace TDU2.Vehicles
                 p.Load(path);
                 var pm = Mgr != null ? Mgr.GetComponent<TDU2PauseMenu>() : null;
                 if (pm?.Texts != null) Flash.FlashLocalization.Apply(p, pm.Texts);
-                Toast("Loadet: " + System.IO.Path.GetFileName(path) + " – Labels under Flash Movies > Movie > Wurzel");
+                Toast("Loaded: " + System.IO.Path.GetFileName(path) + " – labels under Flash Debug > movie > root");
             }
-            catch (Exception ex) { Destroy(go); Toast("Fehler: " + ex.Message); }
+            catch (Exception ex) { Destroy(go); Toast("Error: " + ex.Message); }
         }
 
         List<Item> FlashPlayerMenu(Flash.VmfPlayer p)
         {
             var l = new List<Item>();
-            if (p == null || p.Root == null) { l.Add(Info("Film nicht mehr vorhanden")); return l; }
+            if (p == null || p.Root == null) { l.Add(Info("Movie no longer exists")); return l; }
             l.Add(Head("Clip " + System.IO.Path.GetFileName(p.BankPath ?? "")));
             l.Add(Bool("Visible", () => p.Visible, v => p.Visible = v, true));
             l.Add(Bool("Mouse", () => p.MouseEnabled, v => p.MouseEnabled = v, false));
@@ -319,7 +650,7 @@ namespace TDU2.Vehicles
             l.Add(Action_("Reset Movie (Reload + Set Up)", () => ResetFlash(p)));
             l.Add(Info("Note: Labels/images from the root folder alter the menus/HUD—reset them here"));
             l.Add(Head("INPUT (like the game)"));
-            foreach (var (lab, fn, arg) in new (string, string, string)[] { ("▲ UP", "Move", "up"), ("▼ DOWM", "Move", "down"), ("◀ LEFT", "Move", "left"), ("▶ RIGHT", "Move", "right"), ("A", "A", null), ("B", "B", null), ("X", "X", null), ("Y", "Y", null) })
+            foreach (var (lab, fn, arg) in new (string, string, string)[] { ("▲ UP", "Move", "up"), ("▼ DOWN", "Move", "down"), ("◀ LEFT", "Move", "left"), ("▶ RIGHT", "Move", "right"), ("A", "A", null), ("B", "B", null), ("X", "X", null), ("Y", "Y", null) })
             {
                 string f2 = fn, a2 = arg;
                 l.Add(Action_(lab, () => { bool ok = a2 != null ? p.Input(f2, a2) : p.Input(f2); Toast(f2 + (a2 != null ? "(" + a2 + ")" : "") + (ok ? " processed" : ": no function")); }));
@@ -333,7 +664,7 @@ namespace TDU2.Vehicles
         {
             if (p == null || string.IsNullOrEmpty(p.BankPath)) return;
             var mm = Mgr != null ? Mgr.Minimap : null;
-            if (mm != null && mm.HudPlayer == p) { mm.ReloadHud(); Toast("HUD neu geladen"); Rebuild(); return; }
+            if (mm != null && mm.HudPlayer == p) { mm.ReloadHud(); Toast("HUD reloaded"); Rebuild(); return; }
             try
             {
                 bool vis = p.Visible;
@@ -343,7 +674,7 @@ namespace TDU2.Vehicles
                 if (pm?.Texts != null) Flash.FlashLocalization.Apply(p, pm.Texts);
                 Toast("Reloaded: " + System.IO.Path.GetFileName(p.BankPath) + " (Initial state—reopen the menu if necessary)");
             }
-            catch (Exception ex) { Toast("Fehler: " + ex.Message); }
+            catch (Exception ex) { Toast("Error: " + ex.Message); }
             Rebuild();
         }
 
@@ -358,13 +689,13 @@ namespace TDU2.Vehicles
         List<Item> FlashClipItems(Flash.VmfPlayer p, string path, Flash.VmfPlayer.Instance inst)
         {
             var l = new List<Item>();
-            if (inst == null) { l.Add(Info("Clip nicht mehr vorhanden")); return l; }
+            if (inst == null) { l.Add(Info("Clip no longer exists")); return l; }
             l.Add(Head("CLIP " + path));
-            l.Add(Info("Image / Label", () => (inst.Frame + 1) + " / " + inst.Timeline.FrameCount + "   [" + (FlashLabel(inst) ?? "-") + "]" + (inst.Playing ? "  ▶" : "  ■")));
+            l.Add(Info("Frame / label", () => (inst.Frame + 1) + " / " + inst.Timeline.FrameCount + "   [" + (FlashLabel(inst) ?? "-") + "]" + (inst.Playing ? "  ▶" : "  ■")));
             l.Add(Bool("Play", () => inst.Playing, v => inst.Playing = v, true));
-            l.Add(Int("Image", () => inst.Frame + 1, v => p.GotoFrame(inst, Mathf.Clamp(v - 1, 0, Math.Max(0, inst.Timeline.FrameCount - 1)), true), 1, Math.Max(1, inst.Timeline.FrameCount), 1));
+            l.Add(Int("Frame", () => inst.Frame + 1, v => p.GotoFrame(inst, Mathf.Clamp(v - 1, 0, Math.Max(0, inst.Timeline.FrameCount - 1)), true), 1, Math.Max(1, inst.Timeline.FrameCount), 1));
             var owner = inst.Owner;
-            if (owner != null) l.Add(Bool("Vvisible (_visible)", () => owner.Visible, v => owner.Visible = v, true));
+            if (owner != null) l.Add(Bool("Visible (_visible)", () => owner.Visible, v => owner.Visible = v, true));
             if (inst.Timeline.Labels.Count > 0)
             {
                 l.Add(Head("LABELS (Enter = gotoAndPlay, ←→ = gotoAndStop)"));
@@ -375,8 +706,8 @@ namespace TDU2.Vehicles
                     string lab = kv.Key;
                     l.Add(new Item
                     {
-                        Label = lab + "  (Image " + (kv.Value + 1) + ")",
-                        Value = () => FlashLabel(inst) == lab ? "◀ aktive" : "",
+                        Label = lab + "  (frame " + (kv.Value + 1) + ")",
+                        Value = () => FlashLabel(inst) == lab ? "◀ active" : "",
                         Activate = () => { p.GotoLabel(path, lab, true); Toast(path + " → " + lab + " (Play)"); },
                         Change = _ => { p.GotoLabel(path, lab, false); Toast(path + " → " + lab + " (Stop)"); },
                     });
@@ -390,21 +721,21 @@ namespace TDU2.Vehicles
                 string cp = (path == "/" ? "/" : path + "/") + name;
                 var sub = d.Sprite;
                 bool shown = d.Visible && !(d.Cx.Mul.w <= 0.003f && d.Cx.Add.w <= 0.003f);
-                kids.Add(Menu(name + (shown ? "" : "  [hidden]") + "  (" + sub.Timeline.FrameCount + " B., " + sub.Timeline.Labels.Count + " Labels)", () => FlashClipItems(p, cp, sub)));
+                kids.Add(Menu(name + (shown ? "" : "  [hidden]") + "  (" + sub.Timeline.FrameCount + " fr., " + sub.Timeline.Labels.Count + " Labels)", () => FlashClipItems(p, cp, sub)));
             }
-            if (kids.Count > 0) { l.Add(Head("UNTER-CLIPS")); l.AddRange(kids); }
+            if (kids.Count > 0) { l.Add(Head("SUB-CLIPS")); l.AddRange(kids); }
             return l;
         }
 
         // ------------------------------------------------------------------ Avatare
-        static readonly string[] SexNames = { "Mann", "Frau" };
-        static readonly string[] EthNames = { "Europäisch", "Asiatisch", "Afrikanisch" };
+        static readonly string[] SexNames = { "Male", "Female" };
+        static readonly string[] EthNames = { "European", "Asian", "African" };
         static readonly (Avatars.ClothePart part, string name)[] AvatarParts =
         {
-            (Avatars.ClothePart.Hair, "Haare"), (Avatars.ClothePart.Top, "Oberteil"), (Avatars.ClothePart.Bottom, "Hose / Rock"),
-            (Avatars.ClothePart.Dress, "Kleid"), (Avatars.ClothePart.Shoes, "Schuhe"), (Avatars.ClothePart.Helmet, "Hut / Helm"),
-            (Avatars.ClothePart.Glasses, "Brille"), (Avatars.ClothePart.Gloves, "Handschuhe"), (Avatars.ClothePart.Beard, "Bart"),
-            (Avatars.ClothePart.Accessories, "Accessoires"), (Avatars.ClothePart.Belt, "Gurt"),
+            (Avatars.ClothePart.Hair, "Hair"), (Avatars.ClothePart.Top, "Top"), (Avatars.ClothePart.Bottom, "Trousers / skirt"),
+            (Avatars.ClothePart.Dress, "Dress"), (Avatars.ClothePart.Shoes, "Shoes"), (Avatars.ClothePart.Helmet, "Hat / helmet"),
+            (Avatars.ClothePart.Glasses, "Glasses"), (Avatars.ClothePart.Gloves, "Gloves"), (Avatars.ClothePart.Beard, "Beard"),
+            (Avatars.ClothePart.Accessories, "Accessories"), (Avatars.ClothePart.Belt, "Belt"),
         };
         List<string> _clipNames;
 
@@ -420,35 +751,35 @@ namespace TDU2.Vehicles
         {
             var l = new List<Item>
             {
-                Head("MITSPIELER IN INTERIEURS"),
-                Bool("Spielfiguren in Interieurs", () => TDU2OnlineSettings.ShowPlayersInInteriors, v => TDU2OnlineSettings.ShowPlayersInInteriors = v, true),
-                Bool("Kleidungsläden", () => TDU2OnlineSettings.ShowInClothesShops, v => TDU2OnlineSettings.ShowInClothesShops = v, true),
-                Bool("Autohändler", () => TDU2OnlineSettings.ShowInCarDealers, v => TDU2OnlineSettings.ShowInCarDealers = v, true),
-                Bool("Motorradhändler", () => TDU2OnlineSettings.ShowInBikeDealers, v => TDU2OnlineSettings.ShowInBikeDealers = v, true),
+                Head("OTHER PLAYERS IN INTERIORS"),
+                Bool("Player avatars in interiors", () => TDU2OnlineSettings.ShowPlayersInInteriors, v => TDU2OnlineSettings.ShowPlayersInInteriors = v, true),
+                Bool("Clothes shops", () => TDU2OnlineSettings.ShowInClothesShops, v => TDU2OnlineSettings.ShowInClothesShops = v, true),
+                Bool("Car dealers", () => TDU2OnlineSettings.ShowInCarDealers, v => TDU2OnlineSettings.ShowInCarDealers = v, true),
+                Bool("Bike dealers", () => TDU2OnlineSettings.ShowInBikeDealers, v => TDU2OnlineSettings.ShowInBikeDealers = v, true),
                 Bool("Clubs / Community Racing Center", () => TDU2OnlineSettings.ShowInClubs, v => TDU2OnlineSettings.ShowInClubs = v, true),
                 Bool("Casino", () => TDU2OnlineSettings.ShowInCasino, v => TDU2OnlineSettings.ShowInCasino = v, true),
-                Bool("Spielhalle", () => TDU2OnlineSettings.ShowInGamblingHall, v => TDU2OnlineSettings.ShowInGamblingHall = v, true),
-                Bool("Flughafen", () => TDU2OnlineSettings.ShowInAirport, v => TDU2OnlineSettings.ShowInAirport = v, true),
-                Bool("Friseur", () => TDU2OnlineSettings.ShowInHairdresser, v => TDU2OnlineSettings.ShowInHairdresser = v, true),
-                Bool("Schönheitsklinik", () => TDU2OnlineSettings.ShowInSurgery, v => TDU2OnlineSettings.ShowInSurgery = v, true),
-                Bool("Makler", () => TDU2OnlineSettings.ShowInRealtor, v => TDU2OnlineSettings.ShowInRealtor = v, true),
+                Bool("Gambling hall", () => TDU2OnlineSettings.ShowInGamblingHall, v => TDU2OnlineSettings.ShowInGamblingHall = v, true),
+                Bool("Airport", () => TDU2OnlineSettings.ShowInAirport, v => TDU2OnlineSettings.ShowInAirport = v, true),
+                Bool("Hairdresser", () => TDU2OnlineSettings.ShowInHairdresser, v => TDU2OnlineSettings.ShowInHairdresser = v, true),
+                Bool("Plastic surgery", () => TDU2OnlineSettings.ShowInSurgery, v => TDU2OnlineSettings.ShowInSurgery = v, true),
+                Bool("Real estate agent", () => TDU2OnlineSettings.ShowInRealtor, v => TDU2OnlineSettings.ShowInRealtor = v, true),
                 Bool("Tuner", () => TDU2OnlineSettings.ShowInTuner, v => TDU2OnlineSettings.ShowInTuner = v, true),
-                Bool("Lackiererei / Sticker", () => TDU2OnlineSettings.ShowInStickerShop, v => TDU2OnlineSettings.ShowInStickerShop = v, true),
-                Bool("Fahrschule (Gebäude)", () => TDU2OnlineSettings.ShowInRacingSchool, v => TDU2OnlineSettings.ShowInRacingSchool = v, true),
-                Bool("Fotograf", () => TDU2OnlineSettings.ShowInPhotograph, v => TDU2OnlineSettings.ShowInPhotograph = v, true),
-                Bool("Auktionshaus", () => TDU2OnlineSettings.ShowInAuctionHall, v => TDU2OnlineSettings.ShowInAuctionHall = v, true),
-                Bool("Hehler", () => TDU2OnlineSettings.ShowInStolenCarDealer, v => TDU2OnlineSettings.ShowInStolenCarDealer = v, true),
-                Bool("Andere Interieurs", () => TDU2OnlineSettings.ShowInOtherInteriors, v => TDU2OnlineSettings.ShowInOtherInteriors = v, true),
-                Bool("Häuser", () => TDU2OnlineSettings.ShowInHouses, v => TDU2OnlineSettings.ShowInHouses = v, true),
-                Bool("Häuser nur mit Einladung", () => TDU2OnlineSettings.HousesInviteOnly, v => TDU2OnlineSettings.HousesInviteOnly = v, true),
-                Head("MITSPIELER-AUTOS"),
-                Bool("In Cups/Einzelrennen ausblenden", () => TDU2OnlineSettings.HidePlayersInCups, v => TDU2OnlineSettings.HidePlayersInCups = v, true),
-                Bool("In Fahrschul-Prüfungen ausblenden", () => TDU2OnlineSettings.HidePlayersInRacingSchool, v => TDU2OnlineSettings.HidePlayersInRacingSchool = v, true),
-                Bool("Im Sticker-Shop fremde Autos ausblenden", () => TDU2OnlineSettings.HideCarsInStickerShop, v => TDU2OnlineSettings.HideCarsInStickerShop = v, true),
+                Bool("Paint / sticker shop", () => TDU2OnlineSettings.ShowInStickerShop, v => TDU2OnlineSettings.ShowInStickerShop = v, true),
+                Bool("Racing school (building)", () => TDU2OnlineSettings.ShowInRacingSchool, v => TDU2OnlineSettings.ShowInRacingSchool = v, true),
+                Bool("Photographer", () => TDU2OnlineSettings.ShowInPhotograph, v => TDU2OnlineSettings.ShowInPhotograph = v, true),
+                Bool("Auction hall", () => TDU2OnlineSettings.ShowInAuctionHall, v => TDU2OnlineSettings.ShowInAuctionHall = v, true),
+                Bool("Stolen car dealer", () => TDU2OnlineSettings.ShowInStolenCarDealer, v => TDU2OnlineSettings.ShowInStolenCarDealer = v, true),
+                Bool("Other interiors", () => TDU2OnlineSettings.ShowInOtherInteriors, v => TDU2OnlineSettings.ShowInOtherInteriors = v, true),
+                Bool("Houses", () => TDU2OnlineSettings.ShowInHouses, v => TDU2OnlineSettings.ShowInHouses = v, true),
+                Bool("Houses: invite only", () => TDU2OnlineSettings.HousesInviteOnly, v => TDU2OnlineSettings.HousesInviteOnly = v, true),
+                Head("OTHER PLAYERS' CARS"),
+                Bool("Hide in cups / single races", () => TDU2OnlineSettings.HidePlayersInCups, v => TDU2OnlineSettings.HidePlayersInCups = v, true),
+                Bool("Hide in racing school tests", () => TDU2OnlineSettings.HidePlayersInRacingSchool, v => TDU2OnlineSettings.HidePlayersInRacingSchool = v, true),
+                Bool("Hide other cars in the sticker shop", () => TDU2OnlineSettings.HideCarsInStickerShop, v => TDU2OnlineSettings.HideCarsInStickerShop = v, true),
                 Head("SYNCHRONISATION"),
-                Bool("Verschmutzung", () => TDU2OnlineSettings.SyncDirt, v => TDU2OnlineSettings.SyncDirt = v, true),
-                Bool("Lackierung / Sticker", () => TDU2OnlineSettings.SyncLiveries, v => TDU2OnlineSettings.SyncLiveries = v, true),
-                Info("Standardwerte: Runtime/Online/TDU2OnlineSettings.cs"),
+                Bool("Dirt", () => TDU2OnlineSettings.SyncDirt, v => TDU2OnlineSettings.SyncDirt = v, true),
+                Bool("Paint / stickers", () => TDU2OnlineSettings.SyncLiveries, v => TDU2OnlineSettings.SyncLiveries = v, true),
+                Info("Defaults: Runtime/Online/TDU2OnlineSettings.cs"),
             };
             return l;
         }
@@ -458,40 +789,40 @@ namespace TDU2.Vehicles
         {
             var gps = TDU2Gps.Instance;
             var l = new List<Item> { Head("GPS") };
-            if (gps == null) { l.Add(Info("GPS noch nicht aktiv (Minimap/HUD nicht geladen)")); return l; }
-            l.Add(Info("Ziel", () => gps.HasTarget ? gps.TargetGame.ToString("F0") : "keins (große Karte: Rechtsklick oder Mini-Menü)"));
-            l.Add(Info("Restweg", () => gps.HasTarget && gps.Remaining >= 0f ? gps.Remaining.ToString("0") + " m (" + gps.Route.Count + " Punkte)" : "-"));
-            l.Add(Action_("Ziel entfernen", () => { gps.ClearTarget(); Toast("GPS-Ziel entfernt"); }));
-            l.Add(Float("Ziel erreicht unter", () => TDU2GpsSettings.ArriveDistance, v => TDU2GpsSettings.ArriveDistance = v, 5f, 5f, 200f, 30f, "0", " m"));
-            l.Add(Float("Pfadbreite", () => TDU2GpsSettings.PathWidth, v => TDU2GpsSettings.PathWidth = v, 0.002f, 0.004f, 0.08f, 0.022f, "0.000"));
-            l.Add(Float("Kranz-Öffnung", () => TDU2GpsSettings.RingSpread, v => TDU2GpsSettings.RingSpread = v, 5f, 5f, 180f, 30f, "0", "°"));
-            l.Add(Bool("Meilen", () => TDU2GpsSettings.Miles, v => TDU2GpsSettings.Miles = v, false));
-            l.Add(Head("ANSAGEN (Sound/Voices/<Sprache>/GPS.bnk)"));
-            l.Add(Bool("Ansagen", () => TDU2GpsSettings.Voice, v => TDU2GpsSettings.Voice = v, true));
-            l.Add(Float("Lautstärke", () => TDU2GpsSettings.VoiceVolume, v => TDU2GpsSettings.VoiceVolume = v, 0.05f, 0f, 1f, 0.9f, "0.00"));
+            if (gps == null) { l.Add(Info("GPS not active yet (minimap/HUD not loaded)")); return l; }
+            l.Add(Info("Target", () => gps.HasTarget ? gps.TargetGame.ToString("F0") : "none (big map: right click or mini menu)"));
+            l.Add(Info("Remaining", () => gps.HasTarget && gps.Remaining >= 0f ? gps.Remaining.ToString("0") + " m (" + gps.Route.Count + " points)" : "-"));
+            l.Add(Action_("Clear target", () => { gps.ClearTarget(); Toast("GPS target cleared"); }));
+            l.Add(Float("Arrived below", () => TDU2GpsSettings.ArriveDistance, v => TDU2GpsSettings.ArriveDistance = v, 5f, 5f, 200f, 30f, "0", " m"));
+            l.Add(Float("Path width", () => TDU2GpsSettings.PathWidth, v => TDU2GpsSettings.PathWidth = v, 0.002f, 0.004f, 0.08f, 0.022f, "0.000"));
+            l.Add(Float("Ring spread", () => TDU2GpsSettings.RingSpread, v => TDU2GpsSettings.RingSpread = v, 5f, 5f, 180f, 30f, "0", "°"));
+            l.Add(Bool("Miles", () => TDU2GpsSettings.Miles, v => TDU2GpsSettings.Miles = v, false));
+            l.Add(Head("VOICE (Sound/Voices/<language>/GPS.bnk)"));
+            l.Add(Bool("Voice", () => TDU2GpsSettings.Voice, v => TDU2GpsSettings.Voice = v, true));
+            l.Add(Float("Volume", () => TDU2GpsSettings.VoiceVolume, v => TDU2GpsSettings.VoiceVolume = v, 0.05f, 0f, 1f, 0.9f, "0.00"));
             var langs = new[] { "", "ge", "us", "fr", "it", "sp", "ja" };
-            var langNames = new[] { "Systemsprache", "Deutsch (ge)", "Englisch (us)", "Französisch (fr)", "Italienisch (it)", "Spanisch (sp)", "Japanisch (ja)" };
-            l.Add(Table("Sprache", langNames, () => Math.Max(0, Array.IndexOf(langs, TDU2GpsSettings.VoiceLanguage ?? "")), v => TDU2GpsSettings.VoiceLanguage = langs[v], 0));
+            var langNames = new[] { "System language", "German (ge)", "English (us)", "French (fr)", "Italian (it)", "Spanish (sp)", "Japanese (ja)" };
+            l.Add(Table("Language", langNames, () => Math.Max(0, Array.IndexOf(langs, TDU2GpsSettings.VoiceLanguage ?? "")), v => TDU2GpsSettings.VoiceLanguage = langs[v], 0));
             int count = Math.Max(17, gps.VoiceCount);
-            l.Add(Int("Ziel gesetzt", () => TDU2GpsSettings.VoiceTargetSet, v => TDU2GpsSettings.VoiceTargetSet = v, 0, count, 0));
-            l.Add(Int("Ziel erreicht", () => TDU2GpsSettings.VoiceArrived, v => TDU2GpsSettings.VoiceArrived = v, 0, count, 0));
-            l.Add(Int("Bald links", () => TDU2GpsSettings.VoiceTurnLeftSoon, v => TDU2GpsSettings.VoiceTurnLeftSoon = v, 0, count, 0));
-            l.Add(Int("Bald rechts", () => TDU2GpsSettings.VoiceTurnRightSoon, v => TDU2GpsSettings.VoiceTurnRightSoon = v, 0, count, 0));
-            l.Add(Int("Jetzt links", () => TDU2GpsSettings.VoiceTurnLeftNow, v => TDU2GpsSettings.VoiceTurnLeftNow = v, 0, count, 0));
-            l.Add(Int("Jetzt rechts", () => TDU2GpsSettings.VoiceTurnRightNow, v => TDU2GpsSettings.VoiceTurnRightNow = v, 0, count, 0));
-            l.Add(Int("Wenden", () => TDU2GpsSettings.VoiceUTurn, v => TDU2GpsSettings.VoiceUTurn = v, 0, count, 0));
-            l.Add(Head("ANSAGEN ANHÖREN"));
+            l.Add(Int("Target set", () => TDU2GpsSettings.VoiceTargetSet, v => TDU2GpsSettings.VoiceTargetSet = v, 0, count, 0));
+            l.Add(Int("Arrived", () => TDU2GpsSettings.VoiceArrived, v => TDU2GpsSettings.VoiceArrived = v, 0, count, 0));
+            l.Add(Int("Left soon", () => TDU2GpsSettings.VoiceTurnLeftSoon, v => TDU2GpsSettings.VoiceTurnLeftSoon = v, 0, count, 0));
+            l.Add(Int("Right soon", () => TDU2GpsSettings.VoiceTurnRightSoon, v => TDU2GpsSettings.VoiceTurnRightSoon = v, 0, count, 0));
+            l.Add(Int("Left now", () => TDU2GpsSettings.VoiceTurnLeftNow, v => TDU2GpsSettings.VoiceTurnLeftNow = v, 0, count, 0));
+            l.Add(Int("Right now", () => TDU2GpsSettings.VoiceTurnRightNow, v => TDU2GpsSettings.VoiceTurnRightNow = v, 0, count, 0));
+            l.Add(Int("U-turn", () => TDU2GpsSettings.VoiceUTurn, v => TDU2GpsSettings.VoiceUTurn = v, 0, count, 0));
+            l.Add(Head("LISTEN TO VOICES"));
             for (int i = 1; i <= count; i++)
             {
                 int k = i;
-                l.Add(Action_("VFGPSVoice" + k.ToString("000") + " abspielen", () => { bool on = TDU2GpsSettings.Voice; TDU2GpsSettings.Voice = true; gps.Voice(k); TDU2GpsSettings.Voice = on; Toast("GPS-Ansage " + k); }));
+                l.Add(Action_("VFGPSVoice" + k.ToString("000") + " play", () => { bool on = TDU2GpsSettings.Voice; TDU2GpsSettings.Voice = true; gps.Voice(k); TDU2GpsSettings.Voice = on; Toast("GPS voice " + k); }));
             }
-            l.Add(Head("LESEZEICHEN (große Karte)"));
-            l.Add(Info("Gespeichert", () => TDU2Bookmarks.All.Count.ToString()));
+            l.Add(Head("BOOKMARKS (big map)"));
+            l.Add(Info("Saved", () => TDU2Bookmarks.All.Count.ToString()));
             foreach (var b in new List<TDU2Bookmarks.Mark>(TDU2Bookmarks.All))
             {
                 var bm = b;
-                l.Add(Action_("Lesezeichen " + bm.Id + " (" + bm.Island + " " + bm.Pos.ToString("F0") + ") löschen", () => { TDU2Bookmarks.Remove(bm.Id); Toast("Lesezeichen gelöscht"); Rebuild(); }));
+                l.Add(Action_("Bookmark " + bm.Id + " (" + bm.Island + " " + bm.Pos.ToString("F0") + ") delete", () => { TDU2Bookmarks.Remove(bm.Id); Toast("Bookmark deleted"); Rebuild(); }));
             }
             return l;
         }
@@ -499,38 +830,38 @@ namespace TDU2.Vehicles
         List<Item> AvatarMenu()
         {
             var l = new List<Item>();
-            if (!Avatars.AvatarLibrary.Ready) { l.Add(Info("Avatar-Daten noch nicht geladen (Datenbank)")); return l; }
-            l.Add(Head("EIGENER AVATAR"));
-            l.Add(Table("Modell (Geschlecht)", SexNames, () => Cfg.Sex, v => { var c = Avatars.AvatarConfig.Default(v); c.Ethnic = Cfg.Ethnic; SetCfg(c); Toast("Modell: " + SexNames[v]); }, 0));
-            l.Add(Table("Herkunft (Kopf, Hautton)", EthNames, () => Cfg.Ethnic, v => { var c = Cfg; c.Ethnic = v; SetCfg(c); }, 0));
-            l.Add(Menu("Kleidung", ClothesMenu));
-            l.Add(Action_("Standard-Aussehen", () => { var c = Avatars.AvatarConfig.Default(Cfg.Sex); c.Ethnic = Cfg.Ethnic; SetCfg(c); Toast("Standard-Aussehen"); }));
-            l.Add(Info("Kodiert", () => { var s = Avatars.AvatarConfigs.LocalCode ?? "-"; return s.Length > 60 ? s.Substring(0, 60) + "…" : s; }));
-            l.Add(Head("ANZEIGE"));
-            l.Add(Bool("Fahrer anzeigen", () => Avatars.TDU2CarAvatar.ShowDrivers, v => Avatars.TDU2CarAvatar.ShowDrivers = v, true));
-            l.Add(Bool("Beifahrer anzeigen", () => Avatars.TDU2CarAvatar.ShowPassengers, v => Avatars.TDU2CarAvatar.ShowPassengers = v, true));
-            l.Add(Bool("Figuren in Interieurs", () => TDU2InteriorNpcs.Show, v => TDU2InteriorNpcs.Show = v, true));
-            l.Add(Bool("Kopf im Cockpit ausblenden", () => Avatars.TDU2CarAvatar.All.Count == 0 || Avatars.TDU2CarAvatar.All[0].HideHeadInCockpit,
+            if (!Avatars.AvatarLibrary.Ready) { l.Add(Info("Avatar data not loaded yet (database)")); return l; }
+            l.Add(Head("OWN AVATAR"));
+            l.Add(Table("Model (sex)", SexNames, () => Cfg.Sex, v => { var c = Avatars.AvatarConfig.Default(v); c.Ethnic = Cfg.Ethnic; SetCfg(c); Toast("Model: " + SexNames[v]); }, 0));
+            l.Add(Table("Ethnicity (head, skin)", EthNames, () => Cfg.Ethnic, v => { var c = Cfg; c.Ethnic = v; SetCfg(c); }, 0));
+            l.Add(Menu("Clothes", ClothesMenu));
+            l.Add(Action_("Default look", () => { var c = Avatars.AvatarConfig.Default(Cfg.Sex); c.Ethnic = Cfg.Ethnic; SetCfg(c); Toast("Default look"); }));
+            l.Add(Info("Encoded", () => { var s = Avatars.AvatarConfigs.LocalCode ?? "-"; return s.Length > 60 ? s.Substring(0, 60) + "…" : s; }));
+            l.Add(Head("DISPLAY"));
+            l.Add(Bool("Show drivers", () => Avatars.TDU2CarAvatar.ShowDrivers, v => Avatars.TDU2CarAvatar.ShowDrivers = v, true));
+            l.Add(Bool("Show passengers", () => Avatars.TDU2CarAvatar.ShowPassengers, v => Avatars.TDU2CarAvatar.ShowPassengers = v, true));
+            l.Add(Bool("NPCs in interiors", () => TDU2InteriorNpcs.Show, v => TDU2InteriorNpcs.Show = v, true));
+            l.Add(Bool("Hide head in cockpit view", () => Avatars.TDU2CarAvatar.All.Count == 0 || Avatars.TDU2CarAvatar.All[0].HideHeadInCockpit,
                 v => { foreach (var a in Avatars.TDU2CarAvatar.All) a.HideHeadInCockpit = v; }, true));
-            l.Add(Head("SHADER (Feinabstimmung, 0 = wie Original)"));
-            l.Add(GlobalFloat("Hautton-Rampe + Verstärkung", "_TDU2AvRampAdd", 0.05f, -1.5f, 2f));
-            l.Add(GlobalFloat("Hautton-Rampe Zeile (0 = COEFFS.z)", "_TDU2AvRampRow", 0.05f, 0f, 1f));
-            l.Add(GlobalFloat("Umgebung auf Lichtseite (0 = Original)", "_TDU2AvAddMix", 0.05f, 0f, 1f));
-            l.Add(GlobalFloat("Zusätzliches Umgebungslicht", "_TDU2AvAmbAdd", 0.02f, -0.5f, 1f));
-            l.Add(GlobalFloat("Haarglanz zusätzlich", "_TDU2AvHairSheen", 0.05f, -0.33f, 1f));
+            l.Add(Head("SHADER (fine tuning, 0 = original)"));
+            l.Add(GlobalFloat("Skin ramp + boost", "_TDU2AvRampAdd", 0.05f, -1.5f, 2f));
+            l.Add(GlobalFloat("Skin ramp row (0 = COEFFS.z)", "_TDU2AvRampRow", 0.05f, 0f, 1f));
+            l.Add(GlobalFloat("Ambient on lit side (0 = original)", "_TDU2AvAddMix", 0.05f, 0f, 1f));
+            l.Add(GlobalFloat("Extra ambient light", "_TDU2AvAmbAdd", 0.02f, -0.5f, 1f));
+            l.Add(GlobalFloat("Extra hair sheen", "_TDU2AvHairSheen", 0.05f, -0.33f, 1f));
             var inter = Mgr != null ? Mgr.GetComponent<TDU2Interiors>() : null;
             if (inter != null)
             {
-                l.Add(Float("Innen: Deckenlicht", () => inter.AvatarIndoorLight.grayscale, v => inter.AvatarIndoorLight = new Color(v, v * 0.94f, v * 0.86f), 0.02f, 0f, 2f, 0.47f, "0.00"));
-                l.Add(Float("Innen: Umgebung oben", () => inter.AvatarIndoorAmbTop.grayscale, v => inter.AvatarIndoorAmbTop = new Color(v, v * 0.96f, v * 0.9f), 0.02f, 0f, 2f, 0.44f, "0.00"));
-                l.Add(Float("Innen: Umgebung unten", () => inter.AvatarIndoorAmbBottom.grayscale, v => inter.AvatarIndoorAmbBottom = new Color(v, v * 0.95f, v * 0.9f), 0.02f, 0f, 2f, 0.19f, "0.00"));
+                l.Add(Float("Indoor: ceiling light", () => inter.AvatarIndoorLight.grayscale, v => inter.AvatarIndoorLight = new Color(v, v * 0.94f, v * 0.86f), 0.02f, 0f, 2f, 0.47f, "0.00"));
+                l.Add(Float("Indoor: ambient top", () => inter.AvatarIndoorAmbTop.grayscale, v => inter.AvatarIndoorAmbTop = new Color(v, v * 0.96f, v * 0.9f), 0.02f, 0f, 2f, 0.44f, "0.00"));
+                l.Add(Float("Indoor: ambient bottom", () => inter.AvatarIndoorAmbBottom.grayscale, v => inter.AvatarIndoorAmbBottom = new Color(v, v * 0.95f, v * 0.9f), 0.02f, 0f, 2f, 0.19f, "0.00"));
             }
             l.Add(Head("ANIMATION"));
             if (_clipNames == null) _clipNames = Avatars.AvatarLibrary.ClipNames();
             l.Add(new Item
             {
                 Label = "Clip (avatarsdriver.bnk)",
-                Value = () => string.IsNullOrEmpty(Avatars.TDU2CarAvatar.DebugClip) ? "Sitzpose (normal)" : Avatars.TDU2CarAvatar.DebugClip,
+                Value = () => string.IsNullOrEmpty(Avatars.TDU2CarAvatar.DebugClip) ? "Seated pose (normal)" : Avatars.TDU2CarAvatar.DebugClip,
                 Change = d =>
                 {
                     int i = _clipNames.IndexOf(Avatars.TDU2CarAvatar.DebugClip ?? "");
@@ -540,19 +871,19 @@ namespace TDU2.Vehicles
                 },
                 Reset = () => Avatars.TDU2CarAvatar.DebugClip = null,
             });
-            l.Add(Float("Abspielgeschwindigkeit", () => Avatars.TDU2CarAvatar.DebugSpeed, v => Avatars.TDU2CarAvatar.DebugSpeed = v, 0.1f, 0f, 4f, 1f, "0.0", "x"));
-            l.Add(Bool("IK Hände/Füße (Lenkrad, Pedale)", () => Avatars.TDU2CarAvatar.DebugIK, v => Avatars.TDU2CarAvatar.DebugIK = v, true));
-            l.Add(Head("INFO / AKTIONEN"));
-            l.Add(Info("Avatare in Autos", () => Avatars.TDU2CarAvatar.All.Count.ToString()));
+            l.Add(Float("Playback speed", () => Avatars.TDU2CarAvatar.DebugSpeed, v => Avatars.TDU2CarAvatar.DebugSpeed = v, 0.1f, 0f, 4f, 1f, "0.0", "x"));
+            l.Add(Bool("IK hands/feet (wheel, pedals)", () => Avatars.TDU2CarAvatar.DebugIK, v => Avatars.TDU2CarAvatar.DebugIK = v, true));
+            l.Add(Head("INFO / ACTIONS"));
+            l.Add(Info("Avatars in cars", () => Avatars.TDU2CarAvatar.All.Count.ToString()));
             l.Add(Info("Clips in avatarsdriver.bnk", () => _clipNames.Count.ToString()));
-            l.Add(Action_("Alle Avatare neu aufbauen", () =>
+            l.Add(Action_("Rebuild all avatars", () =>
             {
                 foreach (var a in Avatars.TDU2CarAvatar.All.ToArray())
                 {
                     var code = a.ConfigCode != null ? a.ConfigCode() : null;
                     a.Rebuild(Avatars.AvatarConfig.Decode(code) ?? a.Avatar?.Config ?? Cfg);
                 }
-                Toast("Avatare neu aufgebaut");
+                Toast("Avatars rebuilt");
             }));
             return l;
         }
@@ -574,7 +905,7 @@ namespace TDU2.Vehicles
 
         List<Item> ClothesMenu()
         {
-            var l = new List<Item> { Head("KLEIDUNG  (←→ Stück · Umschalt+←→ 10 weiter · Entf ablegen)") };
+            var l = new List<Item> { Head("CLOTHES  (←→ item · Shift+←→ 10 · Delete = remove)") };
             int sex = Cfg.Sex;
             foreach (var (part, name) in AvatarParts)
             {
@@ -601,7 +932,7 @@ namespace TDU2.Vehicles
                 });
                 l.Add(new Item
                 {
-                    Label = "    Farbe",
+                    Label = "    Colour",
                     Value = () => { var w = Worn(Cfg, p); return w != null ? (Cfg.ColorOf(w.Hash) + 1) + " / " + Mathf.Max(1, w.NbColors) : "–"; },
                     Change = d =>
                     {
@@ -630,53 +961,115 @@ namespace TDU2.Vehicles
             var l = new List<Item>
             {
                 Head("STATUS"),
-                Info("Angemeldet", () => TDU2Session.LoggedIn ? "JA (" + TDU2Session.Nick + ", Id " + TDU2Session.PlayerId + ")" : "NEIN"),
+                Info("Logged in", () => TDU2Session.LoggedIn ? "YES (" + TDU2Session.Nick + ", Id " + TDU2Session.PlayerId + ")" : "NO"),
                 Info("Server", () => gd != null ? gd.ServerHost + "  TCP " + gd.TcpPort + "  UDP " + gd.UdpPort : "-"),
-                Info("Online", () => gd != null && gd.Online ? "JA" : "NEIN"),
-                Info("Spieler online", () => gd != null ? gd.PlayerCount.ToString() : "-"),
-                Info("Senden möglich (UDP)", () => mp != null && mp.CanSend ? "JA" : "NEIN"),
-                Info("Serverzeit", () => DateTimeOffset.FromUnixTimeMilliseconds((long)(TDU2Session.ServerSeconds * 1000.0)).ToLocalTime().ToString("HH:mm:ss")),
-                Head("EINSTELLUNGEN"),
-                Bool("Mitspieler ausblenden", () => TDU2Multiplayer.Hidden, v => TDU2Multiplayer.Hidden = v, false),
-                Menu("Sichtbarkeit / Synchronisation (TDU2OnlineSettings)", OnlineSettingsMenu),
+                Info("Online", () => gd != null && gd.Online ? "YES" : "NO"),
+                Info("Players online", () => gd != null ? gd.PlayerCount.ToString() : "-"),
+                Info("Can send (UDP)", () => mp != null && mp.CanSend ? "YES" : "NO"),
+                Info("Server time", () => DateTimeOffset.FromUnixTimeMilliseconds((long)(TDU2Session.ServerSeconds * 1000.0)).ToLocalTime().ToString("HH:mm:ss")),
+                Head("NETWORK TRAFFIC"),
+                Info("In/Out (pps)", () => _netInRate.ToString("0") + " / " + _netOutRate.ToString("0")),
+                Info("Graph In", () => GraphStr(_netInHist.ToArray(), 38, Mathf.Max(1f, Max(_netInHist)))),
+                Info("Graph Out", () => GraphStr(_netOutHist.ToArray(), 38, Mathf.Max(1f, Max(_netOutHist)))),
+                Menu("Network Debug (Detailed)", NetworkDebugMenu),
+                Head("SETTINGS"),
+                Bool("Hide other players", () => TDU2Multiplayer.Hidden, v => TDU2Multiplayer.Hidden = v, false),
+                Menu("Visibility / sync (TDU2OnlineSettings)", OnlineSettingsMenu),
             };
             if (gd != null)
             {
-                l.Add(Bool("Namen über Mitspielern", () => gd.ShowNames, v => gd.ShowNames = v, true));
-                l.Add(Bool("Kollision mit Mitspielern", () => gd.PlayerCollisions, v => gd.PlayerCollisions = v, true));
-                l.Add(Bool("Motorgeräusche der Mitspieler", () => gd.PlayerSounds, v => gd.PlayerSounds = v, true));
+                l.Add(Bool("Names above players", () => gd.ShowNames, v => gd.ShowNames = v, true));
+                l.Add(Bool("Collision with players", () => gd.PlayerCollisions, v => gd.PlayerCollisions = v, true));
+                l.Add(Bool("Other players' engine sounds", () => gd.PlayerSounds, v => gd.PlayerSounds = v, true));
                 l.Add(Bool("Chat", () => gd.EnableChat, v => gd.EnableChat = v, true));
-                l.Add(Float("Senderate", () => gd.SendRate, v => gd.SendRate = v, 1f, 2f, 60f, 20f, "0", " /s"));
+                l.Add(Float("Send rate", () => gd.SendRate, v => gd.SendRate = v, 1f, 2f, 60f, 20f, "0", " /s"));
                 l.Add(Float("Interpolation", () => gd.InterpDelay, v => gd.InterpDelay = v, 0.01f, 0f, 1f, 0.12f, "0.00", " s"));
             }
             var tr = Traffic;
-            if (tr != null) l.Add(Bool("Verkehr synchronisieren", () => tr.Sync, v => tr.Sync = v, true));
-            l.Add(Head("AKTIONEN"));
-            l.Add(Action_("Spielstand jetzt speichern", () =>
+            if (tr != null) l.Add(Bool("Sync traffic", () => tr.Sync, v => tr.Sync = v, true));
+            l.Add(Head("ACTIONS"));
+            l.Add(Action_("Save game now", () =>
             {
-                if (!TDU2Session.LoggedIn) { Toast("Nicht angemeldet"); return; }
-                TDU2Session.SaveAsync(); Toast("Spielstand wird gespeichert");
+                if (!TDU2Session.LoggedIn) { Toast("Not logged in"); return; }
+                TDU2Session.SaveAsync(); Toast("Saving game");
             }));
-            l.Add(Menu("Mitspieler", PlayersMenu));
+            l.Add(Menu("Players", PlayersMenu));
             return l;
+        }
+
+        static float Max(List<float> l)
+        {
+            if (l.Count == 0) return 0f;
+            float m = 0f;
+            for (int i = 0; i < l.Count; i++) if (l[i] > m) m = l[i];
+            return m;
+        }
+
+        List<Item> NetworkDebugMenu()
+        {
+            var gd = TDU2GameData.Instance;
+            var mp = Mgr != null ? Mgr.GetComponent<TDU2Multiplayer>() : null;
+            var tr = Traffic;
+            var l = new List<Item>
+            {
+                Head("NETWORK DEBUG"),
+                Info("UDP Connected", () => mp != null && mp.CanSend ? "YES" : "NO"),
+                Info("Players (total)", () => gd != null ? gd.Players.Count.ToString() : "0"),
+                Info("Remotes tracked", () => mp != null ? GetField(mp, "_remotes")?.ToString() ?? "-" : "-"),
+                Info("In/Out rate (pps)", () => _netInRate.ToString("0.0") + " / " + _netOutRate.ToString("0.0")),
+                Head("TRAFFIC NET"),
+                Info("Traffic cars", () => tr != null ? tr.CarCount + " / " + tr.MaxCars : "-"),
+                Info("Owned traffic", () => tr != null ? GetProp(tr, "OwnedCount")?.ToString() ?? "-" : "-"),
+                Info("Traffic sync", () => tr != null ? (tr.Sync ? "ON" : "OFF") : "-"),
+                Info("Traffic status", () => tr != null ? tr.Status : "-"),
+                Head("PLAYER LIST"),
+            };
+            if (gd != null)
+            {
+                foreach (var p in gd.Players.Values)
+                {
+                    var pi = p;
+                    l.Add(Info(pi.Nick + (pi.InCar ? " [CAR]" : ""), () => (pi.Island == 1 ? "IBZ" : pi.Island == 2 ? "HAW" : "-") + "  " + (pi.HasPos ? (pi.GamePos.magnitude/1000f).ToString("0.1")+"km" : "-")));
+                }
+            }
+            if (l.Count < 15) l.Add(Info("No other players"));
+            return l;
+        }
+
+        static object GetField(object o, string name)
+        {
+            if (o == null) return null;
+            var f = o.GetType().GetField(name, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (f == null) return null;
+            var v = f.GetValue(o);
+            if (v is System.Collections.ICollection c) return c.Count;
+            return v;
+        }
+
+        static object GetProp(object o, string name)
+        {
+            if (o == null) return null;
+            var p = o.GetType().GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            if (p == null) return null;
+            return p.GetValue(o);
         }
 
         List<Item> PlayersMenu()
         {
-            var l = new List<Item> { Head("MITSPIELER  (Enter = hinfahren)") };
+            var l = new List<Item> { Head("PLAYERS  (Enter = drive there)") };
             var gd = TDU2GameData.Instance;
-            if (gd == null || gd.Players.Count == 0) { l.Add(Info("keine Mitspieler online")); return l; }
+            if (gd == null || gd.Players.Count == 0) { l.Add(Info("no other players online")); return l; }
             var root = Mgr != null && Mgr.Streamer != null ? Mgr.Streamer.MapRoot : null;
             foreach (var p in gd.Players.Values)
             {
                 var pi = p;
-                string where = !pi.SameIsland ? (pi.Island == 1 ? "Ibiza" : pi.Island == 2 ? "Hawaii" : "andere Insel") : "";
+                string where = !pi.SameIsland ? (pi.Island == 1 ? "Ibiza" : pi.Island == 2 ? "Hawaii" : "other island") : "";
                 float dist = -1f;
                 if (root != null && pi.HasPos && Mgr.Current != null) dist = Vector3.Distance(root.TransformPoint(pi.GamePos), Mgr.Current.transform.position);
                 l.Add(new Item
                 {
                     Label = pi.Nick + (string.IsNullOrEmpty(pi.CarName) ? "" : "  (" + pi.CarName + ")"),
-                    Value = () => where != "" ? where : dist >= 0f ? (dist / 1000f).ToString("0.0", CultureInfo.GetCultureInfo("de-DE")) + " km" : "-",
+                    Value = () => where != "" ? where : dist >= 0f ? (dist / 1000f).ToString("0.0", CultureInfo.InvariantCulture) + " km" : "-",
                     Activate = () => TeleportToPlayer(pi),
                 });
             }
@@ -686,16 +1079,16 @@ namespace TDU2.Vehicles
         void TeleportToPlayer(PlayerInfo p)
         {
             var m = Mgr; var root = m != null && m.Streamer != null ? m.Streamer.MapRoot : null;
-            if (m == null || root == null || m.Current == null) { Toast("Kein eigenes Auto"); return; }
-            if (!p.SameIsland) { Toast(p.Nick + " ist auf einer anderen Insel"); return; }
-            if (!p.HasPos) { Toast("Position von " + p.Nick + " unbekannt"); return; }
+            if (m == null || root == null || m.Current == null) { Toast("No own car"); return; }
+            if (!p.SameIsland) { Toast(p.Nick + " is on another island"); return; }
+            if (!p.HasPos) { Toast("Position of " + p.Nick + " unknown"); return; }
             var fwd = root.TransformDirection(p.GameForward); fwd.y = 0f;
             if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.forward;
             fwd.Normalize();
             var pos = root.TransformPoint(p.GamePos) - fwd * 12f;
             pos.y = m.GroundHeight(pos) + 0.6f;
             PlaceCar(pos, Quaternion.LookRotation(fwd, Vector3.up));
-            Toast("Zu " + p.Nick + " gefahren");
+            Toast("Drove to " + p.Nick + "");
         }
 
         void PlaceCar(Vector3 pos, Quaternion rot)
@@ -715,36 +1108,36 @@ namespace TDU2.Vehicles
             v.transform.SetPositionAndRotation(pos, rot);
         }
 
-        static readonly string[] AidNames = { "Sicher", "Sport", "Hypersport", "Aus" };
+        static readonly string[] AidNames = { "Secure", "Sport", "Hypersport", "Off" };
 
         List<Item> CarsMenu()
         {
             var m = Mgr;
-            var l = new List<Item> { Head("AKTUELLES AUTO") };
-            if (m == null) { l.Add(Info("kein Fahrzeug-Manager in der Szene")); return l; }
-            l.Add(Info("Auto", () => m.Current != null && m.Current.Car != null ? ((m.Current.Car.Brand ?? "") + " " + m.Current.Car.ModelName).Trim() + "  [" + m.Current.Car.FileName + ", Id " + m.Current.Car.Id + "]" : "-"));
-            l.Add(Info("Geschwindigkeit", () => m.Current != null ? m.Current.SpeedKmh.ToString("0") + " km/h" : "-"));
-            l.Add(Table("Fahrhilfen", AidNames, () => (int)m.Aids, i => { m.Aids = (DrivingAids)i; if (m.Current != null) m.Current.Aids = m.Aids; }, (int)DrivingAids.Sport));
-            l.Add(Bool("Automatikgetriebe", () => m.AutomaticGearbox, v => { m.AutomaticGearbox = v; if (m.Current != null) m.Current.AutomaticGearbox = v; }, true));
-            l.Add(Action_("Auto waschen (Schmutz/Kratzer weg)", () =>
+            var l = new List<Item> { Head("CURRENT CAR") };
+            if (m == null) { l.Add(Info("no vehicle manager in the scene")); return l; }
+            l.Add(Info("Car", () => m.Current != null && m.Current.Car != null ? ((m.Current.Car.Brand ?? "") + " " + m.Current.Car.ModelName).Trim() + "  [" + m.Current.Car.FileName + ", Id " + m.Current.Car.Id + "]" : "-"));
+            l.Add(Info("Speed", () => m.Current != null ? m.Current.SpeedKmh.ToString("0") + " km/h" : "-"));
+            l.Add(Table("Driving aids", AidNames, () => (int)m.Aids, i => { m.Aids = (DrivingAids)i; if (m.Current != null) m.Current.Aids = m.Aids; }, (int)DrivingAids.Sport));
+            l.Add(Bool("Automatic gearbox", () => m.AutomaticGearbox, v => { m.AutomaticGearbox = v; if (m.Current != null) m.Current.AutomaticGearbox = v; }, true));
+            l.Add(Action_("Wash car (remove dirt/scratches)", () =>
             {
                 var d = m.Current != null ? m.Current.GetComponentInChildren<TDU2CarDirt>() : null;
-                if (d == null) { Toast("Kein Schmutz-System am Auto"); return; }
-                d.Wash(); Toast("Auto gewaschen");
+                if (d == null) { Toast("No dirt system on the car"); return; }
+                d.Wash(); Toast("Car washed");
             }));
-            l.Add(Action_("Auto aufrichten / zurücksetzen", () =>
+            l.Add(Action_("Right / reset car", () =>
             {
                 if (m.Current == null) return;
                 var t = m.Current.transform; var f = t.forward; f.y = 0f; if (f.sqrMagnitude < 1e-4f) f = Vector3.forward;
                 var p = t.position; p.y = m.GroundHeight(p) + 0.6f;
                 PlaceCar(p, Quaternion.LookRotation(f.normalized, Vector3.up));
-                Toast("Auto zurückgesetzt");
+                Toast("Car reset");
             }));
-            l.Add(Head("AUTO WECHSELN"));
-            l.Add(Menu("Alle Autos (" + m.Available.Count + ")", () => CarList(false)));
-            l.Add(Menu("Eigene Autos", () => CarList(true)));
+            l.Add(Head("SWITCH CAR"));
+            l.Add(Menu("All cars (" + m.Available.Count + ")", () => CarList(false)));
+            l.Add(Menu("Own cars", () => CarList(true)));
             l.Add(Head(""));
-            l.Add(Menu("Verkehr", TrafficMenu));
+            l.Add(Menu("Traffic", TrafficMenu));
             return l;
         }
 
@@ -752,39 +1145,80 @@ namespace TDU2.Vehicles
         {
             var tr = Traffic;
             var l = new List<Item> { Head("STATUS") };
-            if (tr == null) { l.Add(Info("kein Verkehr (TDU2Traffic) in der Szene")); return l; }
-            l.Add(Info("Autos im Verkehr", () => tr.CarCount + " / " + tr.MaxCars + "  (eigene " + tr.OwnedCount + ")"));
-            l.Add(Info("Zustand", () => tr.Status));
-            l.Add(Head("VERKEHR"));
-            l.Add(Bool("Verkehr", () => tr.EnableTraffic, v => tr.EnableTraffic = v, true));
-            l.Add(Int("Autos maximal", () => tr.MaxCars, v => tr.MaxCars = v, 0, 40, 12));
-            l.Add(Bool("Dichte nach Tageszeit", () => tr.DensityByTime, v => tr.DensityByTime = v, false));
-            l.Add(Float("Tempo-Faktor", () => tr.SpeedFactor, v => tr.SpeedFactor = v, 0.02f, 0.5f, 1.3f, 0.92f, "0.00"));
-            l.Add(Float("Spawn-Abstand min", () => tr.SpawnMin, v => tr.SpawnMin = Mathf.Min(v, tr.SpawnMax - 20f), 10f, 40f, 1000f, 180f, "0", " m"));
-            l.Add(Float("Spawn-Abstand max", () => tr.SpawnMax, v => tr.SpawnMax = Mathf.Max(v, tr.SpawnMin + 20f), 10f, 80f, 1500f, 400f, "0", " m"));
-            l.Add(Float("Entfernen ab", () => tr.DespawnDistance, v => tr.DespawnDistance = Mathf.Max(v, tr.SpawnMax + 20f), 10f, 100f, 2000f, 520f, "0", " m"));
-            l.Add(Head("PHYSIK & TON"));
-            l.Add(Int("Autos mit Physik (max)", () => tr.PhysicsMax, v => tr.PhysicsMax = v, 0, 30, 6));
-            l.Add(Float("Physik-Radius", () => tr.PhysicsRadius, v => tr.PhysicsRadius = v, 10f, 20f, 500f, 100f, "0", " m"));
-            l.Add(Float("Unfall ab", () => tr.CrashSpeed, v => tr.CrashSpeed = v, 0.5f, 0.5f, 20f, 3.5f, "0.0", " m/s"));
-            l.Add(Bool("Verkehrsgeräusche", () => tr.Sounds, v => tr.Sounds = v, true));
-            l.Add(Int("Geräusche maximal", () => tr.SoundMax, v => tr.SoundMax = v, 0, 16, 3));
-            l.Add(Float("Geräusch-Radius", () => tr.SoundRadius, v => tr.SoundRadius = v, 5f, 10f, 300f, 70f, "0", " m"));
-            l.Add(Head("MEHRSPIELER"));
-            l.Add(Bool("Verkehr synchronisieren", () => tr.Sync, v => tr.Sync = v, true));
-            l.Add(Float("Senderate", () => tr.SendRate, v => tr.SendRate = v, 1f, 1f, 30f, 8f, "0", " /s"));
-            l.Add(Float("Relevanz-Abstand", () => tr.RelevantDistance, v => tr.RelevantDistance = v, 50f, 200f, 3000f, 900f, "0", " m"));
+            if (tr == null) { l.Add(Info("no traffic (TDU2Traffic) in the scene")); return l; }
+            l.Add(Info("Traffic cars", () => tr.CarCount + " / " + tr.MaxCars + "  (own " + tr.OwnedCount + ")"));
+            l.Add(Info("State", () => tr.Status));
+            l.Add(Head("TRAFFIC"));
+            l.Add(Bool("Traffic", () => tr.EnableTraffic, v => tr.EnableTraffic = v, true));
+            l.Add(Int("Max cars", () => tr.MaxCars, v => tr.MaxCars = v, 0, 40, 12));
+            l.Add(Bool("Density by time of day", () => tr.DensityByTime, v => tr.DensityByTime = v, false));
+            l.Add(Float("Speed factor", () => tr.SpeedFactor, v => tr.SpeedFactor = v, 0.02f, 0.5f, 1.3f, 0.92f, "0.00"));
+            l.Add(Float("Spawn distance min", () => tr.SpawnMin, v => tr.SpawnMin = Mathf.Min(v, tr.SpawnMax - 20f), 10f, 40f, 1000f, 180f, "0", " m"));
+            l.Add(Float("Spawn distance max", () => tr.SpawnMax, v => tr.SpawnMax = Mathf.Max(v, tr.SpawnMin + 20f), 10f, 80f, 1500f, 400f, "0", " m"));
+            l.Add(Float("Despawn beyond", () => tr.DespawnDistance, v => tr.DespawnDistance = Mathf.Max(v, tr.SpawnMax + 20f), 10f, 100f, 2000f, 520f, "0", " m"));
+            l.Add(Head("PHYSICS & SOUND"));
+            l.Add(Int("Cars with physics (max)", () => tr.PhysicsMax, v => tr.PhysicsMax = v, 0, 30, 6));
+            l.Add(Float("Physics radius", () => tr.PhysicsRadius, v => tr.PhysicsRadius = v, 10f, 20f, 500f, 100f, "0", " m"));
+            l.Add(Float("Crash above", () => tr.CrashSpeed, v => tr.CrashSpeed = v, 0.5f, 0.5f, 20f, 3.5f, "0.0", " m/s"));
+            l.Add(Bool("Traffic sounds", () => tr.Sounds, v => tr.Sounds = v, true));
+            l.Add(Int("Max sounds", () => tr.SoundMax, v => tr.SoundMax = v, 0, 16, 3));
+            l.Add(Float("Sound radius", () => tr.SoundRadius, v => tr.SoundRadius = v, 5f, 10f, 300f, 70f, "0", " m"));
+            l.Add(Head("MULTIPLAYER"));
+            l.Add(Bool("Sync traffic", () => tr.Sync, v => tr.Sync = v, true));
+            l.Add(Float("Send rate", () => tr.SendRate, v => tr.SendRate = v, 1f, 1f, 30f, 8f, "0", " /s"));
+            l.Add(Float("Relevance distance", () => tr.RelevantDistance, v => tr.RelevantDistance = v, 50f, 200f, 3000f, 900f, "0", " m"));
             l.Add(Head("DEBUG"));
-            l.Add(Bool("Verkehr-Debuganzeige", () => tr.ShowDebug, v => tr.ShowDebug = v, false));
-            l.Add(Menu("Autoliste", () =>
+            l.Add(Bool("Traffic debug overlay (routes/speed/target)", () => tr.ShowDebug, v => tr.ShowDebug = v, false));
+            l.Add(Menu("Traffic Debug Details", TrafficDebugMenu));
+            l.Add(Menu("Car list", () =>
             {
-                var cl = new List<Item> { Head("VERKEHRSAUTOS  (● eigene · ○ fremde)") };
+                var cl = new List<Item> { Head("TRAFFIC CARS  (● own · ○ remote)") };
                 foreach (var c in tr.Info())
                     cl.Add(Info($"{(c.mine ? "●" : "○")} {c.id & 0xFFFF:X4} {c.model}", () => $"{c.mode}  {c.kmh:0} km/h  {c.dist:0} m  #{c.owner}"));
-                if (cl.Count == 1) cl.Add(Info("keine Autos"));
+                if (cl.Count == 1) cl.Add(Info("no cars"));
                 return cl;
             }));
             return l;
+        }
+
+        List<Item> TrafficDebugMenu()
+        {
+            var tr = Traffic;
+            var l = new List<Item> { Head("TRAFFIC DEBUG DETAILS") };
+            if (tr == null) { l.Add(Info("no traffic")); return l; }
+            l.Add(Bool("Show in 3D (paths/speed/labels)", () => tr.ShowDebug, v => tr.ShowDebug = v, false));
+            l.Add(Info("Total / Own / Remote", () => tr.CarCount + " / " + tr.OwnedCount + " / " + (tr.CarCount - tr.OwnedCount)));
+            l.Add(Info("Physics / Sound", () => "p:" + tr.PhysicsMax + "@" + tr.PhysicsRadius + "m  s:" + tr.SoundMax + "@" + tr.SoundRadius + "m"));
+            l.Add(Head("NEARBY CARS (live)"));
+            int shown = 0;
+            var root = Mgr != null && Mgr.Streamer != null ? Mgr.Streamer.MapRoot : null;
+            var cam = Camera.main;
+            foreach (var c in tr.Info())
+            {
+                if (shown++ > 25) break;
+                float d = c.dist;
+                string distStr = d < 1000 ? d.ToString("0") + "m" : (d/1000f).ToString("0.0") + "km";
+                l.Add(Info($"{(c.mine ? "●" : "○")} {c.model} [{c.mode}]", () => $"{c.kmh:0} km/h  {distStr}  Lane:{GetTrafficLane(tr,c.id)}"));
+            }
+            if (shown == 0) l.Add(Info("No traffic cars"));
+            return l;
+        }
+
+        static string GetTrafficLane(TDU2.Traffic.TDU2Traffic tr, uint id)
+        {
+            try
+            {
+                var f = tr.GetType().GetField("_cars", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (f == null) return "-";
+                var dict = f.GetValue(tr) as System.Collections.IDictionary;
+                if (dict == null || !dict.Contains(id)) return "-";
+                var car = dict[id];
+                var lane = car.GetType().GetField("Lane", BindingFlags.Public | BindingFlags.Instance)?.GetValue(car);
+                if (lane == null) return "-";
+                var ln = lane.GetType().GetField("Lane", BindingFlags.Public | BindingFlags.Instance)?.GetValue(lane);
+                return ln?.ToString() ?? "-";
+            }
+            catch { return "-"; }
         }
 
         TDU2MapStreamer Streamer
@@ -802,51 +1236,51 @@ namespace TDU2.Vehicles
             }
         }
 
-        static string Num(float v, string fmt = "0") => v.ToString(fmt, CultureInfo.GetCultureInfo("de-DE"));
+        static string Num(float v, string fmt = "0") => v.ToString(fmt, CultureInfo.InvariantCulture);
 
         List<Item> WorldMenu()
         {
             var s = Streamer;
             var l = new List<Item> { Head("STATUS") };
-            if (s == null || s.Index == null) { l.Add(Info("keine Insel geladen (TDU2MapStreamer)")); return l; }
+            if (s == null || s.Index == null) { l.Add(Info("no island loaded (TDU2MapStreamer)")); return l; }
             s.RefreshStats();
-            l.Add(Info("Insel", () => TDU2IslandTravel.DisplayName(s.Index.IslandName) + "  (" + s.Status + ")"));
-            l.Add(Info("Position (Spiel)", () => Num(s.ViewerGamePosition.x) + " / " + Num(s.ViewerGamePosition.y) + " / " + Num(s.ViewerGamePosition.z)));
-            l.Add(Info("Sektor", () => WorldLayout.SectorAt(s.ViewerGamePosition.x, s.ViewerGamePosition.z).ToString()));
-            l.Add(Info("Areas fertig / geladen", () => s.builtA + " / " + s.areaCount + "  (Bänke " + s.Index.AreaBanks.Count + (s.failedA > 0 ? ", Fehler " + s.failedA : "") + ")"));
-            l.Add(Info("Sektoren fertig / geladen", () => s.builtS + " / " + s.sectorCount + "  (Bänke " + s.Index.SectorBanks.Count + (s.failedS > 0 ? ", Fehler " + s.failedS : "") + ")"));
-            l.Add(Info("Instanzen (Bäume/Objekte)", () => s.inst.ToString("N0", CultureInfo.GetCultureInfo("de-DE"))));
-            l.Add(Info("Objekt-Bibliothek", () => s.lib));
+            l.Add(Info("Island", () => TDU2IslandTravel.DisplayName(s.Index.IslandName) + "  (" + s.Status + ")"));
+            l.Add(Info("Position (game)", () => Num(s.ViewerGamePosition.x) + " / " + Num(s.ViewerGamePosition.y) + " / " + Num(s.ViewerGamePosition.z)));
+            l.Add(Info("Sector", () => WorldLayout.SectorAt(s.ViewerGamePosition.x, s.ViewerGamePosition.z).ToString()));
+            l.Add(Info("Areas built / loaded", () => s.builtA + " / " + s.areaCount + "  (banks " + s.Index.AreaBanks.Count + (s.failedA > 0 ? ", errors " + s.failedA : "") + ")"));
+            l.Add(Info("Sectors built / loaded", () => s.builtS + " / " + s.sectorCount + "  (banks " + s.Index.SectorBanks.Count + (s.failedS > 0 ? ", errors " + s.failedS : "") + ")"));
+            l.Add(Info("Instances (trees/objects)", () => s.inst.ToString("N0", CultureInfo.InvariantCulture)));
+            l.Add(Info("Object library", () => s.lib));
             l.Add(Info("World-Actors", () => s.ActorsState));
             l.Add(Info("Spots", () => s.Spots != null ? s.Spots.Spots.Count.ToString() : "-"));
-            l.Add(Head("INHALTE  (gilt für neu geladene Kacheln – siehe 'Welt neu laden')"));
-            l.Add(Bool("Inselmodell (Fern-LOD)", () => s.ShowIslandLod, v => s.ShowIslandLod = v, true));
-            l.Add(Bool("Area-Objekte", () => s.LoadAreaObjects, v => s.LoadAreaObjects = v, true));
-            l.Add(Bool("Sektor-Objekte", () => s.LoadSectorObjects, v => s.LoadSectorObjects = v, true));
+            l.Add(Head("CONTENT  (applies to newly loaded tiles – see 'Reload world')"));
+            l.Add(Bool("Island model (far LOD)", () => s.ShowIslandLod, v => s.ShowIslandLod = v, true));
+            l.Add(Bool("Area objects", () => s.LoadAreaObjects, v => s.LoadAreaObjects = v, true));
+            l.Add(Bool("Sector objects", () => s.LoadSectorObjects, v => s.LoadSectorObjects = v, true));
             l.Add(Bool("Vegetation", () => s.LoadVegetation, v => s.LoadVegetation = v, true));
-            l.Add(Bool("Weitere Platzierungen", () => s.LoadOtherPlacements, v => s.LoadOtherPlacements = v, true));
+            l.Add(Bool("Other placements", () => s.LoadOtherPlacements, v => s.LoadOtherPlacements = v, true));
             l.Add(Bool("Actors", () => s.LoadActors, v => s.LoadActors = v, false));
-            l.Add(Bool("World-Actors (Ampeln, Schilder)", () => s.LoadWorldActors, v => s.LoadWorldActors = v, true));
-            l.Add(Bool("Gras", () => s.LoadGrass, v => s.LoadGrass = v, true));
+            l.Add(Bool("World actors (traffic lights, signs)", () => s.LoadWorldActors, v => s.LoadWorldActors = v, true));
+            l.Add(Bool("Grass", () => s.LoadGrass, v => s.LoadGrass = v, true));
             l.Add(Bool("POIs", () => s.LoadPois, v => s.LoadPois = v, true));
-            l.Add(Bool("Spot-Gebäude (außen)", () => s.LoadSpotExteriors, v => s.LoadSpotExteriors = v, true));
-            l.Add(Bool("Interieurs", () => s.LoadInteriors, v => s.LoadInteriors = v, true));
-            l.Add(Bool("Wasser", () => s.ShowWater, v => s.ShowWater = v, true));
-            l.Add(Bool("Kollisionen erzeugen", () => s.GenerateColliders, v => s.GenerateColliders = v, true));
-            l.Add(Bool("Tunnelportale öffnen", () => s.CutTunnelPortals, v => s.CutTunnelPortals = v, true));
-            l.Add(Head("AKTIONEN"));
-            l.Add(Action_("Welt neu laden (alle Kacheln)", () =>
+            l.Add(Bool("Spot buildings (exterior)", () => s.LoadSpotExteriors, v => s.LoadSpotExteriors = v, true));
+            l.Add(Bool("Interiors", () => s.LoadInteriors, v => s.LoadInteriors = v, true));
+            l.Add(Bool("Water", () => s.ShowWater, v => s.ShowWater = v, true));
+            l.Add(Bool("Generate colliders", () => s.GenerateColliders, v => s.GenerateColliders = v, true));
+            l.Add(Bool("Open tunnel portals", () => s.CutTunnelPortals, v => s.CutTunnelPortals = v, true));
+            l.Add(Head("ACTIONS"));
+            l.Add(Action_("Reload world (all tiles)", () =>
             {
-                if (Mgr != null && Mgr.Suspended) { Toast("Gerade nicht möglich (Interieur/Menü)"); return; }
-                s.ReloadWorld(); Toast("Welt wird neu geladen");
+                if (Mgr != null && Mgr.Suspended) { Toast("Not possible right now (interior/menu)"); return; }
+                s.ReloadWorld(); Toast("Reloading world");
             }));
-            l.Add(Action_("Speicher aufräumen (GC + unbenutzte Assets)", CleanMemory));
-            l.Add(Head("ANZEIGE"));
+            l.Add(Action_("Clean memory (GC + unused assets)", CleanMemory));
+            l.Add(Head("DISPLAY"));
             var dm = DebugManager.Instance;
             if (dm != null)
             {
-                l.Add(Bool("Sektor-Debug", () => dm.isSectorDebug, v => dm.isSectorDebug = v, false));
-                l.Add(Bool("POI-Marker", () => dm.isPOIMarker, v => dm.isPOIMarker = v, false));
+                l.Add(Bool("Sector debug", () => dm.isSectorDebug, v => dm.isSectorDebug = v, false));
+                l.Add(Bool("POI markers", () => dm.isPOIMarker, v => dm.isPOIMarker = v, false));
             }
             return l;
         }
@@ -855,27 +1289,33 @@ namespace TDU2.Vehicles
         {
             var s = Streamer;
             var l = new List<Item> { Head("STATUS") };
-            if (s == null || s.Index == null) { l.Add(Info("keine Insel geladen (TDU2MapStreamer)")); return l; }
+            if (s == null || s.Index == null) { l.Add(Info("no island loaded (TDU2MapStreamer)")); return l; }
             s.RefreshStats();
-            l.Add(Info("Lade-Jobs", () => s.Jobs + " / " + s.MaxParallelLoads));
-            l.Add(Info("Areas / Sektoren", () => s.builtA + "/" + s.areaCount + "  ·  " + s.builtS + "/" + s.sectorCount));
-            l.Add(Info("Floating Origin", () => s.UseFloatingOrigin ? "AN" : "AUS"));
-            l.Add(Head("LADEN"));
-            l.Add(Int("Gleichzeitige Lade-Jobs", () => s.MaxParallelLoads, v => s.MaxParallelLoads = v, 1, 8, 3));
-            l.Add(Float("Area laden bis", () => s.AreaLoadDistance, v => s.AreaLoadDistance = v, 100f, 500f, 10000f, 2500f, "0", " m"));
-            l.Add(Float("Area entladen (+)", () => s.AreaUnloadMargin, v => s.AreaUnloadMargin = v, 100f, 100f, 5000f, 1000f, "0", " m"));
-            l.Add(Float("Sektor laden bis", () => s.SectorLoadDistance, v => s.SectorLoadDistance = v, 50f, 100f, 5000f, 700f, "0", " m"));
-            l.Add(Float("Sektor entladen (+)", () => s.SectorUnloadMargin, v => s.SectorUnloadMargin = v, 50f, 50f, 3000f, 300f, "0", " m"));
-            l.Add(Head("DETAIL  (neu geladene Kacheln)"));
-            l.Add(Float("LOD-Distanz Objekte", () => s.LodDistanceScale, v => s.LodDistanceScale = v, 0.25f, 0.25f, 10f, 3f, "0.00", " x"));
-            l.Add(Bool("Letzte LOD-Stufe ausblenden", () => s.CullLastLod, v => s.CullLastLod = v, false));
-            l.Add(Float("Vegetation-Sichtweite", () => s.VegetationDistance, v => s.VegetationDistance = v, 50f, 100f, 5000f, 900f, "0", " m"));
-            l.Add(Float("Gras-Radius", () => s.GrassRadius, v => { s.GrassRadius = v; foreach (var g in FindAll<GrassRenderer>()) g.Radius = v; }, 10f, 20f, 500f, 120f, "0", " m"));
-            l.Add(Head("AKTIONEN"));
-            l.Add(Action_("Welt neu laden (alle Kacheln)", () =>
+            l.Add(Info("Load jobs", () => s.Jobs + " / " + s.MaxParallelLoads));
+            l.Add(Info("Areas / sectors", () => s.builtA + "/" + s.areaCount + "  ·  " + s.builtS + "/" + s.sectorCount));
+            l.Add(Info("Floating Origin", () => s.UseFloatingOrigin ? "ON" : "OFF"));
+            l.Add(Head("LOADING"));
+            l.Add(Int("Parallel load jobs", () => s.MaxParallelLoads, v => s.MaxParallelLoads = v, 1, 8, 3));
+            l.Add(Float("Load areas up to", () => s.AreaLoadDistance, v => s.AreaLoadDistance = v, 100f, 500f, 10000f, 2500f, "0", " m"));
+            l.Add(Float("Unload areas (+)", () => s.AreaUnloadMargin, v => s.AreaUnloadMargin = v, 100f, 100f, 5000f, 1000f, "0", " m"));
+            l.Add(Float("Load sectors up to", () => s.SectorLoadDistance, v => s.SectorLoadDistance = v, 50f, 100f, 5000f, 700f, "0", " m"));
+            l.Add(Float("Unload sectors (+)", () => s.SectorUnloadMargin, v => s.SectorUnloadMargin = v, 50f, 50f, 3000f, 300f, "0", " m"));
+            l.Add(Head("RENDER DISTANCE  (immediate)"));
+            l.Add(Table("Object render distance", TDU2RenderDistance.Names, () => (int)TDU2RenderDistance.Level, i => TDU2RenderDistance.Level = (RenderDistance)i, (int)RenderDistance.Normal));
+            l.Add(Info("Effective", () => "LOD bias " + QualitySettings.lodBias.ToString("0.00", CultureInfo.InvariantCulture) + "  ·  vegetation " + (s.VegetationDistance * TDU2RenderDistance.Multiplier).ToString("0", CultureInfo.InvariantCulture) + " m"));
+            l.Add(Head("TERRAIN DISPLAY  (immediate)"));
+            l.Add(Float("Lower terrain (sidewalks/roads on top)", () => s.TerrainLower, v => s.TerrainLower = v, 0.01f, 0f, 0.5f, 0.1f, "0.00", " m"));
+            l.Add(Float("Terrain depth push", () => s.TerrainDepthPush * 1000f, v => s.TerrainDepthPush = v / 1000f, 0.1f, 0f, 10f, 1.5f, "0.0", " mm/m"));
+            l.Add(Head("DETAIL  (newly loaded tiles)"));
+            l.Add(Float("Object LOD distance", () => s.LodDistanceScale, v => s.LodDistanceScale = v, 0.25f, 0.25f, 10f, 3f, "0.00", " x"));
+            l.Add(Bool("Cull last LOD", () => s.CullLastLod, v => s.CullLastLod = v, false));
+            l.Add(Float("Vegetation distance", () => s.VegetationDistance, v => s.VegetationDistance = v, 50f, 100f, 5000f, 900f, "0", " m"));
+            l.Add(Float("Grass radius", () => s.GrassRadius, v => { s.GrassRadius = v; foreach (var g in FindAll<GrassRenderer>()) g.Radius = v; }, 10f, 20f, 500f, 120f, "0", " m"));
+            l.Add(Head("ACTIONS"));
+            l.Add(Action_("Reload world (all tiles)", () =>
             {
-                if (Mgr != null && Mgr.Suspended) { Toast("Gerade nicht möglich (Interieur/Menü)"); return; }
-                s.ReloadWorld(); Toast("Welt wird neu geladen");
+                if (Mgr != null && Mgr.Suspended) { Toast("Not possible right now (interior/menu)"); return; }
+                s.ReloadWorld(); Toast("Reloading world");
             }));
             return l;
         }
@@ -896,67 +1336,67 @@ namespace TDU2.Vehicles
             if (s != null && s.Index != null)
             {
                 s.RefreshStats();
-                l.Add(Info("Lade-Jobs (Area/Sektor)", () => s.Jobs + " / " + s.MaxParallelLoads));
-                l.Add(Int("Gleichzeitige Lade-Jobs", () => s.MaxParallelLoads, v => s.MaxParallelLoads = v, 1, 8, 3));
-                l.Add(Info("Objekt-Bibliothek", () => s.lib));
+                l.Add(Info("Load jobs (area/sector)", () => s.Jobs + " / " + s.MaxParallelLoads));
+                l.Add(Int("Parallel load jobs", () => s.MaxParallelLoads, v => s.MaxParallelLoads = v, 1, 8, 3));
+                l.Add(Info("Object library", () => s.lib));
                 l.Add(Info("World-Actors", () => s.ActorsState));
             }
-            else l.Add(Info("keine Insel geladen"));
+            else l.Add(Info("no island loaded"));
             l.Add(Head("UNITY JOB SYSTEM"));
             l.Add(Int("Job-Worker", () => Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount,
                 v => Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerCount = v, 1, Math.Max(1, Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerMaximumCount), Math.Max(1, SystemInfo.processorCount - 1)));
-            l.Add(Info("Job-Worker maximal", () => Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerMaximumCount.ToString()));
-            l.Add(Head(".NET THREADPOOL  (Task.Run: Bänke, Texturen, Autos, Musik)"));
-            l.Add(Info("Worker frei / max", () => { System.Threading.ThreadPool.GetAvailableThreads(out int w, out _); System.Threading.ThreadPool.GetMaxThreads(out int mw, out _); return w + " / " + mw + "  (belegt " + (mw - w) + ")"; }));
-            l.Add(Info("E/A frei / max", () => { System.Threading.ThreadPool.GetAvailableThreads(out _, out int io); System.Threading.ThreadPool.GetMaxThreads(out _, out int mio); return io + " / " + mio; }));
+            l.Add(Info("Job workers max", () => Unity.Jobs.LowLevel.Unsafe.JobsUtility.JobWorkerMaximumCount.ToString()));
+            l.Add(Head(".NET THREADPOOL  (Task.Run: banks, textures, cars, music)"));
+            l.Add(Info("Workers free / max", () => { System.Threading.ThreadPool.GetAvailableThreads(out int w, out _); System.Threading.ThreadPool.GetMaxThreads(out int mw, out _); return w + " / " + mw + "  (busy " + (mw - w) + ")"; }));
+            l.Add(Info("I/O free / max", () => { System.Threading.ThreadPool.GetAvailableThreads(out _, out int io); System.Threading.ThreadPool.GetMaxThreads(out _, out int mio); return io + " / " + mio; }));
             l.Add(Head("SYSTEM"));
             l.Add(Info("CPU", () => SystemInfo.processorType + "  (" + SystemInfo.processorCount + " Threads, " + SystemInfo.processorFrequency + " MHz)"));
-            l.Add(Info("Hauptthread", () => Num(_fps, "0") + " FPS  ·  " + Num(_ftAvg, "0.0") + " ms"));
+            l.Add(Info("Main thread", () => Num(_fps, "0") + " FPS  ·  " + Num(_ftAvg, "0.0") + " ms"));
             return l;
         }
 
-        static readonly string[] ShadowNames = { "Aus", "Nur harte", "Alle" };
-        static readonly string[] ShadowResNames = { "Niedrig", "Mittel", "Hoch", "Sehr hoch" };
-        static readonly string[] AnisoNames = { "Aus", "Je Textur", "Erzwungen" };
-        static readonly string[] FpsNames = { "Aus", "30", "60", "120", "144", "240" };
+        static readonly string[] ShadowNames = { "Off", "Hard only", "All" };
+        static readonly string[] ShadowResNames = { "Low", "Medium", "High", "Very high" };
+        static readonly string[] AnisoNames = { "Off", "Per texture", "Forced" };
+        static readonly string[] FpsNames = { "Off", "30", "60", "120", "144", "240" };
         static readonly int[] FpsValues = { -1, 30, 60, 120, 144, 240 };
-        static readonly string[] TexNames = { "Voll", "1/2", "1/4", "1/8" };
+        static readonly string[] TexNames = { "Full", "1/2", "1/4", "1/8" };
 
         List<Item> RenderingMenu()
         {
             var s = Streamer;
             var cam = Camera.main;
-            var l = new List<Item> { Head("BILD") };
-            l.Add(Info("Auflösung", () => Screen.width + " x " + Screen.height + "  (" + Screen.fullScreenMode + ")"));
-            l.Add(Info("Grafik", () => SystemInfo.graphicsDeviceName + "  (" + SystemInfo.graphicsDeviceType + ")"));
-            l.Add(Table("Qualitätsstufe", QualitySettings.names, QualitySettings.GetQualityLevel, i => QualitySettings.SetQualityLevel(i, true), QualitySettings.GetQualityLevel()));
+            var l = new List<Item> { Head("DISPLAY") };
+            l.Add(Info("Resolution", () => Screen.width + " x " + Screen.height + "  (" + Screen.fullScreenMode + ")"));
+            l.Add(Info("Graphics", () => SystemInfo.graphicsDeviceName + "  (" + SystemInfo.graphicsDeviceType + ")"));
+            l.Add(Table("Quality level", QualitySettings.names, QualitySettings.GetQualityLevel, i => QualitySettings.SetQualityLevel(i, true), QualitySettings.GetQualityLevel()));
             l.Add(Int("VSync", () => QualitySettings.vSyncCount, v => QualitySettings.vSyncCount = v, 0, 2, 1));
-            l.Add(Table("FPS-Begrenzung", FpsNames, () => Math.Max(0, Array.IndexOf(FpsValues, Application.targetFrameRate)), i => Application.targetFrameRate = FpsValues[i], 0));
+            l.Add(Table("FPS limit", FpsNames, () => Math.Max(0, Array.IndexOf(FpsValues, Application.targetFrameRate)), i => Application.targetFrameRate = FpsValues[i], 0));
             if (cam != null)
             {
-                l.Add(Float("Sichtweite (Kamera)", () => cam.farClipPlane, v => cam.farClipPlane = v, 500f, 1000f, 60000f, 60000f, "0", " m"));
-                l.Add(Float("Sichtfeld", () => cam.fieldOfView, v => cam.fieldOfView = v, 1f, 30f, 110f, 60f, "0", "°"));
+                l.Add(Float("View distance (camera)", () => cam.farClipPlane, v => cam.farClipPlane = v, 500f, 1000f, 60000f, 60000f, "0", " m"));
+                l.Add(Float("Field of view", () => cam.fieldOfView, v => cam.fieldOfView = v, 1f, 30f, 110f, 60f, "0", "°"));
             }
             l.Add(Head("DETAIL"));
-            l.Add(Float("LOD-Bias (sofort)", () => QualitySettings.lodBias, v => QualitySettings.lodBias = v, 0.25f, 0.25f, 8f, 2f, "0.00"));
-            if (s != null) l.Add(Float("LOD-Distanz Objekte (neu geladen)", () => s.LodDistanceScale, v => s.LodDistanceScale = v, 0.25f, 0.25f, 10f, 3f, "0.00", " x"));
+            l.Add(Float("LOD bias (immediate)", () => QualitySettings.lodBias, v => QualitySettings.lodBias = v, 0.25f, 0.25f, 8f, 2f, "0.00"));
+            if (s != null) l.Add(Float("Object LOD distance (new tiles)", () => s.LodDistanceScale, v => s.LodDistanceScale = v, 0.25f, 0.25f, 10f, 3f, "0.00", " x"));
 #if UNITY_2022_2_OR_NEWER
-            l.Add(Table("Texturauflösung", TexNames, () => Mathf.Clamp(QualitySettings.globalTextureMipmapLimit, 0, 3), i => QualitySettings.globalTextureMipmapLimit = i, 0));
+            l.Add(Table("Texture resolution", TexNames, () => Mathf.Clamp(QualitySettings.globalTextureMipmapLimit, 0, 3), i => QualitySettings.globalTextureMipmapLimit = i, 0));
 #else
-            l.Add(Table("Texturauflösung", TexNames, () => Mathf.Clamp(QualitySettings.masterTextureLimit, 0, 3), i => QualitySettings.masterTextureLimit = i, 0));
+            l.Add(Table("Texture resolution", TexNames, () => Mathf.Clamp(QualitySettings.masterTextureLimit, 0, 3), i => QualitySettings.masterTextureLimit = i, 0));
 #endif
-            l.Add(Table("Anisotrope Filterung", AnisoNames, () => (int)QualitySettings.anisotropicFiltering, i => QualitySettings.anisotropicFiltering = (AnisotropicFiltering)i, (int)AnisotropicFiltering.Enable));
-            l.Add(Int("Pixel-Lichter", () => QualitySettings.pixelLightCount, v => QualitySettings.pixelLightCount = v, 0, 32, 4));
-            l.Add(Head("SCHATTEN"));
-            l.Add(Table("Schatten", ShadowNames, () => (int)QualitySettings.shadows, i => QualitySettings.shadows = (ShadowQuality)i, (int)ShadowQuality.All));
-            l.Add(Table("Schattenauflösung", ShadowResNames, () => (int)QualitySettings.shadowResolution, i => QualitySettings.shadowResolution = (ShadowResolution)i, (int)ShadowResolution.High));
-            l.Add(Float("Schattendistanz", () => QualitySettings.shadowDistance, v => QualitySettings.shadowDistance = v, 25f, 0f, 3000f, 150f, "0", " m"));
-            l.Add(Int("Schatten-Kaskaden", () => QualitySettings.shadowCascades, v => QualitySettings.shadowCascades = v <= 1 ? 1 : v <= 2 ? 2 : 4, 1, 4, 4));
-            l.Add(Head("WELT"));
-            l.Add(Bool("Gras anzeigen", () => _grassOn, v => { _grassOn = v; foreach (var g in FindAll<GrassRenderer>()) g.enabled = v; }, true));
-            l.Add(Bool("Vegetation anzeigen", () => _vegOn, v => { _vegOn = v; foreach (var g in FindAll<VegetationRenderer>()) g.enabled = v; }, true));
-            l.Add(Bool("Leuchteffekte (neu geladen)", () => MaterialFactory.ShowGlowMaterials, v => { MaterialFactory.ShowGlowMaterials = v; if (s != null) s.ShowGlowMaterials = v; }, true));
-            if (s != null) l.Add(Float("Vegetation-Sichtweite (neu geladen)", () => s.VegetationDistance, v => s.VegetationDistance = v, 50f, 100f, 5000f, 900f, "0", " m"));
+            l.Add(Table("Anisotropic filtering", AnisoNames, () => (int)QualitySettings.anisotropicFiltering, i => QualitySettings.anisotropicFiltering = (AnisotropicFiltering)i, (int)AnisotropicFiltering.Enable));
+            l.Add(Int("Pixel lights", () => QualitySettings.pixelLightCount, v => QualitySettings.pixelLightCount = v, 0, 32, 4));
+            l.Add(Head("SHADOWS"));
+            l.Add(Table("Shadows", ShadowNames, () => (int)QualitySettings.shadows, i => QualitySettings.shadows = (ShadowQuality)i, (int)ShadowQuality.All));
+            l.Add(Table("Shadow resolution", ShadowResNames, () => (int)QualitySettings.shadowResolution, i => QualitySettings.shadowResolution = (ShadowResolution)i, (int)ShadowResolution.High));
+            l.Add(Float("Shadow distance", () => QualitySettings.shadowDistance, v => QualitySettings.shadowDistance = v, 25f, 0f, 3000f, 150f, "0", " m"));
+            l.Add(Int("Shadow cascades", () => QualitySettings.shadowCascades, v => QualitySettings.shadowCascades = v <= 1 ? 1 : v <= 2 ? 2 : 4, 1, 4, 4));
+            l.Add(Head("WORLD"));
+            l.Add(Bool("Show grass", () => _grassOn, v => { _grassOn = v; foreach (var g in FindAll<GrassRenderer>()) g.enabled = v; }, true));
+            l.Add(Bool("Show vegetation", () => _vegOn, v => { _vegOn = v; foreach (var g in FindAll<VegetationRenderer>()) g.enabled = v; }, true));
+            l.Add(Bool("Glow materials (new tiles)", () => MaterialFactory.ShowGlowMaterials, v => { MaterialFactory.ShowGlowMaterials = v; if (s != null) s.ShowGlowMaterials = v; }, true));
+            if (s != null) l.Add(Float("Vegetation distance (new tiles)", () => s.VegetationDistance, v => s.VegetationDistance = v, 50f, 100f, 5000f, 900f, "0", " m"));
             return l;
         }
         bool _grassOn = true, _vegOn = true;
@@ -997,13 +1437,13 @@ namespace TDU2.Vehicles
             _recStarted = false;
             _recDraw.Dispose(); _recBatch.Dispose(); _recSetPass.Dispose(); _recTris.Dispose(); _recVerts.Dispose();
         }
-        static string Rec(Unity.Profiling.ProfilerRecorder r) => r.Valid ? r.LastValue.ToString("N0", CultureInfo.GetCultureInfo("de-DE")) : "– (nur Editor/Development-Build)";
+        static string Rec(Unity.Profiling.ProfilerRecorder r) => r.Valid ? r.LastValue.ToString("N0", CultureInfo.InvariantCulture) : "– (editor/development build only)";
 #else
         void StartRecorders() { }
         void StopRecorders() { }
 #endif
 
-        static string MB(long bytes) => (bytes / (1024.0 * 1024.0)).ToString("N0", CultureInfo.GetCultureInfo("de-DE")) + " MB";
+        static string MB(long bytes) => (bytes / (1024.0 * 1024.0)).ToString("N0", CultureInfo.InvariantCulture) + " MB";
 
         void CountObjects()
         {
@@ -1019,7 +1459,7 @@ namespace TDU2.Vehicles
         {
             GC.Collect();
             Resources.UnloadUnusedAssets();
-            Toast("Speicher wird aufgeräumt");
+            Toast("Cleaning memory");
         }
 
         List<Item> UsageMenu()
@@ -1028,32 +1468,32 @@ namespace TDU2.Vehicles
             CountObjects();
             var l = new List<Item>
             {
-                Head("BILDRATE"),
+                Head("FRAME RATE"),
                 Info("FPS", () => Num(_fps, "0.0")),
-                Info("Frame-Zeit Ø / min / max", () => Num(_ftAvg, "0.0") + " / " + Num(_ftMin, "0.0") + " / " + Num(_ftMax, "0.0") + " ms"),
+                Info("Frame time avg / min / max", () => Num(_ftAvg, "0.0") + " / " + Num(_ftMin, "0.0") + " / " + Num(_ftMax, "0.0") + " ms"),
 #if UNITY_2020_2_OR_NEWER
-                Head("RENDERING (letzter Frame)"),
+                Head("RENDERING (last frame)"),
                 Info("Draw Calls", () => Rec(_recDraw)),
                 Info("Batches", () => Rec(_recBatch)),
                 Info("SetPass Calls", () => Rec(_recSetPass)),
-                Info("Dreiecke", () => Rec(_recTris)),
+                Info("Triangles", () => Rec(_recTris)),
                 Info("Vertices", () => Rec(_recVerts)),
 #endif
-                Info("Renderer aktiv / sichtbar / gesamt", () => _renderersOn + " / " + _visible + " / " + _renderers),
-                Info("GameObjects", () => _gameObjects.ToString("N0", CultureInfo.GetCultureInfo("de-DE"))),
-                Head("SPEICHER"),
-                Info("Unity belegt / reserviert", () => MB(UProfiler.GetTotalAllocatedMemoryLong()) + " / " + MB(UProfiler.GetTotalReservedMemoryLong())),
-                Info("Mono-Heap belegt / gesamt", () => MB(UProfiler.GetMonoUsedSizeLong()) + " / " + MB(UProfiler.GetMonoHeapSizeLong())),
-                Info("Grafiktreiber", () => MB(UProfiler.GetAllocatedMemoryForGraphicsDriver())),
-                Info("Texturen", () => MB((long)Texture.currentTextureMemory) + "  (gewünscht " + MB((long)Texture.desiredTextureMemory) + ")"),
-                Info("GC-Durchläufe", () => GC.CollectionCount(0) + " / " + GC.CollectionCount(1) + " / " + GC.CollectionCount(2)),
+                Info("Renderers active / visible / total", () => _renderersOn + " / " + _visible + " / " + _renderers),
+                Info("GameObjects", () => _gameObjects.ToString("N0", CultureInfo.InvariantCulture)),
+                Head("MEMORY"),
+                Info("Unity allocated / reserved", () => MB(UProfiler.GetTotalAllocatedMemoryLong()) + " / " + MB(UProfiler.GetTotalReservedMemoryLong())),
+                Info("Mono heap used / total", () => MB(UProfiler.GetMonoUsedSizeLong()) + " / " + MB(UProfiler.GetMonoHeapSizeLong())),
+                Info("Graphics driver", () => MB(UProfiler.GetAllocatedMemoryForGraphicsDriver())),
+                Info("Textures", () => MB((long)Texture.currentTextureMemory) + "  (desired " + MB((long)Texture.desiredTextureMemory) + ")"),
+                Info("GC collections", () => GC.CollectionCount(0) + " / " + GC.CollectionCount(1) + " / " + GC.CollectionCount(2)),
                 Head("SYSTEM"),
-                Info("Arbeitsspeicher", () => SystemInfo.systemMemorySize.ToString("N0", CultureInfo.GetCultureInfo("de-DE")) + " MB"),
-                Info("Grafikspeicher", () => SystemInfo.graphicsMemorySize.ToString("N0", CultureInfo.GetCultureInfo("de-DE")) + " MB  (" + SystemInfo.graphicsDeviceName + ")"),
+                Info("System memory", () => SystemInfo.systemMemorySize.ToString("N0", CultureInfo.InvariantCulture) + " MB"),
+                Info("Graphics memory", () => SystemInfo.graphicsMemorySize.ToString("N0", CultureInfo.InvariantCulture) + " MB  (" + SystemInfo.graphicsDeviceName + ")"),
                 Info("CPU", () => SystemInfo.processorType + "  (" + SystemInfo.processorCount + " Threads)"),
-                Info("Laufzeit", () => TimeSpan.FromSeconds(Time.realtimeSinceStartup).ToString(@"hh\:mm\:ss")),
-                Head("AKTIONEN"),
-                Action_("Speicher aufräumen (GC + unbenutzte Assets)", CleanMemory),
+                Info("Uptime", () => TimeSpan.FromSeconds(Time.realtimeSinceStartup).ToString(@"hh\:mm\:ss")),
+                Head("ACTIONS"),
+                Action_("Clean memory (GC + unused assets)", CleanMemory),
             };
             return l;
         }
@@ -1061,13 +1501,13 @@ namespace TDU2.Vehicles
         List<Item> CarList(bool ownOnly)
         {
             var m = Mgr;
-            var l = new List<Item> { Head(ownOnly ? "EIGENE AUTOS  (Enter = einsteigen)" : "ALLE AUTOS  (Enter = einsteigen, Entf = zu eigenen Autos)") };
+            var l = new List<Item> { Head(ownOnly ? "OWN CARS  (Enter = drive)" : "ALL CARS  (Enter = drive, Delete = add to own cars)") };
             if (m == null) return l;
             var cars = new List<CarPhysics>();
             if (ownOnly) { foreach (var f in TDU2Session.OwnedCars) { var c = m.FindCar(f); if (c != null && !cars.Contains(c)) cars.Add(c); } }
             else cars.AddRange(m.Available);
             cars.Sort((a, b) => string.Compare(((a.Brand ?? "") + a.ModelName), ((b.Brand ?? "") + b.ModelName), StringComparison.OrdinalIgnoreCase));
-            if (cars.Count == 0) { l.Add(Info(ownOnly ? "keine eigenen Autos (nicht angemeldet?)" : "keine Autos geladen")); return l; }
+            if (cars.Count == 0) { l.Add(Info(ownOnly ? "no own cars (not logged in?)" : "no cars loaded")); return l; }
             foreach (var c in cars)
             {
                 var car = c;
@@ -1075,12 +1515,12 @@ namespace TDU2.Vehicles
                 l.Add(new Item
                 {
                     Label = ((car.Brand ?? "") + " " + car.ModelName).Trim(),
-                    Value = () => (own ? "eigen  " : "") + car.FileName,
+                    Value = () => (own ? "own  " : "") + car.FileName,
                     Activate = () => SwitchCar(car),
                     Reset = ownOnly ? (Action)null : () =>
                     {
-                        if (!TDU2Session.LoggedIn) { Toast("Nicht angemeldet"); return; }
-                        TDU2Session.AddOwned(car.FileName); TDU2Session.SaveAsync(); Toast(car.ModelName + " zu den eigenen Autos hinzugefügt");
+                        if (!TDU2Session.LoggedIn) { Toast("Not logged in"); return; }
+                        TDU2Session.AddOwned(car.FileName); TDU2Session.SaveAsync(); Toast(car.ModelName + " added to own cars");
                     },
                 });
             }
@@ -1090,7 +1530,7 @@ namespace TDU2.Vehicles
         void SwitchCar(CarPhysics car)
         {
             var m = Mgr;
-            if (m == null || m.Suspended) { Toast("Gerade nicht möglich (Interieur/Menü)"); return; }
+            if (m == null || m.Suspended) { Toast("Not possible right now (interior/menu)"); return; }
             Vector3 pos; Quaternion rot;
             if (m.Current != null)
             {
@@ -1105,50 +1545,51 @@ namespace TDU2.Vehicles
             else return;
             m.SpawnCar(car, pos, rot);
             if (TDU2Session.LoggedIn) TDU2Session.SetCurrentCar(car.FileName);
-            Toast("Auto: " + ((car.Brand ?? "") + " " + car.ModelName).Trim());
+            Toast("Car: " + ((car.Brand ?? "") + " " + car.ModelName).Trim());
         }
 
-        static readonly string[] KindNames = { "Automatisch", "Sonne", "Wolken", "Regen", "Vor Regen", "Nach Regen", "Gewitter" };
+        static readonly string[] KindNames = { "Automatic", "Sun", "Clouds", "Rain", "Before rain", "After rain", "Thunderstorm" };
 
         List<Item> WeatherMenu()
         {
             var w = TDU2Weather.Instance;
             var l = new List<Item>
             {
-                Head("AKTUELL"),
-                Info("Uhrzeit", () => HourText(TDU2Weather.Hour)),
-                Info("Wetter", () => KindNames[(int)TDU2Weather.Kind + 1]),
-                Info("Nacht / Regen / Nässe", () => (TDU2Weather.Night * 100f).ToString("0") + " % / " + (TDU2Weather.Rain * 100f).ToString("0") + " % / " + (TDU2Weather.GroundWet * 100f).ToString("0") + " %"),
+                Head("CURRENT"),
+                Info("Time", () => HourText(TDU2Weather.Hour)),
+                Info("Weather", () => KindNames[(int)TDU2Weather.Kind + 1]),
+                Info("Night / rain / wetness", () => (TDU2Weather.Night * 100f).ToString("0") + " % / " + (TDU2Weather.Rain * 100f).ToString("0") + " % / " + (TDU2Weather.GroundWet * 100f).ToString("0") + " %"),
             };
-            if (w == null) { l.Add(Info("Wetter ist nicht aktiv (TDU2MapStreamer.Weather)")); return l; }
-            l.Add(Head("STEUERUNG  (lokal – im Mehrspieler sonst synchron zur Serverzeit)"));
+            if (w == null) { l.Add(Info("Weather not active (TDU2MapStreamer.Weather)")); return l; }
+            l.Add(Head("CONTROL  (local – otherwise synced to server time)"));
             l.Add(new Item
             {
-                Label = "Feste Uhrzeit",
-                Value = () => w.ForceHour < 0f ? "Automatisch" : HourText(w.ForceHour),
+                Label = "Fixed time",
+                Value = () => w.ForceHour < 0f ? "Automatic" : HourText(w.ForceHour),
                 Change = d => { float h = w.ForceHour < 0f ? Mathf.Floor(TDU2Weather.Hour * 2f) / 2f : w.ForceHour; h += 0.5f * Mathf.Sign(d) * (Mathf.Abs(d) >= 10 ? 6f : 1f); w.ForceHour = (h % 24f + 24f) % 24f; },
                 Reset = () => w.ForceHour = -1f,
             });
-            l.Add(Table("Feste Wetterart", KindNames, () => w.ForceKind + 1, i => w.ForceKind = i - 1, 0));
-            l.Add(Float("Uhr verschieben", () => w.HourOffset, v => w.HourOffset = v, 0.5f, -12f, 12f, 0f, "+0.0;-0.0;0", " h"));
-            l.Add(Float("Länge eines Spieltags", () => w.DayMinutes, v => w.DayMinutes = v, 5f, 5f, 1440f, 120f, "0", " min"));
-            l.Add(Float("Dauer eines Wetterabschnitts", () => w.WeatherMinutes, v => w.WeatherMinutes = v, 1f, 1f, 120f, 14f, "0", " min"));
-            l.Add(Float("Wetterübergang", () => w.TransitionSeconds, v => w.TransitionSeconds = v, 10f, 0f, 600f, 120f, "0", " s"));
-            l.Add(Head("DARSTELLUNG"));
-            l.Add(Bool("Nebel", () => w.ApplyFog, v => w.ApplyFog = v, true));
-            l.Add(Float("Nebelstärke", () => w.FogStrength, v => w.FogStrength = v, 0.05f, 0f, 1f, 0.8f, "0.00"));
-            l.Add(Float("Sonnenlicht", () => w.DiffuseScale, v => w.DiffuseScale = v, 0.05f, 0f, 2f, 0.65f, "0.00"));
-            l.Add(Float("Umgebungslicht", () => w.AmbientScale, v => w.AmbientScale = v, 0.05f, 0f, 2f, 0.75f, "0.00"));
-            l.Add(Bool("Scheinwerfer automatisch", () => w.AutoHeadlights, v => w.AutoHeadlights = v, true));
-            l.Add(Int("Straßenlampen mit Licht", () => w.LampLights, v => w.LampLights = v, 0, 64, 16));
-            l.Add(Float("Lampenhelligkeit", () => w.LampIntensity, v => w.LampIntensity = v, 0.1f, 0f, 2f, 1f, "0.0"));
-            l.Add(Float("Straßenlicht im Gelände", () => w.StreetLightStrength, v => w.StreetLightStrength = v, 0.05f, 0f, 1f, 0.5f, "0.00"));
-            l.Add(Head("SCHNELLWAHL"));
-            l.Add(Action_("Sonnenaufgang (6:30)", () => { w.ForceHour = 6.5f; Toast("Uhrzeit 6:30"); }));
-            l.Add(Action_("Mittag (12:00)", () => { w.ForceHour = 12f; Toast("Uhrzeit 12:00"); }));
-            l.Add(Action_("Abenddämmerung (19:30)", () => { w.ForceHour = 19.5f; Toast("Uhrzeit 19:30"); }));
-            l.Add(Action_("Nacht (23:00)", () => { w.ForceHour = 23f; Toast("Uhrzeit 23:00"); }));
-            l.Add(Action_("Alles automatisch (synchron)", () => { w.ForceHour = -1f; w.ForceKind = -1; w.HourOffset = 0f; Toast("Wetter/Uhrzeit wieder synchron"); }));
+            l.Add(Table("Fixed weather (road wetness follows at once)", KindNames, () => w.ForceKind + 1, i => { w.ForceKind = i - 1; w.SnapWetness(); }, 0));
+            l.Add(Action_("Apply road wetness of the current weather now", () => { w.SnapWetness(); Toast("Road wetness updated"); }));
+            l.Add(Float("Clock offset", () => w.HourOffset, v => w.HourOffset = v, 0.5f, -12f, 12f, 0f, "+0.0;-0.0;0", " h"));
+            l.Add(Float("Length of a game day", () => w.DayMinutes, v => w.DayMinutes = v, 5f, 5f, 1440f, 120f, "0", " min"));
+            l.Add(Float("Weather segment length", () => w.WeatherMinutes, v => w.WeatherMinutes = v, 1f, 1f, 120f, 14f, "0", " min"));
+            l.Add(Float("Weather transition", () => w.TransitionSeconds, v => w.TransitionSeconds = v, 10f, 0f, 600f, 120f, "0", " s"));
+            l.Add(Head("DISPLAY"));
+            l.Add(Bool("Fog", () => w.ApplyFog, v => w.ApplyFog = v, true));
+            l.Add(Float("Fog strength", () => w.FogStrength, v => w.FogStrength = v, 0.05f, 0f, 1f, 0.8f, "0.00"));
+            l.Add(Float("Sunlight", () => w.DiffuseScale, v => w.DiffuseScale = v, 0.05f, 0f, 2f, 0.65f, "0.00"));
+            l.Add(Float("Ambient light", () => w.AmbientScale, v => w.AmbientScale = v, 0.05f, 0f, 2f, 0.75f, "0.00"));
+            l.Add(Bool("Auto headlights", () => w.AutoHeadlights, v => w.AutoHeadlights = v, true));
+            l.Add(Int("Street lamps with light", () => w.LampLights, v => w.LampLights = v, 0, 64, 16));
+            l.Add(Float("Lamp brightness", () => w.LampIntensity, v => w.LampIntensity = v, 0.1f, 0f, 2f, 1f, "0.0"));
+            l.Add(Float("Street light on terrain", () => w.StreetLightStrength, v => w.StreetLightStrength = v, 0.05f, 0f, 1f, 0.5f, "0.00"));
+            l.Add(Head("PRESETS"));
+            l.Add(Action_("Sunrise (6:30)", () => { w.ForceHour = 6.5f; Toast("Time 6:30"); }));
+            l.Add(Action_("Noon (12:00)", () => { w.ForceHour = 12f; Toast("Time 12:00"); }));
+            l.Add(Action_("Dusk (19:30)", () => { w.ForceHour = 19.5f; Toast("Time 19:30"); }));
+            l.Add(Action_("Night (23:00)", () => { w.ForceHour = 23f; Toast("Time 23:00"); }));
+            l.Add(Action_("All automatic (synced)", () => { w.ForceHour = -1f; w.ForceKind = -1; w.HourOffset = 0f; Toast("Weather/time synced again"); }));
             return l;
         }
 
@@ -1225,7 +1666,7 @@ namespace TDU2.Vehicles
             // Fußzeile
             _style.normal.textColor = CBlue;
             string more = _items.Count > rows ? "  (" + (p.Sel + 1) + "/" + _items.Count + ")" : "";
-            //GUI.Label(new Rect(x, r.yMax - lh - 4f, w - 20f, lh), "F1 Schließen  ↑↓ Eintrag  ←→ Wert  Enter Öffnen  Rücktaste Zurück  Entf Standard" + more, _style);
+            //GUI.Label(new Rect(x, r.yMax - lh - 4f, w - 20f, lh), "F1 close  ↑↓ entry  ←→ value  Enter open  Backspace back  Delete default" + more, _style);
 
             if (_toast != null && Time.unscaledTime <= _toastUntil)
             {

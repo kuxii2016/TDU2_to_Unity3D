@@ -204,16 +204,150 @@ namespace TDU2.Avatars
             if (head) _headRenderers.Add(smr);
         }
 
-        /// <summary>Augenbrauen/Wimpern (Masken-Materialien) in der Haarfarbe der getragenen Frisur.</summary>
+        /// <summary>
+        /// Gesicht wie das Original (Material-Überschreibungen je Avatar, td2.exe 0x67CB20 / 0x67CD60): "EYES" UVOFF = Zelle EyeID%25 des
+        /// 5x5-Iris-Atlas (u = (n/5)/5, v = (n%5)/5), "EYEBROW" UVOFF = Zelle EyebrowsID des 2x4-Brauen-Atlas (u = (k/4)/2, v = (k%4)/4) und
+        /// COLOR = EyebrowsColor. Ohne .avt-Angaben (eigener Spieler-Avatar): Brauen in der Haarfarbe der Frisur; Wimpern behalten COLOR.
+        /// </summary>
         void ApplyBrowColor()
         {
             var col = AvatarMaterials.DefaultBrow;
-            foreach (var p in _parts) if (p != null && p.HasHairColor) { col = Color.Lerp(p.HairPrim, p.HairScd, 0.25f) * 0.85f; col.a = 1f; break; }
+            if (Config != null && Config.HasBrowColor) col = Config.BrowColor;
+            else foreach (var p in _parts) if (p != null && p.HasHairColor) { col = Color.Lerp(p.HairPrim, p.HairScd, 0.25f) * 0.85f; col.a = 1f; break; }
             foreach (var r in _renderers)
             {
                 if (r == null) continue;
                 foreach (var m in r.sharedMaterials)
-                    if (m != null && m.HasProperty("_AlphaLum") && m.GetFloat("_AlphaLum") > 0.5f) m.SetColor("_Color", col);
+                {
+                    if (m == null) continue;
+                    string n = m.name ?? "";
+                    bool brow = n.IndexOf("BROW", StringComparison.OrdinalIgnoreCase) >= 0;
+                    if (brow && m.GetFloat("_Mode") > 1.5f && m.GetFloat("_Mode") < 2.5f) m.SetColor("_Color", col);
+                    if (!m.HasProperty("_UVOff") || Config == null) continue;
+                    if (brow && Config.BrowId >= 0)
+                    {
+                        int k = Config.BrowId % 8;
+                        m.SetVector("_UVOff", new Vector4((k / 4) * 0.5f, (k % 4) * 0.25f, 0f, 0f));
+                    }
+                    else if (n == "AVT EYES" && Config.EyeId >= 0)
+                    {
+                        int e = Config.EyeId % 25;
+                        m.SetVector("_UVOff", new Vector4((e / 5) * 0.2f, (e % 5) * 0.2f, 0f, 0f));
+                    }
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------ Diagnose (Sitzungs-Log)
+        /// <summary>Alle Materialien der Teile mit Shader, Modus und Texturen ins Sitzungs-Log (einmal je Avatar).</summary>
+        public void DiagMaterials(string who)
+        {
+            if (!Ready) return;
+            var sb = new System.Text.StringBuilder();
+            sb.Append(who).Append(" sex=").Append(Config?.Sex).Append(" ethnic=").Append(Config?.Ethnic).Append(" eye=").Append(Config?.EyeId)
+              .Append(" brow=").Append(Config?.BrowId).Append(" browColor=").Append(Config != null && Config.HasBrowColor ? Config.BrowColor.ToString() : "-");
+            foreach (var r in _renderers)
+            {
+                if (r == null) continue;
+                sb.Append("\n    [").Append(r.name).Append("] layer=").Append(r.gameObject.layer).Append(" enabled=").Append(r.enabled);
+                var mats = r.sharedMaterials;
+                for (int k = 0; k < mats.Length; k++)
+                {
+                    var m = mats[k];
+                    if (m == null) { sb.Append("\n      #").Append(k).Append(" null"); continue; }
+                    var t = m.mainTexture as Texture2D;
+                    sb.Append("\n      #").Append(k).Append(' ').Append(m.name).Append(" shader=").Append(m.shader != null ? m.shader.name : "?")
+                      .Append(" q=").Append(m.renderQueue);
+                    foreach (var p in new[] { "_Mode", "_AlphaLum", "_Cutoff", "_Cull" }) if (m.HasProperty(p)) sb.Append(' ').Append(p).Append('=').Append(m.GetFloat(p).ToString("0.###"));
+                    if (m.HasProperty("_Color")) sb.Append(" _Color=").Append(m.GetColor("_Color"));
+                    if (m.HasProperty("_UVOff")) sb.Append(" _UVOff=").Append(m.GetVector("_UVOff"));
+                    sb.Append(" tex=").Append(t != null ? $"{t.name} {t.format} {t.width}x{t.height} mips={t.mipmapCount}" : "-");
+                }
+            }
+            TDU2Diag.Log("AVATAR", sb.ToString());
+        }
+
+        /// <summary>
+        /// Gesichtsknochen relativ zum Kopf, aktuell gegen Ruhe (aus den inversen Bind-Matrizen): große Abweichungen = Lider/Augen/Kiefer
+        /// stehen nicht dort, wo die Haut gebunden ist (Haut und innere Teile verschieben sich gegeneinander).
+        /// </summary>
+        public void DiagFace(string who)
+        {
+            if (!Ready || Skeleton == null || Bones == null) return;
+            int head = Bone("HEAD");
+            if (head < 0 || Bones[head] == null) return;
+            var headRestInv = Skeleton.InvBind[head];
+            var headNowInv = Bones[head].worldToLocalMatrix;
+            var sb = new System.Text.StringBuilder(who);
+            foreach (var n in new[] { "Head_Facial", "L_Eye_All", "L_EyeBall", "L_UpperEyeLid", "L_LowerEyeLid", "L_InnerBrow", "L_OuterBrow", "R_EyeBall", "R_UpperEyeLid", "M_Jaw", "L_LowerLip" })
+            {
+                int i = Bone(n);
+                if (i < 0 || Bones[i] == null) { sb.Append("\n    ").Append(n).Append(" fehlt"); continue; }
+                Vector3 rest = headRestInv.MultiplyPoint3x4(Skeleton.InvBind[i].inverse.MultiplyPoint3x4(Vector3.zero));
+                Vector3 now = headNowInv.MultiplyPoint3x4(Bones[i].position);
+                float scale = Bones[head].lossyScale.magnitude / Mathf.Sqrt(3f);
+                sb.Append("\n    ").Append(n).Append(" rest=").Append(TDU2Diag.F(rest)).Append(" jetzt=").Append(TDU2Diag.F(now))
+                  .Append(" Δ=").Append(((now - rest).magnitude * 100f).ToString("0.00")).Append(" cm (Kopfskala ").Append(scale.ToString("0.###")).Append(")")
+                  .Append(" lokal=").Append(TDU2Diag.F(Bones[i].localPosition)).Append(" ").Append(TDU2Diag.F(Bones[i].localRotation)).Append(" s=").Append(TDU2Diag.F(Bones[i].localScale));
+            }
+            TDU2Diag.Log("FACE", sb.ToString());
+        }
+
+        static readonly HashSet<string> _snapDone = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Gesichtsbild für die Fehlersuche: unsichtbare Hilfskamera rendert den Kopf (frontal, schräg, nah an den Augen) in eine
+        /// Textur, gespeichert als Docs/Logs/face_&lt;key&gt;.png (je Figur einmal, höchstens 16 je Sitzung). Zeigt, wie Augenbrauen,
+        /// Wimpern und Augen tatsächlich aussehen, ohne Screenshot.
+        /// </summary>
+        public void DiagSnapshot(string key, string who)
+        {
+            if (!TDU2Diag.Enabled || !Ready || Bones == null || string.IsNullOrEmpty(key) || _snapDone.Count >= 16 || _snapDone.Contains(key)) return;
+            int head = Bone("HEAD"), le = Bone("L_EyeBall"), re = Bone("R_EyeBall");
+            if (head < 0 || le < 0 || re < 0 || Bones[head] == null || Bones[le] == null || Bones[re] == null) return;
+            _snapDone.Add(key);
+            Vector3 eyes = (Bones[le].position + Bones[re].position) * 0.5f;
+            Vector3 fwd = eyes - Bones[head].position; fwd.y = 0f;
+            if (fwd.sqrMagnitude < 1e-8f) fwd = transform.forward;
+            fwd.Normalize();
+            const int S = 512;
+            var go = new GameObject("TDU2 DiagFaceCam");
+            RenderTexture rt = null; Texture2D tex = null;
+            try
+            {
+                var cam = go.AddComponent<Camera>();
+                cam.enabled = false;
+                cam.nearClipPlane = 0.01f; cam.farClipPlane = 30f; cam.fieldOfView = 25f;
+                cam.clearFlags = CameraClearFlags.SolidColor; cam.backgroundColor = new Color(0.3f, 0.3f, 0.35f, 1f);
+                rt = new RenderTexture(S, S, 24, RenderTextureFormat.ARGB32);
+                cam.targetTexture = rt;
+                var dirs = new[] { fwd, Quaternion.AngleAxis(40f, Vector3.up) * fwd, fwd };
+                var dists = new[] { 0.5f, 0.5f, 0.17f };
+                tex = new Texture2D(S * dirs.Length, S, TextureFormat.RGB24, false);
+                for (int i = 0; i < dirs.Length; i++)
+                {
+                    cam.transform.position = eyes + dirs[i] * dists[i] + Vector3.up * 0.01f;
+                    cam.transform.rotation = Quaternion.LookRotation(eyes - cam.transform.position, Vector3.up);
+                    cam.Render();
+                    var prev = RenderTexture.active;
+                    RenderTexture.active = rt;
+                    tex.ReadPixels(new Rect(0, 0, S, S), S * i, 0);
+                    RenderTexture.active = prev;
+                }
+                tex.Apply();
+                var safe = new System.Text.StringBuilder();
+                foreach (var ch in key) safe.Append(char.IsLetterOrDigit(ch) || ch == '_' || ch == '-' ? ch : '_');
+                string path = TDU2Diag.FilePath("face_" + safe + ".png");
+                System.IO.File.WriteAllBytes(path, tex.EncodeToPNG());
+                TDU2Diag.Log("AVATAR", $"Gesichtsbild {who}: {path}");
+                cam.targetTexture = null;
+            }
+            catch (Exception ex) { TDU2Diag.Log("AVATAR", "Gesichtsbild " + who + " fehlgeschlagen: " + ex.Message); }
+            finally
+            {
+                if (rt != null) { rt.Release(); Destroy(rt); }
+                if (tex != null) Destroy(tex);
+                Destroy(go);
             }
         }
 
@@ -346,7 +480,18 @@ namespace TDU2.Avatars
                 if (b == null) continue;
                 b.localPosition = _lp[i];
                 b.localRotation = _lr[i];
+                b.localScale = _ls[i];
             }
+        }
+
+        /// <summary>Lokale Lage eines Knochens in der Arbeits-Pose setzen bzw. mit Gewicht <paramref name="w"/> überblenden (FaceFX).</summary>
+        public void BlendLocal(int i, Vector3 pos, Quaternion rot, Vector3 scale, float w)
+        {
+            if (Skeleton == null || _lp == null || i < 0 || i >= Skeleton.Count || w <= 0f) return;
+            if (w >= 1f) { _lp[i] = pos; _lr[i] = rot; _ls[i] = scale; return; }
+            _lp[i] = Vector3.Lerp(_lp[i], pos, w);
+            _lr[i] = Quaternion.Slerp(_lr[i], rot, w);
+            _ls[i] = Vector3.Lerp(_ls[i], scale, w);
         }
 
         public int Bone(string name) => Skeleton != null ? Skeleton.Find(name) : -1;
@@ -407,6 +552,8 @@ namespace TDU2.Avatars
             if (def.TryGetParam("SPECPARM", out var sp)) m.SetVector("_Spec", new Vector4(sp.x, Mathf.Max(1f, sp.y), 0f, 0f));
             if (def.TryGetParam("CARINTEG", out var ci)) m.SetVector("_CarInteg", ci);
             if (def.TryGetParam("ATTEFACT", out var af)) m.SetVector("_AtteFact", af);
+            // UVOFF: Atlas-Zelle (Iris, Augenbrauen); TDU2Avatar überschreibt sie je Figur
+            if (def.TryGetParam("UVOFF", out var uo)) m.SetVector("_UVOff", new Vector4(uo.x, uo.y, 0f, 0f));
             Texture2D t;
             if (Layer(def, SemSkin, out var skin))
             {
@@ -456,10 +603,18 @@ namespace TDU2.Avatars
                 Layer(def, SemTex, out var tex);
                 // "EYEBROW"/"EYELASHES" sind keine Augen (sonst deckend als Auge gezeichnet -> schwarzer Block)
                 string dn = def.Name ?? "";
+                // Augäpfel = Shader-Set TD_Eye: deckend (nicht geblendet) und OHNE COLOR-Parameter (EYES, OCC_EYES_B). Alles mit COLOR
+                // ist TD_Avatar (Farbe = TEX x COLOR, Deckkraft = TEX.a) – auch "Eye_01" (Lidschatten-Make-up an w_pn_a_jewels_tess,
+                // geblendet, DXT5): als Auge gezeichnet wurde daraus ein deckender Fleck um die Augen.
                 bool eye = dn.IndexOf("EYE", StringComparison.OrdinalIgnoreCase) >= 0
                            && dn.IndexOf("LASH", StringComparison.OrdinalIgnoreCase) < 0
-                           && dn.IndexOf("BROW", StringComparison.OrdinalIgnoreCase) < 0;
+                           && dn.IndexOf("BROW", StringComparison.OrdinalIgnoreCase) < 0
+                           && !blend && !def.TryGetParam("COLOR", out _);
                 m.SetFloat("_Mode", eye ? 4f : 2f);
+                // TD_Avatar des Kopfes: Farbe = TEX x COLOR (Zähne 0.83, Wimpern/Brauen schwarz); Kleidung/Accessoires unverändert
+                bool face = dn.IndexOf("LASH", StringComparison.OrdinalIgnoreCase) >= 0 || dn.IndexOf("BROW", StringComparison.OrdinalIgnoreCase) >= 0
+                            || dn.IndexOf("TEETH", StringComparison.OrdinalIgnoreCase) >= 0 || dn.IndexOf("TONGUE", StringComparison.OrdinalIgnoreCase) >= 0;
+                if (face && def.TryGetParam("COLOR", out var tc)) m.SetColor("_Color", new Color(tc.x, tc.y, tc.z, 1f));
                 if ((t = Tex(tex, get)) != null)
                 {
                     m.SetTexture("_MainTex", t);
@@ -470,7 +625,8 @@ namespace TDU2.Avatars
                     if (blend && !eye && (t.format == TextureFormat.DXT1 || t.format == TextureFormat.RGB24))
                     {
                         m.SetFloat("_AlphaLum", 1f);
-                        m.SetColor("_Color", DefaultBrow);
+                        // Original TD_Avatar: Farbe = COLOR (Wimpern, Brauen: schwarz; Brauen bekommen EyebrowsColor)
+                        m.SetColor("_Color", def.TryGetParam("COLOR", out var cc) ? new Color(cc.x, cc.y, cc.z, 1f) : DefaultBrow);
                         m.SetFloat("_Cutoff", 0.02f);
                     }
                 }

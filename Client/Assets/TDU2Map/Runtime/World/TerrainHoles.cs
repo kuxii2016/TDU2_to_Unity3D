@@ -327,5 +327,119 @@ namespace TDU2.World
                     }
                 }
         }
+    
+
+        // ------------------------------------------------------------------ Gelände unter Boden-/Straßenobjekten
+        /// <summary>Boden gilt als "auf dem Gelände", wenn er so weit unter (−) bzw. über (+) der Rasterhöhe liegt.</summary>
+        public static float CoverBelow = 1.5f, CoverAbove = 2.5f;
+
+        /// <summary>Deckende Straßen-/Bodenmaterialien (TD_Road, TD_Ground; keine Tunnel, nicht transparent).</summary>
+        static bool IsCoverMaterial(MaterialDef def)
+        {
+            if (def == null || !(def.IsRoad || def.IsGround) || IsTunnelRoad(def)) return false;
+            var blend = MaterialFactory.GetBlend(def, out _, out _);
+            return blend == EdenBlend.Opaque || blend == EdenBlend.Cutout;
+        }
+
+        /// <summary>
+        /// Zellen, die vollständig von Straßen/Gehwegen/Plätzen (City-Mesh "BLOCK", "NETWORK" …) bedeckt sind, werden im
+        /// dargestellten Gelände ausgespart. Das 3-m-Raster liegt zwischen den Punkten sonst über den nur Zentimeter hohen
+        /// Bodenobjekten und schaut als Erdfleck durch. Eine Zelle zählt als bedeckt, wenn alle vier Ecken und die Mitte
+        /// unter einem nach oben zeigenden Boden-Dreieck in Geländenähe liegen (Brücken/Tunnel bleiben außen vor).
+        /// Thread-sicher. Rückgabe: Maske [z * cells + x] oder null.
+        /// </summary>
+        public static bool[] ComputeGroundCover(HeightGrid g, IEnumerable<ObjectSet> sets, out int count)
+        {
+            count = 0;
+            if (g == null || sets == null) return null;
+            int size = g.Size, cells = size - 1;
+            float sp = g.Spacing;
+            var pt = new bool[size * size];          // Rasterpunkte
+            var ctr = new bool[cells * cells];       // Zellmitten
+            bool any = false;
+            foreach (var set in sets)
+            {
+                var scene = set?.Scene;
+                if (scene == null || set.Materials == null) continue;
+                var byOffset = new Dictionary<int, HieRecord>();
+                foreach (var h in scene.Hierarchy) byOffset[h.Offset] = h;
+                var leaves = new List<(InsRecord ins, Matrix4x4 m)>();
+                if (scene.Hierarchy.Count > 0)
+                    foreach (var h in scene.Hierarchy) { var ins = scene.GetIns(h.InsOffset); if (ins.Lods.Length > 0) leaves.Add((ins, scene.WorldMatrix(h, byOffset))); }
+                else
+                    foreach (var off in scene.InsOffsets) { var ins = scene.GetIns(off); if (ins.Lods.Length > 0) leaves.Add((ins, ins.Matrix)); }
+                var placements = set.Placements ?? new List<Matrix4x4> { Matrix4x4.identity };
+                foreach (var (ins, m) in leaves)
+                {
+                    if (!set.Meshes.TryGetValue(ins.Lods[0].ObjKey, out var md) || md == null) continue;
+                    var bank = scene.ReadMaterialBank(ins.MaterialBankOffset);
+                    for (int s = 0; s < md.SubMeshes.Count; s++)
+                    {
+                        int mi = md.SubMeshMaterialIndex[s];
+                        ulong mk = mi >= 0 && mi < bank.Length ? bank[mi] : 0;
+                        if (mk == 0 || !set.Materials.Materials.TryGetValue(mk, out var def) || !IsCoverMaterial(def)) continue;
+                        var tris = md.SubMeshes[s];
+                        foreach (var pm in placements)
+                        {
+                            var full = pm * m;
+                            for (int t = 0; t + 2 < tris.Count; t += 3)
+                            {
+                                var a = full.MultiplyPoint3x4(md.Positions[tris[t]]);
+                                var b = full.MultiplyPoint3x4(md.Positions[tris[t + 1]]);
+                                var c = full.MultiplyPoint3x4(md.Positions[tris[t + 2]]);
+                                var n = Vector3.Cross(b - a, c - a);
+                                float len = n.magnitude;
+                                if (len < 1e-6f || Mathf.Abs(n.y) / len < 0.5f) continue;   // nur waagerechte Flächen
+                                if (CoverTri(g, pt, ctr, size, cells, sp, a, b, c)) any = true;
+                            }
+                        }
+                    }
+                }
+            }
+            if (!any) return null;
+            bool[] mask = null;
+            for (int z = 0; z < cells; z++)
+                for (int x = 0; x < cells; x++)
+                {
+                    if (!ctr[z * cells + x]) continue;
+                    if (!pt[z * size + x] || !pt[z * size + x + 1] || !pt[(z + 1) * size + x] || !pt[(z + 1) * size + x + 1]) continue;
+                    if (mask == null) mask = new bool[cells * cells];
+                    mask[z * cells + x] = true;
+                    count++;
+                }
+            return mask;
+        }
+
+        static bool CoverTri(HeightGrid g, bool[] pt, bool[] ctr, int size, int cells, float sp, Vector3 a, Vector3 b, Vector3 c)
+        {
+            float det = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
+            if (Mathf.Abs(det) < 1e-6f) return false;
+            // Punkte im Raster: Halbschritte (gerade = Rasterpunkt, ungerade/ungerade = Zellmitte)
+            float h2 = sp * 0.5f;
+            int x0 = Mathf.Max(0, Mathf.FloorToInt(Mathf.Min(a.x, Mathf.Min(b.x, c.x)) / h2));
+            int x1 = Mathf.Min(2 * cells, Mathf.CeilToInt(Mathf.Max(a.x, Mathf.Max(b.x, c.x)) / h2));
+            int z0 = Mathf.Max(0, Mathf.FloorToInt(Mathf.Min(a.z, Mathf.Min(b.z, c.z)) / h2));
+            int z1 = Mathf.Min(2 * cells, Mathf.CeilToInt(Mathf.Max(a.z, Mathf.Max(b.z, c.z)) / h2));
+            bool hit = false;
+            for (int zz = z0; zz <= z1; zz++)
+                for (int xx = x0; xx <= x1; xx++)
+                {
+                    bool point = (xx & 1) == 0 && (zz & 1) == 0, center = (xx & 1) == 1 && (zz & 1) == 1;
+                    if (!point && !center) continue;
+                    float px = xx * h2, pz = zz * h2;
+                    float l1 = ((b.z - c.z) * (px - c.x) + (c.x - b.x) * (pz - c.z)) / det;
+                    float l2 = ((c.z - a.z) * (px - c.x) + (a.x - c.x) * (pz - c.z)) / det;
+                    float l3 = 1f - l1 - l2;
+                    const float e = -0.001f;
+                    if (l1 < e || l2 < e || l3 < e) continue;
+                    float y = l1 * a.y + l2 * b.y + l3 * c.y;
+                    float th = g.Sample(px, pz);
+                    if (y < th - CoverBelow || y > th + CoverAbove) continue;
+                    if (point) pt[(zz >> 1) * size + (xx >> 1)] = true;
+                    else ctr[(zz >> 1) * cells + (xx >> 1)] = true;
+                    hit = true;
+                }
+            return hit;
+        }
     }
 }

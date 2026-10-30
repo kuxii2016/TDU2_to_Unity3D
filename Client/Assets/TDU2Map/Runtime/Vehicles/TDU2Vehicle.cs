@@ -176,6 +176,12 @@ namespace TDU2.Vehicles
 
         void Awake() { _rb = GetComponent<Rigidbody>(); }
 
+        // Floating Origin: Radkontakte stammen aus dem letzten FixedUpdate (Weltkoordinaten) – mitverschieben, sonst zeichnen
+        // Bremsspuren/Staub nach dem Verschieben bis zum nächsten Physikschritt an der alten Stelle (lange Streifen über 1 km).
+        void OnEnable() => FloatingOrigin.Shifted += OnOriginShift;
+        void OnDisable() => FloatingOrigin.Shifted -= OnOriginShift;
+        void OnOriginShift(Vector3 d) { foreach (var w in Wheels) if (w != null) w.ContactPoint -= d; }
+
         void FixedUpdate()
         {
             if (Car == null || Wheels.Length == 0) return;

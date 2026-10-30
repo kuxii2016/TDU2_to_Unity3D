@@ -17,6 +17,11 @@ namespace TDU2.Formats
         public Matrix4x4 Box1, Box2;               // zwei Transformationen (Trigger/Kamera?)
 
         public string Category => SpotsFile.CategoryFromCode(Code);
+
+        public override string ToString()
+        {
+            return $"{Index}, {Key}, {Code}, {Position}, {Position2}, {Value1}, {Heading2}, {AreaX}, {AreaZ}, {SectorX}, {SectorZ}, {TypeA}, {TypeB}";
+        }
     }
 
     /// <summary>

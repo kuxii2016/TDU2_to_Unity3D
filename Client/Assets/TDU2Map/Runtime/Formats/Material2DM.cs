@@ -17,6 +17,9 @@ namespace TDU2.Formats
         public ulong Key;
         public string Name;
         public byte[] Flags = new byte[16];
+        /// <summary>TD_Water (Pools "Oasis_*", Brunnen).</summary>
+        public const ulong ShaderWater = 0x0123000000000000UL;
+        public bool IsPoolWater => ShaderSet == ShaderWater;
         /// <summary>Shader-Set des Originals (MAT.+0x310), z.B. TD_Road / TD_Ground / TD_Building.</summary>
         public ulong ShaderSet;
         /// <summary>Diffusfarbe aus dem Farbblock (MAT.+0xC0 ambient/diffuse/specular/emissive). Interieur-Farb-

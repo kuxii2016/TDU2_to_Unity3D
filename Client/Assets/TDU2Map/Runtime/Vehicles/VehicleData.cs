@@ -259,6 +259,8 @@ namespace TDU2.Vehicles
         public string SpotName;                 // z.B. "ECD_FERR_7841"
         public readonly List<int> CarIds = new List<int>();   // _slot_1.._slot_9 (_id_car), 0 = leer
         public int ClothesBrand;
+        /// <summary>Name in der Sprachdatenbank (_libelle_hc, z.B. "Audi (Norden)", "Tuner - Deutsche").</summary>
+        public int NameHash;
         public string Code => SpotName != null && SpotName.LastIndexOf('_') > 0 ? SpotName.Substring(0, SpotName.LastIndexOf('_')) : SpotName;
         public bool IsInteriorVariant => SpotName != null && SpotName.EndsWith("I");
     }
@@ -267,6 +269,8 @@ namespace TDU2.Vehicles
     public sealed class HouseInfo
     {
         public string SpotName; public int CarSlots, Level, BuyPrice;
+        /// <summary>Name in der Sprachdatenbank (_housename_hc, z.B. "Salines-Villa").</summary>
+        public int NameHash { get; set; }
         public string Code => SpotName != null && SpotName.LastIndexOf('_') > 0 ? SpotName.Substring(0, SpotName.LastIndexOf('_')) : SpotName;
     }
 
@@ -389,14 +393,14 @@ namespace TDU2.Vehicles
             if (shops != null)
                 foreach (var r in shops.Items)
                 {
-                    var sh = new CarShopInfo { SpotName = r.S("_spot_name", ""), ClothesBrand = r.I("_clothesshopbrand") };
+                    var sh = new CarShopInfo { SpotName = r.S("_spot_name", ""), ClothesBrand = r.I("_clothesshopbrand"), NameHash = r.I("_libelle_hc") };
                     for (int i = 1; i <= 9; i++) sh.CarIds.Add(r.I("_slot_" + i));
                     if (r.B("_isvalid", true)) db.Shops.Add(sh);
                 }
             var houses = root.Get("DBHouse");
             if (houses != null)
                 foreach (var r in houses.Items)
-                    db.Houses.Add(new HouseInfo { SpotName = r.S("_spotname", ""), CarSlots = r.I("_nbcarslots", 2), Level = r.I("_level"), BuyPrice = r.I("_buyprice") });
+                    db.Houses.Add(new HouseInfo { SpotName = r.S("_spotname", ""), CarSlots = r.I("_nbcarslots", 2), Level = r.I("_level"), BuyPrice = r.I("_buyprice"), NameHash = r.I("_housename_hc") });
 
             var tp = root.Get("DBTiresPhysics");
             if (tp != null) foreach (var r in tp.Items) db.TirePhysics[r.I("_hashcode")] = r.S("_tires_physics", "");
@@ -435,6 +439,46 @@ namespace TDU2.Vehicles
                 if (first == null) first = s;
             }
             return first;
+        }
+
+        /// <summary>
+        /// Genau der Händler/Shop eines Spots: Datenbanknamen sind &lt;Code&gt;_&lt;AreaX&gt;&lt;AreaZ&gt;&lt;SectorX&gt;&lt;SectorZ&gt;[I] (I = Ibiza),
+        /// z.B. ECD_AUDI_2206 (Hawaii, Norden) / ECD_AUDI_4751 (Süden). Mehrere Spots teilen sich denselben Code – ShopFor(Code) traf
+        /// immer den ersten (falscher Name und falscher Bestand). Fällt auf die beste Übereinstimmung zurück.
+        /// </summary>
+        public CarShopInfo ShopForSpot(Spot s, string islandName)
+        {
+            if (s == null) return null;
+            return BestBySpotName(Shops, x => x.SpotName, s.Code, SpotDigits(s), IsIbiza(islandName)) ?? ShopFor(s.Code);
+        }
+
+        public HouseInfo HouseForSpot(Spot s, string islandName)
+        {
+            if (s == null) return null;
+            return BestBySpotName(Houses, x => x.SpotName, s.Code, SpotDigits(s), IsIbiza(islandName)) ?? HouseFor(s.Code);
+        }
+
+        public static string SpotDigits(Spot s) => s == null ? "" : s.AreaX.ToString() + s.AreaZ + s.SectorX + s.SectorZ;
+        public static bool IsIbiza(string islandName) => !string.IsNullOrEmpty(islandName) && islandName.StartsWith("i", StringComparison.OrdinalIgnoreCase);
+
+        static T BestBySpotName<T>(List<T> list, Func<T, string> nameOf, string code, string digits, bool ibiza) where T : class
+        {
+            if (string.IsNullOrEmpty(code)) return null;
+            T best = null; int bestScore = int.MinValue;
+            foreach (var it in list)
+            {
+                string n = nameOf(it) ?? "";
+                if (n.Length <= code.Length + 1 || !n.StartsWith(code, StringComparison.OrdinalIgnoreCase)) continue;
+                char sep = n[code.Length];
+                if (sep != '_' && sep != '-') continue;   // "ECD_EUR2-6106I" (Tippfehler in der Datenbank)
+                string suf = n.Substring(code.Length + 1);
+                bool isI = suf.EndsWith("I", StringComparison.OrdinalIgnoreCase);
+                string dg = isI ? suf.Substring(0, suf.Length - 1) : suf;
+                int score = (isI == ibiza ? 1000 : 0) + (dg == digits ? 500 : 0);
+                for (int k = 0; k < Math.Min(dg.Length, digits.Length); k++) if (dg[k] == digits[k]) score += 10 - Math.Min(k, 9);
+                if (score > bestScore) { bestScore = score; best = it; }
+            }
+            return best;
         }
 
         public HouseInfo HouseFor(string spotCode)

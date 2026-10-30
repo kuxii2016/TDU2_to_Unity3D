@@ -54,6 +54,9 @@ namespace TDU2.Online
         public string interior = "";
         /// <summary>Ausstattung je Auto (Autohändler: Felgen, Lack, Innenraum).</summary>
         public List<CarConfigEntry> carConfigs = new List<CarConfigEntry>();
+        /// <summary>Schritt der Geschichte (TDU2StoryProgress, -1 = nie begonnen) – stellt den Fortschritt auf einem anderen PC
+        /// bzw. nach gelöschten PlayerPrefs wieder her.</summary>
+        public int story = -1;
         public string savedAt = "";
     }
 
@@ -126,6 +129,42 @@ namespace TDU2.Online
         public int target;          // invite/invreply: Spielernummer
         public bool accept;         // invreply
         public string kind = "";    // invite: "codriving"
+        public int since;           // news: höchste schon bekannte News-Id (0 = alle)
+        public int choice;          // vote: gewählte Antwort (0-basiert), target = Umfrage-Id
+    }
+
+    /// <summary>News-Meldung vom Server (op "news"; im Web-Panel angelegt). Feldnamen = Server Data/NewsItem.cs.</summary>
+    [Serializable]
+    public sealed class NewsEntry
+    {
+        public int id;
+        public string header = "";
+        public string message = "";
+        public string icon = "";      // info, update, event, warning, weather, car, club (Anzeige später)
+        public int island;            // 0 = alle, 1 Ibiza, 2 Hawaii
+        public string author = "";
+        public string created = "";   // ISO (UTC)
+        public string updated = "";
+        public bool hasImage;         // Bild per op "newsimg" (target = id) abholen
+        public string kind = "";      // "" = News-Kanal, "update" = Updates-Kanal (Patch-Notes)
+        public string version = "";   // Updates: Versionsnummer
+        public string category = "";  // Updates: Reiter des DLC-Kanals – gmodes (Packs), vehicles, avatar, furnitures, stickers
+    }
+
+    /// <summary>Umfrage vom Server (op "surveys"/"vote"; im Web-Panel angelegt). Feldnamen = Server Data/SurveyStore.cs SurveyEntry.</summary>
+    [Serializable]
+    public sealed class SurveyEntry
+    {
+        public int id;
+        public string question = "";
+        public string text = "";
+        public List<string> answers = new List<string>();
+        public List<int> counts = new List<int>();
+        public int total;
+        public int myVote = -1;       // -1 = noch nicht abgestimmt
+        public bool open;
+        public string created = "";   // ISO (UTC)
+        public string closes = "";    // ISO (UTC), leer = kein Ende
     }
 
     /// <summary>Offene Einladung (op "status": invites).</summary>
@@ -191,6 +230,15 @@ namespace TDU2.Online
         /// <summary>profile: MyTDULife des angefragten Spielers (mit Foto).</summary>
         public MyLifeData life;
         public int lifeOf;
+        /// <summary>status/news: höchste News-Id auf dem Server; news: neue Meldungen (Id &gt; since) und alle vorhandenen Ids.</summary>
+        public int newsLatest;
+        public List<NewsEntry> news = new List<NewsEntry>();
+        public List<int> newsIds = new List<int>();
+        /// <summary>newsimg: Bild der Meldung (JPEG/PNG, Base64), lifeOf = deren Id.</summary>
+        public string newsImage = "";
+        /// <summary>surveys/vote: Umfragen mit Summen und eigener Stimme; Änderungszähler.</summary>
+        public List<SurveyEntry> surveys = new List<SurveyEntry>();
+        public int surveyVersion;
 
         public static NetResponse Error(string e) => new NetResponse { ok = false, error = e };
     }
@@ -379,15 +427,21 @@ namespace TDU2.Online
         /// <summary>Speichern beginnt (für das Speicher-Symbol saving_logo).</summary>
         public static event Action SaveStarted;
         public static bool Saving => _saving != null && !_saving.IsCompleted;
+        /// <summary>Kopie des Spielstands, die gerade gespeichert wird (Hauptthread; TDU2SaveGame schreibt sie zusätzlich als Original-DATA).</summary>
+        public static event Action<string, SaveData> SaveCopied;
 
         /// <summary>Spielstand an den Server schicken (im Hintergrund). Ist die Sitzung weg (Verbindungsabbruch), erst mit dem Token neu anmelden.</summary>
         public static Task<NetResponse> SaveAsync()
         {
             if (!LoggedIn || Client == null) return Task.FromResult(NetResponse.Error("not_logged_in"));
             if (Saving) return _saving;
+            int step = Story.TDU2StoryProgress.Get(Nick);
+            if (step >= 0) Save.story = step;
             string json = JsonUtility.ToJson(Save);   // Kopie im Hauptthread ziehen
             var copy = JsonUtility.FromJson<SaveData>(json);
             var client = Client; string nick = Nick, token = Token, session = SessionId;
+            try { SaveCopied?.Invoke(nick, JsonUtility.FromJson<SaveData>(json)); }
+            catch (Exception e) { Debug.LogWarning("[TDU2] Savegame: " + e.Message); }
             SaveStarted?.Invoke();
             _saving = Task.Run(() =>
             {

@@ -33,11 +33,16 @@ namespace TDU2.Vehicles
         [Tooltip("Neue Konten wie im Spiel nach GamePC.cpr starten: Insel (AddLevel), im Standard-Haus (DefaultHouse), " +
                  "Auto DefaultCarConfig + Garage DefaultGarageConfig, Geld DefaultMoney. Aus = Startauto beim Händler wählen (Server starterCars).")]
         public bool GamePcStart = true;
+        [Tooltip("Nach der Profilwahl das Hauptmenü des Originals zeigen (main.vmf /menus main_in, WhatGameMode 0): " +
+                 "Spiel fortsetzen / Neues Spiel / Profile / Spiel beenden. Aus = direkt weiterspielen.")]
+        public bool ShowMainMenu = true;
+        [Tooltip("Hauptmenü wirklich nach der Profilwahl öffnen (hing im Ladebildschirm) – aus = direkt weiterspielen")]
+        public bool MainMenuAfterLogin = false;
 
         /// <summary>true, solange Anmeldung/Start läuft – Pausemenü, Karte und Fahrtasten sind dann gesperrt.</summary>
         public static bool Active { get; private set; }
 
-        enum St { Init, PressStart, PressStartOut, Profiles, NewProfile, Busy, Closing, Spawning, Playing }
+        enum St { Init, PressStart, PressStartOut, Profiles, NewProfile, Busy, Closing, MainMenu, Spawning, Playing, Story }
         St _st = St.Init;
 
         TDU2PauseMenu _pause;
@@ -77,6 +82,7 @@ namespace TDU2.Vehicles
         void OnDisable()
         {
             if (_st != St.Playing) Active = false;
+            TDU2TitleScene.End();
             Unsubscribe();
             DestroyIntro();
         }
@@ -92,6 +98,7 @@ namespace TDU2.Vehicles
                 HoldCamera();
             }
             PollTask();
+            UpdateTitleScene();
             switch (_st)
             {
                 case St.Init when _resume:
@@ -125,6 +132,9 @@ namespace TDU2.Vehicles
                 case St.Closing:
                     UpdateClosing();
                     break;
+                case St.MainMenu:
+                    UpdateMainMenu();
+                    break;
                 case St.Spawning:
                     UpdateSpawning();
                     break;
@@ -132,6 +142,25 @@ namespace TDU2.Vehicles
                     UpdatePlaying();
                     break;
             }
+        }
+
+        // ------------------------------------------------------------------ 3D-Hintergrund (Press-Start-Kino der Insel)
+        bool _titleTried;
+
+        /// <summary>Wie im Original (GMLogin): hinter Press Start und den Profilmenüs läuft eines der Press-Start-Kinos.</summary>
+        void UpdateTitleScene()
+        {
+            bool front = _st == St.PressStart || _st == St.PressStartOut || _st == St.Profiles || _st == St.NewProfile || _st == St.Busy
+                         || _st == St.Closing || _st == St.MainMenu;
+            if (!front || _resume) return;
+            if (!_titleTried && Manager.Database != null && Manager.Streamer != null && Manager.Streamer.MapRoot != null && Manager.Streamer.Index != null)
+            {
+                _titleTried = true;
+                TDU2TitleScene.Begin(Manager);
+            }
+#if ENABLE_LEGACY_INPUT_MANAGER
+            if (_st == St.PressStart && Input.GetKeyDown(KeyCode.R)) TDU2TitleScene.Next();   // OpenTDU2: nächstes Kino
+#endif
         }
 
         bool Ready => Manager.Database != null && Manager.Available.Count > 0 && _pause != null && _pause.Ui != null && _pause.Texts != null
@@ -153,9 +182,13 @@ namespace TDU2.Vehicles
             if (_task == null || !_task.IsCompleted) return;
             var t = _task; var then = _then; _task = null; _then = null;
             NetResponse r = t.Status == TaskStatus.RanToCompletion && t.Result != null ? t.Result : NetResponse.Error("net:" + t.Exception?.GetBaseException().Message);
+            TDU2Diag.Log("LOGIN", $"Server-Antwort nach {Time.unscaledTime - _sentAt:0.0} s: ok={r.ok} Fehler={r.error ?? "-"} nick={r.nick ?? "-"}");
             if (_st == St.Busy) _st = _afterBusy;
             try { then?.Invoke(r); }
-            catch (Exception ex) { Debug.LogError("[TDU2] Login: " + ex); }
+            catch (Exception ex) 
+            { 
+                Debug.LogError("[TDU2] Login: " + ex); 
+            }
         }
 
         void Request(NetRequest req, Action<NetResponse> then)
@@ -165,6 +198,8 @@ namespace TDU2.Vehicles
             _afterBusy = _st;
             _st = St.Busy;
             _then = then;
+            _sentAt = Time.unscaledTime;
+            TDU2Diag.Log("LOGIN", $"Anfrage {req.op} für {req.nick} an {gd.ServerHost}:{gd.TcpPort}");
             _task = TDU2Session.Client.Send(req);
         }
 
@@ -231,6 +266,7 @@ namespace TDU2.Vehicles
             ui.SetValue("/:EditProfile", false);
             ui.SetValue("/:EditPassOnly", false);
             ui.SetValue("/:ForceSelection", 1);   // ohne Profil kein Spiel: B/Esc = Beenden
+            ui.SetValue("/:WhatMouseButton", 0);  // Profilzeile anklicken = wählen (sonst prüft der Film "löschen")
             ui.SetValue("/:NoProfile", _profiles.Count == 0 ? 1 : 0);
             ui.SetVariable("/:CurrentProfile", _last ?? "");
 
@@ -264,7 +300,7 @@ namespace TDU2.Vehicles
                 else if (key == "B") CancelNewProfile();
                 return;
             }
-            if (_st == St.Profiles) Ui.Input(key);
+            if (_st == St.Profiles || _st == St.MainMenu) Ui.Input(key);
         }
 
         /// <summary>Mausklick auf ein Eingabefeld des Popups: Fokus dorthin.</summary>
@@ -280,6 +316,7 @@ namespace TDU2.Vehicles
             if (!Active) return;
             string c = (cmd ?? "").Trim().ToLowerInvariant();
             if (LogCommands) Debug.Log("[TDU2] Login FSCommand " + cmd + " " + args);
+            TDU2Diag.Log("LOGIN", $"FSCommand {cmd} {args} (Zustand {_st}, Zeile {CurLineSafe()}, Profile {_profiles.Count})");
             if (TDU2FrontendSounds.Command(c)) return;   // Menü-Sounds (fe_snd.bnk: move/valid/back …)
             switch (c)
             {
@@ -287,6 +324,17 @@ namespace TDU2.Vehicles
                 case "psel": OnProfileSelected(); break;
                 case "tfoc": FocusField(Ui.GetVariable("/:TextToFocus")); break;
                 case "quit": QuitGame(); break;
+                // Hauptmenü (WhatGameMode 0): "Spiel fortsetzen" -> reco, "Neues Spiel" -> ngam (auch Y in der Profilliste),
+                // "Profile" -> prof (Film geht selbst zu profiles_in), "Spiel beenden" -> exit:open + Bestätigung confirm_exit_game
+                case "reco": if (_st == St.MainMenu) { Debug.Log("[TDU2] Hauptmenü: Spiel fortsetzen"); FinishLogin(false); } break;
+                case "ngam":
+                    if (_st == St.MainMenu) FinishLogin(true);
+                    else if (_st == St.Profiles && _profiles.Count > 0) { _newGame = true; OnProfileSelected(); }
+                    break;
+                case "prof": if (_st == St.MainMenu) _st = St.Profiles; break;
+                case "exit:open":
+                case "egam":
+                case "exit:vali": if (_st == St.MainMenu) QuitGame(); break;
             }
         }
 
@@ -333,6 +381,7 @@ namespace TDU2.Vehicles
             if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) MoveProfile(1);
             if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space)) ui.Input("A");
             if (Input.GetKeyDown(KeyCode.X) || Input.GetKeyDown(KeyCode.Insert) || Input.GetKeyDown(KeyCode.N)) ui.Input("X");
+            if (Input.GetKeyDown(KeyCode.Y)) ui.Input("Y");   // Original: Y = Neues Spiel (FSCommand ngam) für das gewählte Profil
             if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace)) ui.Input("B");
             if (Input.GetKeyDown(KeyCode.Delete)) RemoveProfile(CurLine() - 1);
 #endif
@@ -369,16 +418,26 @@ namespace TDU2.Vehicles
         void OnProfileSelected()
         {
             int i = CurLine() - 1;
-            if (i < 0 || i >= _profiles.Count) return;
+            TDU2Diag.Log("LOGIN", $"Profil gewählt: Zeile {i + 1} von {_profiles.Count} (Zustand {_st})");
+            if (i < 0 || i >= _profiles.Count) { if (_profiles.Count > 0) OpenProfiles(); return; }   // keine gültige Zeile: Liste neu öffnen statt hängen
             var p = _profiles[i];
             Ui.SetVariable("/:CurrentProfile", (German ? "Anmelden: " : "Logging in: ") + p.nick);
             Request(new NetRequest { op = "login", nick = p.nick, token = p.token, nationality = TDU2GameData.Ensure().NationalityId }, r =>
             {
                 if (r.ok) { RememberProfile(r.nick, r.token); CloseMenus(false, r); return; }
                 if (r.error == "bad_token") { OpenNewProfile(true, p.nick); return; }
+                // Fehler (Server nicht erreichbar …): der Film hat die Liste beim Bestätigen schon geschlossen -> wieder öffnen, sonst
+                // steht man ohne Menü da. Meldung in der Profilzeile.
+                Debug.LogWarning("[TDU2] Login " + p.nick + ": " + r.error);
+                _newGame = false;
+                OpenProfiles();
                 Ui.SetVariable("/:CurrentProfile", p.nick + " – " + TDU2Session.ErrorText(r.error, German));
             });
         }
+
+        float _sentAt;
+
+        string CurLineSafe() { try { return Ui != null ? Ui.GetVariable(ProfilePath + ":cur_line") : "-"; } catch { return "?"; } }
 
         void RememberProfile(string nick, string token)
         {
@@ -558,11 +617,65 @@ namespace TDU2.Vehicles
         void CloseMenus(bool fromPopup, NetResponse r)
         {
             _login = r; _fromPopup = fromPopup; _menusClosed = false;
+            SyncSavegame(r);
             _st = St.Closing; _t = Time.unscaledTime;
             var ui = Ui;
             ui.SetValue("/:EditPassOnly", false);
             ui.SetVariable("/:CurrentProfile", r.nick);
             if (!fromPopup) { ui.GotoLabel(ProfilePath, "close", true); _menusClosed = true; }   // → pcls + profiles_close
+        }
+
+        bool _pushImported;
+
+        /// <summary>
+        /// Lokaler Spielstand im Original-Format (TDU2SaveGame, Dokumente/KuxiiSoft/TDU2toUnity3D/savegame/&lt;Profil&gt;/PLAYERSAVE/DATA).
+        /// Der Server ist die Quelle: hat er Fortschritt, wird die lokale DATA daraus (neu) gebaut. Ist der Server-Spielstand leer,
+        /// die lokale DATA hat aber Fortschritt, wird sie übernommen und beim Spielstart an den Server geschickt.
+        /// Außerdem: Story-Schritt aus dem Server-Spielstand, wenn er auf diesem PC (PlayerPrefs) fehlt.
+        /// </summary>
+        void SyncSavegame(NetResponse r)
+        {
+            _pushImported = false;
+            if (r == null || string.IsNullOrEmpty(r.nick)) return;
+            try
+            {
+                var db = Manager.Database;
+                TDU2SaveGame.Database = db;
+                if (r.save == null) r.save = new SaveData();
+                var sv = r.save;
+                int pref = Story.TDU2StoryProgress.Get(r.nick);
+                if (pref < 0 && sv.story >= 0)
+                {
+                    Story.TDU2StoryProgress.Set(r.nick, sv.story);
+                    Debug.Log($"[TDU2] Savegame: Story-Schritt {sv.story} aus dem Server-Spielstand übernommen");
+                }
+                bool server = sv.starterChosen || (sv.ownedCars?.Count ?? 0) > 0 || sv.hasPosition || sv.story > 0;
+                bool exists = TDU2SaveGame.Exists(r.nick);
+                Debug.Log($"[TDU2] Savegame {r.nick}: Server-Fortschritt={server} (Autos {sv.ownedCars?.Count ?? 0}, Story {sv.story}), lokale DATA vorhanden={exists} ({TDU2SaveGame.PathFor(r.nick)})");
+                if (server)
+                {
+                    TDU2SaveGame.WriteAsync(r.nick, sv, db, exists ? "lokale DATA aus dem Server-Spielstand aktualisiert" : "lokale DATA fehlte – aus dem Server-Spielstand neu gebaut");
+                    return;
+                }
+                if (!exists) { TDU2SaveGame.WriteAsync(r.nick, sv, db, "neues Profil – lokale DATA angelegt"); return; }
+                if (!TDU2SaveGame.TryRead(r.nick, db, out var local, out string why))
+                {
+                    Debug.LogWarning("[TDU2] Savegame: lokale DATA nicht lesbar (" + why + ") – Server-Spielstand bleibt");
+                    return;
+                }
+                Debug.Log("[TDU2] Savegame: lokale DATA gelesen – " + why);
+                bool localProgress = local.starterChosen || local.ownedCars.Count > 0 || local.hasPosition || local.story > 0;
+                if (!localProgress) { Debug.Log("[TDU2] Savegame: lokale DATA ohne Fortschritt – nichts übernommen"); return; }
+                TDU2SaveGame.KeepServerOnly(local, sv);
+                r.save = local;
+                if (local.story >= 0 && Story.TDU2StoryProgress.Get(r.nick) < local.story) Story.TDU2StoryProgress.Set(r.nick, local.story);
+                _pushImported = true;
+                Debug.Log("[TDU2] Savegame: Server-Spielstand war leer – lokale DATA übernommen, wird an den Server geschickt");
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[TDU2] Savegame: Abgleich fehlgeschlagen: " + e.Message);
+            }
         }
 
         void UpdateClosing()
@@ -571,11 +684,115 @@ namespace TDU2.Vehicles
             float dt = Time.unscaledTime - _t;
             if (_fromPopup && !_menusClosed && dt > 0.5f) { _menusClosed = true; ui.GotoLabel("/menus", "profiles_close", true); }
             if (dt < 1.6f) return;
+            if (_newGame) { FinishLogin(true); return; }   // Y in der Profilliste
+            // Ohne Spielfortschritt gibt es nichts fortzusetzen: direkt das Intro (Neues Spiel). Mit Fortschritt das Hauptmenü
+            // des Originals (Spiel fortsetzen / Neues Spiel / Profile / Beenden).
+            if (!HasProgress(out string why))
+            {
+                Debug.Log($"[TDU2] Profil {_login?.nick}: kein Spielfortschritt ({why}) – Neues Spiel (Intro)");
+                FinishLogin(true);
+                return;
+            }
+            Debug.Log($"[TDU2] Profil {_login?.nick}: Spielfortschritt vorhanden ({why})");
+            // Aus dem Neues-Profil-Popup (Konto angelegt/wiederhergestellt, Spielstand z.B. aus der lokalen DATA): der Film startet
+            // nach "close" mit IsValidNewProfile selbst das Laden – das Hauptmenü (main_in) passt dann nicht mehr dazu (endloser
+            // Ladebildschirm). Wie im Original direkt weiterspielen.
+            // Mit Fortschritt direkt weiterspielen (Neues Spiel: Y in der Profilliste). Das Hauptmenü (main_in) blieb nach der
+            // Profilwahl im Ladebildschirm hängen – nur noch auf ausdrücklichen Wunsch (ShowMainMenu + MainMenuAfterLogin).
+            if (ShowMainMenu && MainMenuAfterLogin && !_fromPopup) { EnterMainMenu(); return; }
+            Debug.Log("[TDU2] Profil " + _login?.nick + ": Spiel wird fortgesetzt");
+            FinishLogin(false);
+        }
+
+        // ------------------------------------------------------------------ Hauptmenü (Original main.vmf, WhatGameMode 0)
+        bool _newGame;
+
+        void EnterMainMenu()
+        {
+            var ui = Ui;
+            var save = _login?.save;
+            // Ins Hauptmenü kommt nur ein Profil mit Fortschritt (UpdateClosing) -> "Spiel fortsetzen" immer frei
+            bool progress = HasProgress(out _);
+            foreach (var n in new[] { "LockSnapshot", "LockChangePosition", "LockInviteParty", "LockManageParty", "LockRestart", "LockEditor",
+                                      "LockBookmarks", "LockAchiev", "LockRankings", "LockOnline", "LockSocial", "LockStatus", "LockResume",
+                                      "LockQuit", "LockPlayers", "LockJoin", "LockGameProgress", "LockInvite", "LockSave" })
+                ui.SetValue("/:" + n, true);
+            ui.SetValue("/:LockContinueGame", !progress);
+            ui.SetValue("/:LockNewGame", false);
+            ui.SetValue("/:LockProfiles", false);
+            ui.SetValue("/:LockOptions", true);    // Optionsseiten laufen über das Pausemenü (im Spiel erreichbar)
+            ui.SetValue("/:LockExitGame", false);
+            ui.SetValue("/:WhatGameMode", 0);
+            ui.SetValue("/:WhatPlatform", 1);
+            ui.SetValue("/:Input", true);
+            ui.SetVariable("/:CurrentProfile", _login?.nick ?? "");
+            ui.Visible = true;
+            ui.GotoLabel("/menus", "main_in", true);
+            _st = St.MainMenu;
+            Cursor.lockState = CursorLockMode.None; Cursor.visible = true;
+        }
+
+        void UpdateMainMenu()
+        {
+            var ui = Ui;
+#if ENABLE_LEGACY_INPUT_MANAGER
+            if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) ui.Input("Move", "up");
+            if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) ui.Input("Move", "down");
+            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.E)) ui.Input("A");
+            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace)) ui.Input("B");
+#endif
+        }
+
+        /// <summary>
+        /// Hat das Profil etwas zum Fortsetzen? Spielstand vom Server (Startauto gewählt, Autos, gespeicherte Position) oder die
+        /// Geschichte ist über die Avatar-Wahl hinaus (Schritt &gt; 0). why = Begründung fürs Log.
+        /// </summary>
+        bool HasProgress(out string why)
+        {
+            var save = _login?.save;
+            int step = Story.TDU2StoryProgress.Get(_login?.nick);
+            int cars = save?.ownedCars?.Count ?? 0;
+            bool starter = save != null && save.starterChosen, pos = save != null && save.hasPosition;
+            why = $"Startauto={starter}, Autos={cars}, Position={pos}, Geschichte Schritt {step}";
+            return starter || cars > 0 || pos || step > 0;
+        }
+
+        /// <summary>Anmeldung abschließen und spielen; newGame = Spielstand und Geschichte auf Anfang (Original "Neues Spiel").</summary>
+        void FinishLogin(bool newGame)
+        {
+            var ui = Ui;
+            if (newGame) ResetForNewGame(_login);
+            _newGame = false;
             ui.SetValue("/:Input", true);
             ui.GotoLabel("/", "default", false);
             ui.Visible = false;
             Unsubscribe();   // Klicks/Befehle gehören wieder dem Pausemenü
             StartGame(_login);
+        }
+
+        /// <summary>
+        /// Neues Spiel: frischer Spielstand (Autos, Geld, Position, Häuser, Kleidung …), Geschichte ab Schritt 0 (Intro/Avatar-Wahl).
+        /// Behalten werden nur Profildaten, die kein Spielfortschritt sind (MyTDULife, Lesezeichen, Lieblings-Spots, eigene Farben).
+        /// Der Server erhält den neuen Stand mit dem nächsten Autosave.
+        /// </summary>
+        void ResetForNewGame(NetResponse r)
+        {
+            if (r == null) return;
+            var old = r.save ?? new SaveData();
+            r.save = new SaveData
+            {
+                myLife = old.myLife ?? new MyLifeData(),
+                bookmarks = old.bookmarks ?? new List<BookmarkEntry>(),
+                favoriteSpots = old.favoriteSpots ?? new List<string>(),
+                favoriteColors = old.favoriteColors ?? new List<int>(),
+            };
+            Story.TDU2StoryProgress.Set(r.nick, 0);
+            Story.TDU2StoryProgress.SetGaveStoryCar(r.nick, false);
+            Story.TDU2StoryProgress.SetIntroAvatar(r.nick, "");
+            _storyDone = false;
+            r.save.story = 0;
+            TDU2SaveGame.WriteAsync(r.nick, r.save, Manager.Database, "Neues Spiel – lokale DATA zurückgesetzt");
+            DebugManager.Info($"Neues Spiel für {r.nick}: Spielstand zurückgesetzt, Geschichte ab Schritt 0");
         }
 
         // ------------------------------------------------------------------ 3. Spielstart (Spielstand vom Server)
@@ -587,16 +804,37 @@ namespace TDU2.Vehicles
 
         void StartGame(NetResponse r)
         {
+            TDU2TitleScene.End();
             TDU2FrontendMusic.Stop();
             TDU2Session.Begin(r);
             ApplyOdometers();
             var save = TDU2Session.Save;
+            if (_pushImported)
+            {
+                _pushImported = false;
+                TDU2Session.SaveAsync();
+                Debug.Log("[TDU2] Savegame: übernommener lokaler Spielstand an den Server geschickt");
+            }
             string island = Manager.Streamer?.Index?.IslandName ?? Manager.Streamer?.Island ?? "";
             if (string.IsNullOrEmpty(save.island)) save.island = island;
             DebugManager.Info($"Angemeldet als {r.nick} – {save.ownedCars.Count} Autos, Startauto gewählt: {save.starterChosen}, {r.online} online");
 
-            // Spielstand auf der anderen Insel: dorthin wechseln (Szene mit der Insel neu laden, danach geht es hier weiter)
-            if (!TDU2IslandTravel.Pending && save.starterChosen && save.hasPosition && !string.IsNullOrEmpty(save.island)
+            // Geschichte (GamePC.cpr SCENARIOTUTORIAL = ON) noch nicht gespielt bzw. mittendrin: Intro und Missionen statt des direkten
+            // Starts – wie im Original auf Ibiza (Party-Haus EPH_L3DI_5067I)
+            if (!_storyDone && Story.TDU2Story.ShouldRun(TDU2GamePC.Load(Manager.BnkDir), r.nick, save.starterChosen))
+            {
+                if (!island.StartsWith("ibiza", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!TDU2IslandTravel.Pending && TDU2IslandTravel.CanTravelTo("ibiza", Manager.BnkDir)) { save.hasPosition = false; TDU2IslandTravel.Go("ibiza", false); return; }
+                }
+                else { BeginStory(r); return; }
+            }
+
+            // Spielstand auf der anderen Insel: dorthin wechseln (Szene mit der Insel neu laden, danach geht es hier weiter).
+            // Auch ohne gespeicherte Fahrposition, wenn man zuletzt in einem Interieur (Haus …) der anderen Insel war – sonst blieb man
+            // nach dem Neustart auf Ibiza, das Hawaii-Haus wurde dort nicht gefunden und man stand irgendwo auf der Straße.
+            Debug.Log($"[TDU2] Spielstand: Insel {save.island} (Szene {island}), Position={save.hasPosition}, Interieur='{save.interior}', Auto {save.currentCar}");
+            if (!TDU2IslandTravel.Pending && save.starterChosen && (save.hasPosition || !string.IsNullOrEmpty(save.interior)) && !string.IsNullOrEmpty(save.island)
                 && !string.Equals(save.island, island, StringComparison.OrdinalIgnoreCase) && TDU2IslandTravel.CanTravelTo(save.island, Manager.BnkDir))
             {
                 TDU2IslandTravel.Go(save.island, false);
@@ -652,10 +890,13 @@ namespace TDU2.Vehicles
                 var parts = save.interior.Split('|');
                 Spot last = null;
                 var all = Manager.Streamer?.Spots?.Spots;
-                if (all != null)
+                // Haus über den vollen DBHouse-Namen (3. Teil): mehrere Häuser teilen sich den Code (z.B. EPH_L3A), sonst das erste
+                if (all != null && parts.Length > 2 && parts[2].Length > 0) last = TDU2GamePC.FindSpot(all, parts[2]);
+                if (all != null && last == null)
                     foreach (var s in all)
                         if (string.Equals(s.Code, parts[0], StringComparison.OrdinalIgnoreCase)) { last = s; break; }
                 var interiors = Manager.GetComponent<TDU2Interiors>();
+                Debug.Log($"[TDU2] Spielstand: weiter im Interieur {save.interior} – Spot {(last != null ? "gefunden" : "NICHT gefunden")} auf {island}");
                 if (last != null && interiors != null)
                 {
                     var inCar = car;
@@ -664,7 +905,7 @@ namespace TDU2.Vehicles
                     DebugManager.Debug("Spielstand: weiter im Interieur " + last.Code + (stem.Length > 0 ? " (" + stem + ")" : ""));
                     BeginSpawn(at, new Vector3(Mathf.Sin(last.Heading2), 0f, Mathf.Cos(last.Heading2)), true, (p, q) =>
                     {
-                        if (!interiors.EnterSpotRoom(last, stem, inCar)) SpawnCar(inCar, p, q);
+                        if (!interiors.EnterSpotRoom(last, stem, inCar)) { Debug.LogWarning("[TDU2] Spielstand: Interieur " + last.Code + " (" + stem + ") nicht betretbar – Auto davor"); SpawnCar(inCar, p, q); }
                     });
                     return;
                 }
@@ -819,6 +1060,54 @@ namespace TDU2.Vehicles
             return null;
         }
 
+        // ------------------------------------------------------------------ Geschichte (Story/TDU2Story.cs)
+        NetResponse _storyLogin;
+        bool _storyDone;
+
+        void BeginStory(NetResponse r)
+        {
+            _storyLogin = r;
+            _st = St.Story;   // Login bleibt aktiv (Pausemenü/Karte gesperrt), bis die Geschichte ein Auto setzt
+            DebugManager.Info("Geschichte: Schritt " + Story.TDU2StoryProgress.Get(r.nick) + " – " + Story.TDU2StoryProgress.StepName(Mathf.Max(0, Story.TDU2StoryProgress.Get(r.nick))));
+            var s = Story.TDU2Story.Begin(Manager, r.nick, StorySpawn);
+            s.StarterDealer = StoryDealer;
+        }
+
+        /// <summary>Die Geschichte setzt das Auto (Weltlage) und beginnt die freie Fahrt.</summary>
+        void StorySpawn(CarPhysics car, Vector3 world, Quaternion rot)
+        {
+            if (car == null) return;
+            var root = Manager.Streamer.MapRoot;
+            var game = root.InverseTransformPoint(world);
+            var dir = root.InverseTransformVector(rot * Vector3.forward);
+            BeginSpawn(game, dir, false, (p, q) =>
+            {
+                var save = TDU2Session.Save;
+                bool owned = save != null && save.ownedCars.Exists(c => string.Equals(c, car.FileName, StringComparison.OrdinalIgnoreCase));
+                if (!owned || save == null || !save.starterChosen) OnStarterChosen(car);
+                SpawnCar(car, p, q);
+            });
+        }
+
+        /// <summary>Story-Schritt 7: Gebrauchtwagenhändler (ESTOL_B) mit den Startautos des Servers.</summary>
+        void StoryDealer(Action<CarPhysics> chosen)
+        {
+            var r = _storyLogin ?? TDU2Session.Config;
+            var spot = FindSpot(r != null && !string.IsNullOrEmpty(r.startSpot) ? r.startSpot : "ESTOL_B") ?? FindSpot("ESTOL_B");
+            var starters = new List<CarPhysics>();
+            if (r != null) foreach (var n in r.starterCars ?? new List<string>()) { var c = Manager.FindCar(n); if (c != null && !starters.Contains(c)) starters.Add(c); }
+            if (starters.Count == 0) { var c = Manager.FindCar(Manager.StartCar) ?? Manager.Available[0]; starters.Add(c); }
+            var inter = Manager.GetComponent<TDU2Interiors>();
+            Action<CarPhysics> done = car => { OnStarterChosen(car); chosen?.Invoke(car); };
+            if (spot == null || inter == null)
+            {
+                done(starters[0]);
+                BeginSpawn(Manager.Streamer.ViewerGamePosition, Vector3.forward, false, (p, q) => SpawnCar(starters[0], p, q));
+                return;
+            }
+            BeginSpawn(spot.Position, Vector3.forward, false, (p, q) => inter.EnterStarterDealer(spot, starters, done));
+        }
+
         Spot FindSpot(string code)
         {
             var spots = Manager.Streamer?.Spots?.Spots;
@@ -929,10 +1218,21 @@ namespace TDU2.Vehicles
             // Interieur merken (nicht als Gast und nicht im Casino – dort beginnt man ohnehin in der Halle)
             if (inter != null && inter.Inside && inter.CurrentSpot != null && inter.GuestHost == 0
                 && !(inter.CurrentSpot.Code ?? "").StartsWith("ECAS", StringComparison.OrdinalIgnoreCase))
-                save.interior = inter.CurrentSpot.Code + "|" + inter.CurrentBankStem;
+                save.interior = inter.CurrentSpot.Code + "|" + inter.CurrentBankStem + "|" + (InteriorHouse(inter.CurrentSpot) ?? "");
             else if (inter == null || !inter.Inside)
                 save.interior = "";
             CollectOdometers(save);
+        }
+
+        Spot _houseSpot;
+        string _houseName;
+
+        /// <summary>DBHouse-Name des Interieur-Spots (Haus), sonst null – gecacht.</summary>
+        string InteriorHouse(Spot s)
+        {
+            if (s == null) return null;
+            if (!ReferenceEquals(s, _houseSpot)) { _houseSpot = s; _houseName = TDU2SaveGame.HouseOfSpot(Manager.Database, s); }
+            return _houseName;
         }
 
         void CollectOdometers(SaveData save)

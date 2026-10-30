@@ -88,6 +88,10 @@ namespace TDU2
         public bool LoadInteriors = true;
         [Tooltip("Terrain an Tunnelportalen öffnen (Zellen knapp über Tunnel-Fahrbahnen ausblenden)")]
         public bool CutTunnelPortals = true;
+        [Tooltip("Gelände unter Straßen/Gehwegen/Plätzen (City-Mesh) aussparen – gegen durchscheinende Erdflecken")]
+        public bool CutTerrainUnderGround = true;
+        [Tooltip("Text der Wegweiser aus den .pmi-Platzierungen (Ortsnamen, Entfernungen, Pfeile) auf die Schilder schreiben")]
+        public bool ShowSignText = true;
         [Tooltip("Wrap-Lighting: hellt sonnenabgewandte Seiten auf (0 = reines Lambert)")]
         [Range(0, 1)] public float WrapLighting = 0.35f;
         [Tooltip("Beleuchtung wie im Original (flaches Umgebungslicht + Sonne aus den Wetterwerten, kein Wrap). Siehe TDU2WorldLighting.")]
@@ -100,6 +104,10 @@ namespace TDU2
         [Range(0, 1)] public float VertexColorStrength = 0.5f;
         public bool CastShadows = true;
         public float SectorSkirt = 12f, AreaSkirt = 40f, IslandSkirt = 150f;
+        [Tooltip("Gelände (nur Darstellung) um so viele Meter absenken – Gehwege/Straßen liegen kaum über dem 3-m-Raster, sonst ragt Erde durch")]
+        [Range(0f, 0.5f)] public float TerrainLower = 0.1f;
+        [Tooltip("Gelände in der Tiefe zurückschieben: Anteil des Abstands zur Kamera (gegen Durchscheinen in der Ferne)")]
+        [Range(0f, 0.01f)] public float TerrainDepthPush = 0.0015f;
 
         [Header("Shader (Built-in RP). Bei URP wird automatisch 'Universal Render Pipeline/Lit' verwendet.")]
         public TDU2ShaderSet Shaders = new TDU2ShaderSet();
@@ -350,7 +358,9 @@ namespace TDU2
                         {
                             try
                             {
-                                return ObjectLibrary.Load(p, tex);
+                                var lib = ObjectLibrary.Load(p, tex);
+                                try { _signLayout = RoadSignLayout.Load(p); } catch (Exception ex) { Debug.LogWarning("panel.ppl: " + ex.Message); }
+                                return lib;
                             }
                             catch (Exception ex)
                             {
@@ -609,6 +619,9 @@ namespace TDU2
             if (Viewer == null) return;
             _viewerGame = _root.InverseTransformPoint(Viewer.position);
             Shader.SetGlobalVector(IdOrigin, _root.position);   // Meer: Wellen in Inselkoordinaten (Floating Origin)
+            Shader.SetGlobalFloat(IdTerrainLower, TerrainLower);
+            Shader.SetGlobalFloat(IdTerrainPush, TerrainDepthPush);
+            if (Time.unscaledTime >= _nextTexRetry) { _nextTexRetry = Time.unscaledTime + 1f; MaterialFactory.RetryPendingTextures((k, u, v) => _textures?.Get(k, u, v)); }
 
             PollLibrary();
             PollActors();
@@ -644,6 +657,8 @@ namespace TDU2
         GameObject _water;
         Shader _mapShader;
         static readonly int IdOrigin = Shader.PropertyToID("_TDU2Origin");
+        static readonly int IdTerrainLower = Shader.PropertyToID("_TDU2TerrainLower"), IdTerrainPush = Shader.PropertyToID("_TDU2TerrainPush");
+        float _nextTexRetry;
 
         /// <summary>Fertige Kartenkacheln (Spielkoordinaten: Origin = Area-Ecke, unter <see cref="MapRoot"/>).</summary>
         public IReadOnlyList<MapTile> MapTiles => _mapTiles;
@@ -848,6 +863,7 @@ namespace TDU2
             bool objs = LoadSectorObjects, place = LoadVegetation || LoadOtherPlacements || LoadActors || LoadWorldActors, grass = LoadGrass;
             float skirt = SectorSkirt;
             bool cutTunnels = CutTunnelPortals && objs;
+            bool cutGround = CutTerrainUnderGround;
             var st = new SectorState { Key = k };
             var exteriors = LoadSpotExteriors ? SpotsInSector(k) : new List<(Spot, string)>();
             var tex = _textures;
@@ -886,6 +902,22 @@ namespace TDU2
                         }
                     }
                     catch (Exception ex) { model.Log.Add("TerrainHoles: " + ex.Message); Debug.LogWarning($"TerrainHoles {k}: {ex}"); }
+                }
+                // Gelände unter Straßen/Gehwegen/Plätzen (City-Mesh) nicht darstellen – sonst schauen Erdflecken durch den Boden.
+                // Kollision behält das volle Gelände (eigenes Kollisions-Mesh), wie bisher.
+                if (objs && cutGround && model.Heights != null)
+                {
+                    try
+                    {
+                        var cover = TerrainHoles.ComputeGroundCover(model.Heights, model.AllObjectSets(), out int coverN);
+                        if (cover != null)
+                        {
+                            if (driveHoles == null) driveHoles = holes != null ? (bool[])holes.Clone() : new bool[cover.Length];
+                            if (holes == null) holes = cover;
+                            else for (int ci = 0; ci < cover.Length; ci++) holes[ci] |= cover[ci];
+                        }
+                    }
+                    catch (Exception ex) { model.Log.Add("GroundCover: " + ex.Message); }
                 }
                 var terrain = model.Heights != null ? TerrainMeshBuilder.BuildSector(model.Heights, skirt, holes) : null;
                 var terrainCollider = model.Heights != null && driveHoles != null ? TerrainMeshBuilder.BuildSector(model.Heights, skirt, driveHoles) : null;
@@ -974,7 +1006,7 @@ namespace TDU2
             {
                 st.ExtraModels.Add(em);
                 var go = BuildExterior(spot, em, st.Root.transform, origin, st.Res, "_low");
-                if (go != null) { TDU2.Interior.InteriorFx.ApplyUva(em.Bank?.FilePath, go.transform); Register(st, SpotSector(spot), go); }
+                if (go != null) { TDU2.Interior.InteriorFx.ApplyUva(em.Bank?.FilePath, go.transform, true); Register(st, SpotSector(spot), go); }
             }
             st.Built = true;
             if (_islandPieces.TryGetValue(st.Key, out var ip) && ip != null) ip.SetActive(false);
@@ -1095,7 +1127,7 @@ namespace TDU2
                 var objRoot = new GameObject("Objects").transform;
                 objRoot.SetParent(st.Root.transform, false);
                 ObjectBuilder.BuildObjects(st.Model, objRoot, _textures, st.Res, _opt);
-                TDU2.Interior.InteriorFx.ApplyUva(st.Model.Bank?.FilePath, objRoot);   // Textur-Animationen wie im Spiel
+                TDU2.Interior.InteriorFx.ApplyUva(st.Model.Bank?.FilePath, objRoot, true);   // Textur-Animationen wie im Spiel
             }
 
             if (LoadGrass && st.Model.Grass != null && _grassTypes != null && _grassMat != null && st.Model.Heights != null)
@@ -1122,7 +1154,7 @@ namespace TDU2
             {
                 st.ExtraModels.Add(em);
                 var ego = BuildExterior(spot, em, st.Root.transform, origin, st.Res, "");
-                if (ego != null) TDU2.Interior.InteriorFx.ApplyUva(em.Bank?.FilePath, ego.transform);
+                if (ego != null) TDU2.Interior.InteriorFx.ApplyUva(em.Bank?.FilePath, ego.transform, true);   // keep: dieselbe Bank steht oft mehrfach auf der Karte
             }
             if (GenerateColliders) AddColliders(st.Root);
             st.Built = true;
@@ -1158,6 +1190,7 @@ namespace TDU2
                 int n = _actors.Build(st.Model.Actors, holder.transform, _textures, st.Res, _opt, _root);
                 if (n == 0) { UnityUtil.SafeDestroy(holder); return; }
                 TDU2.Interior.InteriorFx.ApplyUva(_actors.Model?.Bank?.FilePath, holder.transform, true);
+                if (ShowSignText) BuildSignTexts(st, st.Model.Actors, "SignTextActors");   // Wegweiser-Text der World Actors
                 // wie im Spiel: Poller, Schilder, Ampeln, Mülleimer fallen beim Anfahren um (Bänke bleiben fest)
                 foreach (Transform grp in holder.transform)
                     foreach (Transform inst in grp)
@@ -1250,6 +1283,11 @@ namespace TDU2
             }
             DebugManager.Debug($"Library Loadet: {_library.Scene?.InsHash.Count ?? 0} Objekte, {_textures.Count} Textures");
             foreach (var st in _sectors.Values) if (st.Built) TryAddVegetation(st);
+            // World Actors schon vor der Library gebaut: Schildertext jetzt nachholen (Layout/Atlas kommen aus commonworld)
+            if (ShowSignText)
+                foreach (var st in _sectors.Values)
+                    if (st.Built && st.ActorsDone && st.Root != null && st.Model?.Actors != null && st.Root.transform.Find("SignTextActors") == null)
+                        BuildSignTexts(st, st.Model.Actors, "SignTextActors");
         }
 
         void TryAddVegetation(SectorState st)
@@ -1266,9 +1304,64 @@ namespace TDU2
             veg.Shadows = CastShadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
             if (LoadVegetation) AddPlacements(veg, st.Model.Vegetation, origin);
             if (LoadOtherPlacements) AddPlacements(veg, st.Model.Placements, origin);
+            if (LoadOtherPlacements && ShowSignText) BuildSignTexts(st, origin);
             if (LoadOtherPlacements) AddPlacements(veg, st.Model.Rails, origin, st.Res);   // Leitplanken (-S.pmi)
             if (LoadActors) AddPlacements(veg, st.Model.Actors, origin);
             st.Instances = veg.InstanceCount;
+        }
+
+        // ------------------------------------------------------------------ Schildertext (§7.7)
+        volatile RoadSignLayout _signLayout;
+        Material _signMat;
+
+        /// <summary>Text der Wegweiser (Art-4-Platzierungen der -O.pmi) als ein Mesh je Sektor.</summary>
+        void BuildSignTexts(SectorState st, Vector3 origin) => BuildSignTexts(st, st.Model?.Placements, "SignText");
+
+        /// <summary>
+        /// Schildertext für die Art-4-Gruppen einer .pmi (Ibiza: fast alle Wegweiser sind World Actors der -A.pmi, Schlüssel =
+        /// Entitäts-Hash; die große Kreuzungstafel liegt in der -O.pmi). Platzierung wie beim Aufbau: sektor-lokal.
+        /// </summary>
+        void BuildSignTexts(SectorState st, PmiFile pmi, string goName)
+        {
+            var lay = _signLayout;
+            if (lay == null || pmi == null || st.Root == null) return;
+            if (_signMat == null)
+            {
+                var atlas = _textures.Get(_textures.KeyByName("rsalphab.2db"), TextureWrapMode.Clamp, TextureWrapMode.Clamp);
+                var sh = Shaders.ObjectTransparent ?? Shader.Find("Sprites/Default");
+                if (atlas == null || sh == null) return;
+                _signMat = new Material(sh) { name = "TDU2_SignText", mainTexture = atlas, renderQueue = 3001 };
+                if (_signMat.HasProperty("_VcMul")) _signMat.SetFloat("_VcMul", 1f);
+                if (_signMat.HasProperty("_Lit")) _signMat.SetFloat("_Lit", 1f);
+                if (_signMat.HasProperty("_AlphaSource")) _signMat.SetFloat("_AlphaSource", 0f);
+                if (_signMat.HasProperty("_Cull")) _signMat.SetFloat("_Cull", 0f);
+                if (_signMat.HasProperty("_SrcBlend")) { _signMat.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha); _signMat.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha); }
+            }
+            var v = new List<Vector3>(); var uv = new List<Vector2>(); var col = new List<Color32>(); var nrm = new List<Vector3>(); var tri = new List<int>();
+            foreach (var g in pmi.Groups)
+            {
+                if (g.Version != 4) continue;
+                foreach (var inst in g.Instances)
+                {
+                    if (inst.SignCodes == null) continue;
+                    // Spieldaten-Raum des Schildmodells -> sektor-lokal (wie Library-Platzierung bzw. World-Actor-Holder)
+                    var m = MathUtil.TRS(inst.Position, inst.Rotation, inst.Scale);
+                    if (inst.Pre.HasValue) m = m * inst.Pre.Value;
+                    lay.AddSign(inst.SignCodes, m, v, uv, col, nrm, tri);
+                }
+            }
+            if (tri.Count == 0) return;
+            var mesh = new Mesh { name = "SignText " + st.Key, indexFormat = v.Count > 65000 ? IndexFormat.UInt32 : IndexFormat.UInt16 };
+            mesh.SetVertices(v); mesh.SetUVs(0, uv); mesh.SetColors(col); mesh.SetNormals(nrm); mesh.SetTriangles(tri, 0);
+            mesh.RecalculateBounds();
+            st.Res.Owned.Add(mesh);
+            var go = new GameObject(goName);
+            go.transform.SetParent(st.Root.transform, false);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = _signMat;
+            mr.shadowCastingMode = ShadowCastingMode.Off;
+            mr.receiveShadows = false;
         }
 
         void AddPlacements(VegetationRenderer veg, PmiFile pmi, Vector3 origin, BuildResources res = null)

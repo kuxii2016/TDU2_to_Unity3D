@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading;
 using UnityEngine;
 
@@ -20,27 +21,45 @@ namespace TDU2.Flash
     {
         /// <summary>Shapes im Hintergrund rastern (kein Stillstand beim ersten Anzeigen).</summary>
         public static bool AsyncRaster = true;
+        /// <summary>Anzahl paralleler Raster-Threads.</summary>
+        public static int RasterThreadCount = Math.Max(4, Environment.ProcessorCount);
         /// <summary>Nach dem Laden alle Shapes vorab rastern.</summary>
         public static bool PrewarmShapes = true;
         /// <summary>Höchstens so viele MB Pixel je Film vorab rastern.</summary>
-        public static int PrewarmBudgetMB = 48;
+        public static int PrewarmBudgetMB = 12;
         /// <summary>Shapes bis zu dieser Pixelzahl werden bei Bedarf sofort (synchron) gerastert, größere im Hintergrund.</summary>
-        public static int SyncRasterMaxPixels = 40000;
+        public static int SyncRasterMaxPixels = 12000;
         /// <summary>Zeitbudget (ms) je Bild für das Erzeugen fertiger Texturen: sichtbare Filme / alle unsichtbaren zusammen.</summary>
-        public static float IntegrateBudgetVisibleMs = 6f, IntegrateBudgetHiddenMs = 2.5f;
-        const long MaxPendingBytes = 96L * 1024 * 1024;
+        public static float IntegrateBudgetVisibleMs = 0.1f, IntegrateBudgetHiddenMs = 0.05f;
+        const long MaxPendingBytes = 64L * 1024 * 1024;
         /// <summary>Beim Einblenden höchstens so lange (s) warten, bis alle sichtbaren Shapes fertig sind, statt den Aufbau zu zeigen.</summary>
-        public static float FirstShowHoldSeconds = 2f;
+        public static float FirstShowHoldSeconds = 0f;
         /// <summary>
         /// Atomares Einblenden: ein Clip, der neu erscheint (Fenster, Seite, Popup), wird erst gezeigt, wenn alle seine Shapes
         /// scharf gerastert sind – höchstens so lange (s) angehalten. Seine Zeitleiste steht so lange, die Öffnen-Animation
         /// läuft danach vollständig ab. 0 = aus (alter Stil: Shapes erscheinen einzeln, sobald sie fertig sind).
         /// </summary>
-        public static float RevealHoldSeconds = 1.2f;
+        public static float RevealHoldSeconds = 0.2f;
         bool _probe, _missing, _wasVisible;
         float _holdUntil;
         int _drawSerial;
         bool _revealHolding;
+
+        readonly Queue<(int id, int target, int gen, VmfRaster.Result r)> _uploadQueue = new Queue<(int id, int target, int gen, VmfRaster.Result r)>();
+        public void UploadTick()
+        {
+            if (_uploadQueue.Count == 0) return;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int done = 0;
+            while (sw.Elapsed.TotalMilliseconds < 0.08 && done < 1 && _uploadQueue.Count > 0)
+            {
+                var e = _uploadQueue.Dequeue();
+                if (e.gen != _rasterGen) continue;
+                if (_shapeBest.TryGetValue(e.id, out int best) && best >= e.target && _shapeCache.ContainsKey((e.id, best))) continue;
+                try { StoreShape(e.id, e.target, e.r); } catch { }
+                done++;
+            }
+        }
 
         /// <summary>
         /// Darf der Clip gezeichnet werden? Beim (Wieder-)Erscheinen einmal prüfen, ob alle Shapes darunter in voller Schärfe
@@ -77,7 +96,7 @@ namespace TDU2.Flash
         readonly HashSet<long> _rasterQueued = new HashSet<long>();
         readonly Queue<(int id, int target, int gen, VmfRaster.Result r)> _rasterDone = new Queue<(int, int, int, VmfRaster.Result)>();
         readonly AutoResetEvent _rasterSignal = new AutoResetEvent(false);
-        Thread _rasterThread;
+        Thread[] _rasterThreads;
         volatile bool _rasterStop;
         long _pendingBytes;
         int _rasterGen;
@@ -117,19 +136,29 @@ namespace TDU2.Flash
                 _rasterJobs.Clear(); _rasterQueued.Clear(); _rasterDone.Clear(); _pendingBytes = 0;
                 _rasterGen++;
             }
-            _rasterThread = null;
+            if (_rasterThreads != null)
+            {
+                foreach (var t in _rasterThreads) { try { t.Join(50); } catch {} }
+            }
+            _rasterThreads = null;
             _fontQueue = null;
         }
 
         void StartRasterThread()
         {
-            if (!AsyncRaster || _rasterThread != null) return;
+            if (!AsyncRaster || (_rasterThreads != null && _rasterThreads.Length > 0)) return;
             _rasterStop = false;
             _rasterMovie = Movie;
             int gen; lock (_rasterLock) gen = _rasterGen;
-            var t = new Thread(() => RasterLoop(gen)) { IsBackground = true, Priority = System.Threading.ThreadPriority.BelowNormal, Name = "VMF Raster " + name };
-            _rasterThread = t;
-            t.Start();
+            int count = RasterThreadCount;
+            if (count < 1) count = 1;
+            _rasterThreads = new Thread[count];
+            for (int i = 0; i < count; i++)
+            {
+                var t = new Thread(() => RasterLoop(gen)) { IsBackground = true, Priority = System.Threading.ThreadPriority.Normal, Name = "VMF Raster " + name + " " + i };
+                _rasterThreads[i] = t;
+                t.Start();
+            }
         }
 
         /// <summary>Nach dem Laden: alle Shapes (bis zum Budget) und Schriften vorbereiten.</summary>
@@ -160,8 +189,8 @@ namespace TDU2.Flash
 
         void RequestRaster(int id, int target, bool urgent)
         {
-            if (_rasterThread == null) StartRasterThread();
-            if (_rasterThread == null) return;
+            if (_rasterThreads == null || _rasterThreads.Length == 0) StartRasterThread();
+            if (_rasterThreads == null || _rasterThreads.Length == 0) return;
             lock (_rasterLock)
             {
                 long k = Key(id, target);
@@ -211,10 +240,10 @@ namespace TDU2.Flash
         /// <summary>Fertige Rasterungen als Texturen übernehmen (Hauptthread, mit Zeitbudget).</summary>
         void IntegrateRasters()
         {
-            if (_rasterThread == null && _fontQueue == null) return;
+            if ((_rasterThreads == null || _rasterThreads.Length == 0) && _fontQueue == null) return;
             bool visible = Visible;
             float budget;
-            if (visible) budget = _holdUntil > 0f || _revealHolding ? 14f : IntegrateBudgetVisibleMs;   // beim Einblenden schneller fertig werden
+            if (visible) budget = _holdUntil > 0f || _revealHolding ? 0.4f : 0.15f;
             else
             {
                 if (_hiddenFrame != Time.frameCount) { _hiddenFrame = Time.frameCount; _hiddenMs = 0f; }
@@ -222,22 +251,24 @@ namespace TDU2.Flash
                 if (budget <= 0f) return;
             }
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            while (sw.Elapsed.TotalMilliseconds < budget)
+            int integrated = 0;
+            int maxIntegrate = 1;
+            while (sw.Elapsed.TotalMilliseconds < budget && integrated < maxIntegrate)
             {
                 (int id, int target, int gen, VmfRaster.Result r) e;
                 lock (_rasterLock)
                 {
                     if (_rasterDone.Count == 0) break;
                     e = _rasterDone.Dequeue();
-                    _rasterQueued.Remove(Key(e.id, e.target));   // erst jetzt: bis zur Übernahme nicht erneut anfordern
+                    _rasterQueued.Remove(Key(e.id, e.target));
                     if (e.r != null && e.r.Pixels != null) _pendingBytes -= e.r.Pixels.Length * 4L;
                 }
                 if (e.gen != _rasterGen) continue;
                 if (_shapeBest.TryGetValue(e.id, out int best) && best >= e.target && _shapeCache.ContainsKey((e.id, best))) continue;
-                StoreShape(e.id, e.target, e.r);
+                _uploadQueue.Enqueue(e);
+                integrated++;
             }
-            // Schriften: eine je Durchgang
-            if (_fontQueue != null && _fontQueue.Count > 0 && sw.Elapsed.TotalMilliseconds < budget)
+            if (_fontQueue != null && _fontQueue.Count > 0 && sw.Elapsed.TotalMilliseconds < budget && integrated == 0)
             {
                 var f = _fontQueue[_fontQueue.Count - 1];
                 _fontQueue.RemoveAt(_fontQueue.Count - 1);
@@ -245,16 +276,43 @@ namespace TDU2.Flash
                 if (_fontQueue.Count == 0) _fontQueue = null;
             }
             if (!visible) _hiddenMs += (float)sw.Elapsed.TotalMilliseconds;
+            try
+            {
+                lock (_rasterLock)
+                {
+                    LastRasterPendingBytes = _pendingBytes;
+                    LastRasterQueueCount = _rasterJobs.Count;
+                    LastRasterDoneCount = _rasterDone.Count;
+                }
+            }
+            catch {}
         }
 
         /// <summary>Rasterung als Textur ablegen (ersetzt eine kleinere Stufe).</summary>
         (Texture2D tex, float ox, float oy, float sc) StoreShape(int id, int target, VmfRaster.Result r)
         {
             Texture2D tex = null;
-            if (r != null)
+            if (r != null && r.Pixels != null)
             {
-                tex = new Texture2D(r.Width, r.Height, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Trilinear, anisoLevel = 0 };
-                tex.SetPixels32(r.Pixels); tex.Apply(true, true);
+                tex = new Texture2D(r.Width, r.Height, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear, anisoLevel = 0 };
+                try
+                {
+                    var handle = GCHandle.Alloc(r.Pixels, GCHandleType.Pinned);
+                    try
+                    {
+                        tex.LoadRawTextureData(handle.AddrOfPinnedObject(), r.Pixels.Length * 4);
+                    }
+                    finally
+                    {
+                        handle.Free();
+                    }
+                    tex.Apply(false, true);
+                }
+                catch
+                {
+                    tex.SetPixels32(r.Pixels);
+                    tex.Apply(false, true);
+                }
             }
             var e = (tex, r?.OriginX ?? 0, r?.OriginY ?? 0, r?.Scale ?? 1);
             if (_shapeBest.TryGetValue(id, out int old) && _shapeCache.TryGetValue((id, old), out var oe))

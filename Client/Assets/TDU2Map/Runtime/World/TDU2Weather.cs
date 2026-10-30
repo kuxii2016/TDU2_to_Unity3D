@@ -82,6 +82,95 @@ namespace TDU2.World
             f = h1 > h0 ? Mathf.Clamp01((h - h0) / (h1 - h0)) : 0f;
         }
 
+        // ------------------------------------------------------------------ Kino-Modifikatoren (fx/cinematic_modifiers.xmb)
+        /// <summary>Ein Modifikator ("wmod:&lt;Name&gt;" der .cin): überschreibt einzelne Parameter eines Kino-Wetters je Schnitt,
+        /// meist die Sonnenrichtung, dazu Licht, Schatten, Nebel, Bloom. weather_name = Wetter, für das er gilt.</summary>
+        public sealed class Modifier
+        {
+            public string Name, Weather;
+            public int Block = -1;
+            public readonly List<(string name, Vector4 v, string s)> Params = new List<(string, Vector4, string)>();
+        }
+
+        public readonly List<Modifier> Modifiers = new List<Modifier>();
+        readonly Dictionary<string, Key> _modified = new Dictionary<string, Key>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>fx/cinematic_modifiers.xmb (MODIFIER_EXPORT: modifier[] {name, type, weather_name, intempery_index, param[]}) dazuladen.</summary>
+        public int LoadModifiers(string path)
+        {
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return 0;
+            var root = new BeXmb(File.ReadAllBytes(path)).Root() as Dictionary<string, object>;
+            if (root == null || !root.TryGetValue("modifier", out var mo) || !(mo is List<object> list)) return 0;
+            foreach (var o in list)
+            {
+                if (!(o is Dictionary<string, object> m)) continue;
+                var mod = new Modifier
+                {
+                    Name = m.TryGetValue("name", out var n) ? n as string ?? "" : "",
+                    Weather = m.TryGetValue("weather_name", out var wn) ? wn as string ?? "" : "",
+                    Block = m.TryGetValue("intempery_index", out var ii) && ii != null ? Convert.ToInt32(ii, CultureInfo.InvariantCulture) : -1,
+                };
+                if (m.TryGetValue("param", out var po) && po is List<object> ps)
+                    foreach (var pp in ps)
+                    {
+                        if (!(pp is Dictionary<string, object> p) || !p.TryGetValue("name", out var pn) || !(pn is string name)) continue;
+                        if (!p.TryGetValue("param", out var pv) || !(pv is Dictionary<string, object> v)) continue;
+                        if (v.TryGetValue("value", out var sv) && sv is string s) mod.Params.Add((name, default, s));
+                        else mod.Params.Add((name, new Vector4(F(v, "x"), F(v, "y"), F(v, "z"), F(v, "w")), null));
+                    }
+                Modifiers.Add(mod);
+            }
+            _modified.Clear();
+            return Modifiers.Count;
+        }
+
+        /// <summary>
+        /// Kino-Wetter "weat:&lt;weather&gt;" mit Modifikator "wmod:&lt;modifier&gt;": Schlüssel des Wetters, darauf die Parameter des
+        /// Modifikators (zuerst der mit passendem weather_name, sonst irgendeiner dieses Namens). Ein Schlüssel, der selbst so heißt
+        /// wie der Modifikator, hat Vorrang (alte Dateien). Ergebnis wird je Paar zwischengespeichert (gleiche Referenz je Schnitt).
+        /// </summary>
+        public Key Find(string weather, string modifier)
+        {
+            if (string.IsNullOrEmpty(weather)) return null;
+            Key b = null, named = null;
+            foreach (var k in Keys)
+            {
+                if (!string.IsNullOrEmpty(modifier) && string.Equals(k.Name, modifier, StringComparison.OrdinalIgnoreCase)) named = k;
+                if (string.Equals(k.Name, weather, StringComparison.OrdinalIgnoreCase)) b = k;
+            }
+            if (named != null) return named;
+            if (b == null || string.IsNullOrEmpty(modifier)) return b;
+            string id = weather + "/" + modifier;
+            if (_modified.TryGetValue(id, out var cached)) return cached;
+            Modifier mod = null;
+            foreach (var m in Modifiers)
+                if (string.Equals(m.Name, modifier, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (string.Equals(m.Weather, weather, StringComparison.OrdinalIgnoreCase)) { mod = m; break; }
+                    if (mod == null) mod = m;
+                }
+            if (mod == null) { _modified[id] = b; return b; }
+            var r = new Key { Name = id, Hour = b.Hour, Blocks = new Dictionary<string, Vector4>[b.Blocks.Length], Strings = new Dictionary<string, string>[b.Blocks.Length] };
+            for (int i = 0; i < b.Blocks.Length; i++) { r.Blocks[i] = new Dictionary<string, Vector4>(b.Blocks[i]); r.Strings[i] = new Dictionary<string, string>(b.Strings[i]); }
+            foreach (var (name, v, s) in mod.Params)
+            {
+                bool any = false;
+                for (int i = 0; i < r.Blocks.Length; i++)
+                {
+                    if (mod.Block >= 0 && i != mod.Block) continue;
+                    if (s != null ? !r.Strings[i].ContainsKey(name) : !r.Blocks[i].ContainsKey(name)) continue;
+                    if (s != null) r.Strings[i][name] = s; else r.Blocks[i][name] = v;
+                    any = true;
+                }
+                if (any) continue;
+                // Parameter fehlt im Wetter: Sonnenrichtung/Tunnel stehen in Block 0, alles andere in Block 1
+                int blk = mod.Block >= 0 && mod.Block < r.Blocks.Length ? mod.Block : (name == "sundirection" || name.StartsWith("tunnel_", StringComparison.Ordinal) ? 0 : 1);
+                if (s != null) r.Strings[blk][name] = s; else r.Blocks[blk][name] = v;
+            }
+            _modified[id] = r;
+            return r;
+        }
+
         public Vector4 Value(Key k, int block, string name, Vector4 def)
         {
             if (block < 0 || block >= k.Blocks.Length) return def;
@@ -176,8 +265,23 @@ namespace TDU2.World
     public sealed class TDU2Weather : MonoBehaviour
     {
         public static TDU2Weather Instance { get; private set; }
+
+        /// <summary>
+        /// Kino-Wetter (fx/cinematic_weathers.xmb, benannter Schlüssel z.B. "SS_Arche"): solange gesetzt, kommen Sonne, Licht,
+        /// Nebel, Meer, Nachtleuchten und Regen aus diesem Schlüssel (Block 0 Zeit/Sonnenrichtung, Block 1 Parameter) statt
+        /// aus Uhrzeit und Wetterfolge. null = normales Wetter. Gesetzt von Kinos (Titelbildschirm, Missionen).
+        /// </summary>
+        public static TDU2WeatherData.Key Override;
         /// <summary>Spielzeit in Stunden (0..24).</summary>
         public static float Hour { get; private set; } = 12f;
+        /// <summary>
+        /// Geschichte läuft (Intro-Kapitel: Haus, Hotel, Solar Crown …): Tageszeit und Wetter wie im Original fest – sonniger,
+        /// trockener Nachmittag statt der laufenden Server-Uhr (die z.B. 0:30 Uhr und "nach dem Regen" lieferte).
+        /// Gesetzt von TDU2Story, solange ein Schritt aktiv ist. ForceHour/ForceKind (Entwicklermenü) haben Vorrang.
+        /// </summary>
+        public static bool StoryLock;
+        public static float StoryHour = 14f;
+        public static WeatherKind StoryKind = WeatherKind.Sunny;
         public static WeatherKind Kind { get; private set; } = WeatherKind.Sunny;
         /// <summary>0 = Tag, 1 = Nacht (spot_exterior_lightmap_day_night.y).</summary>
         public static float Night { get; private set; }
@@ -193,6 +297,8 @@ namespace TDU2.World
         [Header("Zeit (aus der Serverzeit -> im Mehrspieler synchron)")]
         [Tooltip("Echtzeit-Minuten für einen Spieltag")] public float DayMinutes = 120f;
         [Tooltip("Verschiebung der Uhr (Stunden)")] public float HourOffset = 0f;
+        [Tooltip("Zeitverschiebung Hawaii gegenüber Ibiza in Stunden (Ibiza MEZ, Hawaii HST = -11). Gilt für Himmel, Uhr und Vorhersage")]
+        public float HawaiiHourOffset = -11f;
         [Tooltip(">= 0: feste Uhrzeit (Test)")] public float ForceHour = -1f;
         [Header("Wetter")]
         [Tooltip("Echtzeit-Minuten je Wetterabschnitt")] public float WeatherMinutes = 14f;
@@ -356,15 +462,70 @@ namespace TDU2.World
             return (uint)(h ^ (h >> 32));
         }
 
-        /// <summary>Wetterart im Abschnitt seg: Markow-Kette, von einem festen Startpunkt 48 Abschnitte vorher gerechnet.</summary>
-        WeatherKind KindAt(long seg)
+        /// <summary>Insel des geladenen Spielstands ("ibiza", "hawai", "casino").</summary>
+        string CurrentIsland => _streamer != null ? (_streamer.Index?.IslandName ?? _streamer.Island) : null;
+
+        /// <summary>Inselname vereinheitlicht: "ibiza", "hawai" oder "casino".</summary>
+        public static string IslandKey(string island)
         {
-            if (_kindCache.TryGetValue(seg, out var k)) return k;
+            if (string.IsNullOrEmpty(island)) return "ibiza";
+            if (island.StartsWith("h", StringComparison.OrdinalIgnoreCase)) return "hawai";
+            if (island.StartsWith("cas", StringComparison.OrdinalIgnoreCase)) return "casino";
+            return "ibiza";
+        }
+
+        /// <summary>Zeitverschiebung der Insel gegenüber Ibiza (Stunden).</summary>
+        float ZoneOffset(string island) => IslandKey(island) == "hawai" ? HawaiiHourOffset : 0f;
+
+        /// <summary>Eigene Wetterfolge je Insel (Ibiza 0 = wie bisher). Alle Spieler rechnen aus der Serverzeit dasselbe.</summary>
+        static long IslandSalt(string island) { string k = IslandKey(island); return k == "hawai" ? 1 : k == "casino" ? 2 : 0; }
+
+        /// <summary>Ortszeit einer Insel (Stunden 0..24): Uhr der geladenen Insel umgerechnet mit der Zeitverschiebung.</summary>
+        public static float HourOn(string island)
+        {
+            var w = Instance;
+            if (w == null) return Hour;
+            float h = (Hour - w.ZoneOffset(w.CurrentIsland) + w.ZoneOffset(island)) % 24f;
+            return h < 0f ? h + 24f : h;
+        }
+
+        /// <summary>Wetterart im Abschnitt seg (Insel des Spielstands).</summary>
+        WeatherKind KindAt(long seg) => KindAt(seg, IslandSalt(CurrentIsland));
+
+        /// <summary>Wetterart im Abschnitt seg einer Insel: Markow-Kette, von einem festen Startpunkt 48 Abschnitte vorher gerechnet.</summary>
+        WeatherKind KindAt(long seg, long salt)
+        {
+            long key = (seg << 2) | salt;
+            if (_kindCache.TryGetValue(key, out var k)) return k;
             var s = WeatherKind.Sunny;
-            for (long i = seg - 48; i <= seg; i++) s = Next(s, Hash(i) % 1000 / 1000f);
-            if (_kindCache.Count > 64) _kindCache.Clear();
-            _kindCache[seg] = s;
+            for (long i = seg - 48; i <= seg; i++) s = Next(s, Hash(salt == 0 ? i : i ^ (salt * 0x5DEECE66DL)) % 1000 / 1000f);
+            if (_kindCache.Count > 128) _kindCache.Clear();
+            _kindCache[key] = s;
             return s;
+        }
+
+        /// <summary>
+        /// Vorhersage (TDU Media, Wetter-Kanal): Wetterart und Tag/Nacht in <paramref name="hoursAhead"/> Spielstunden – dieselbe
+        /// Markow-Kette und Uhr wie <see cref="Update"/>, nur in die Zukunft gerechnet.
+        /// </summary>
+        public static void Forecast(float hoursAhead, out WeatherKind kind, out bool night) => Forecast(hoursAhead, null, out kind, out night);
+
+        /// <summary>Vorhersage für eine bestimmte Insel (null = die geladene): eigene Wetterfolge und Ortszeit der Insel.</summary>
+        public static void Forecast(float hoursAhead, string island, out WeatherKind kind, out bool night)
+        {
+            kind = Kind; night = Night > 0.5f;
+            var w = Instance;
+            if (w == null || w._data == null || w._data.Keys.Count == 0) return;
+            if (string.IsNullOrEmpty(island)) island = w.CurrentIsland;
+            double dayLen = Mathf.Max(1f, w.DayMinutes) * 60.0;
+            double t = w.Now + hoursAhead / 24.0 * dayLen;
+            double segLen = Mathf.Max(1f, w.WeatherMinutes) * 60.0;
+            kind = w.ForceKind >= 0 ? (WeatherKind)Mathf.Clamp(w.ForceKind, 0, 5) : w.KindAt((long)Math.Floor(t / segLen), IslandSalt(island));
+            float hour = w.ForceHour >= 0f ? w.ForceHour + hoursAhead : (float)(((t / dayLen) * 24.0 + w.HourOffset + w.ZoneOffset(island)) % 24.0);
+            hour %= 24f;
+            if (hour < 0f) hour += 24f;
+            int b = (int)kind + 1;
+            night = Mathf.Clamp01(w._data.Sample("spot_exterior_lightmap_day_night", hour, b, b, 0f, new Vector4(1, 0, 0, 0)).y) > 0.5f;
         }
 
         static WeatherKind Next(WeatherKind s, float r)
@@ -403,21 +564,65 @@ namespace TDU2.World
             return null;
         }
 
+        TDU2WeatherData.Key _ovKey, _wetOv; float _ovHour; bool _wetLock;
+        int _wetForce = int.MinValue; bool _wetSnap;
+        /// <summary>Fahrbahnnässe sofort auf den Zielwert des aktuellen Wetters setzen (Entwicklermenü).</summary>
+        public void SnapWetness() { _wetSnap = true; }
+        float _diagNext; TDU2WeatherData.Key _diagOv;
+
+        float OverrideHour(TDU2WeatherData.Key ov, float fallback)
+        {
+            if (ov == _ovKey) return _ovHour;
+            _ovKey = ov; _ovHour = fallback;
+            // Tag oder Nacht entscheidet der Schlüssel selbst (spot_exterior_lightmap_day_night.y: 0 = Tag, 1 = Nacht). Die
+            // "Sonne" des Spieltags zeigt auch nachts nach unten (Mondlicht), daher NUR Stunden derselben Tageshälfte vergleichen –
+            // sonst landet z.B. Meeting_Tess (Tag) bei 1:15 Uhr. Darin die Stunde mit der passendsten Sonnenhöhe.
+            float night = Mathf.Clamp01(_data.Value(ov, 1, "spot_exterior_lightmap_day_night", new Vector4(1, 0, 0, 0)).y);
+            var d = (Vector3)_data.Value(ov, 0, "sundirection", Vector4.zero);
+            bool hasDir = d.sqrMagnitude > 1e-6f;
+            if (hasDir) d.Normalize();
+            float best = float.MaxValue;
+            for (int i = 0; i < 96; i++)
+            {
+                float h = i * 0.25f;
+                float wn = Mathf.Clamp01(_data.Sample("spot_exterior_lightmap_day_night", h, 1, 1, 0f, new Vector4(1, 0, 0, 0)).y);
+                float cost = Mathf.Abs(wn - night) * 10f;
+                if (hasDir)
+                {
+                    var s = (Vector3)_data.Sample("sundirection", h, 0, 0, 0f, Vector4.zero);
+                    if (s.sqrMagnitude > 1e-6f) cost += Mathf.Abs(s.normalized.y - d.y);
+                }
+                else cost += Mathf.Abs(h - (night > 0.5f ? 0f : 13f)) * 0.01f;
+                if (cost < best) { best = cost; _ovHour = h; }
+            }
+            TDU2Diag.Log("WETTER", $"Kino-Wetter {ov.Name}: Nacht={night:0.00} Sonne={TDU2Diag.F(d)} -> Uhrzeit {_ovHour:0.00} h");
+            return _ovHour;
+        }
+
         // ------------------------------------------------------------------ jedes Bild
         void Update()
         {
             if (_data == null || _data.Keys.Count == 0) return;
             double now = Now;
             float dayLen = Mathf.Max(1f, DayMinutes) * 60f;
-            float hour = ForceHour >= 0f ? ForceHour : (float)(((now / dayLen) * 24.0 + HourOffset) % 24.0);
+            float hour = ForceHour >= 0f ? ForceHour : StoryLock ? StoryHour : (float)(((now / dayLen) * 24.0 + HourOffset + ZoneOffset(CurrentIsland)) % 24.0);
             if (hour < 0f) hour += 24f;
+            // Kino-Wetter (Titel-/Story-Szenen): die Schlüssel haben keine echte Uhrzeit ("hour"/"minutes" sind dort nur ein Index) –
+            // Uhrzeit aus der Sonnenrichtung des Schlüssels ableiten (passende Stunde im Tagesablauf), damit Himmel, Reflexionen und
+            // Nachtwerte (Autos, Wasser) zur Szene passen statt zur echten Uhr.
+            if (Override != null) hour = OverrideHour(Override, hour);
             Hour = hour;
+            if (Time.unscaledTime >= _diagNext || Override != _diagOv)
+            {
+                _diagNext = Time.unscaledTime + 10f; _diagOv = Override;
+                TDU2Diag.Log("WETTER", $"Uhr {hour:0.00} h (ForceHour={ForceHour} StoryLock={StoryLock} Offset={HourOffset} Tag={DayMinutes} min) Art={Kind} Regen={Rain:0.00} Nässe={GroundWet:0.00} Kino-Wetter={(Override != null ? Override.Name : "-")}");
+            }
 
             // Wetter: Abschnitt und Übergang vom vorigen
             double segLen = Mathf.Max(1f, WeatherMinutes) * 60.0;
             long seg = (long)Math.Floor(now / segLen);
-            WeatherKind cur = ForceKind >= 0 ? (WeatherKind)Mathf.Clamp(ForceKind, 0, 5) : KindAt(seg);
-            WeatherKind prev = ForceKind >= 0 ? cur : KindAt(seg - 1);
+            WeatherKind cur = ForceKind >= 0 ? (WeatherKind)Mathf.Clamp(ForceKind, 0, 5) : StoryLock ? StoryKind : KindAt(seg);
+            WeatherKind prev = ForceKind >= 0 || StoryLock ? cur : KindAt(seg - 1);
             float since = (float)(now - seg * segLen);
             float t = TransitionSeconds > 0f ? Mathf.Clamp01(since / TransitionSeconds) : 1f;
             t = t * t * (3f - 2f * t);
@@ -425,10 +630,12 @@ namespace TDU2.World
             if (Kind != _lastKind) { if ((int)_lastKind >= 0) NewsPending = true; _lastKind = Kind; }
             int ba = (int)prev + 1, bb = (int)cur + 1;
 
-            Vector4 S(string n, Vector4 d = default) => _data.Sample(n, hour, ba, bb, t, d);
+            var ov = Override;
+            Vector4 S(string n, Vector4 d = default) => ov != null ? _data.Value(ov, 1, n, d) : _data.Sample(n, hour, ba, bb, t, d);
 
             // ---------------- Sonne / Licht
-            var dir = (Vector3)_data.Sample("sundirection", hour, 0, 0, 0f, new Vector4(0, -0.856f, -0.423f, 0));
+            var dir = ov != null ? (Vector3)_data.Value(ov, 0, "sundirection", new Vector4(0, -0.856f, -0.423f, 0))
+                                 : (Vector3)_data.Sample("sundirection", hour, 0, 0, 0f, new Vector4(0, -0.856f, -0.423f, 0));
             if (_sun == null) FindSun();
             var diff = S("sun_diffuse", new Vector4(2.01f, 1.74f, 1.36f, 0));
             var amb = S("sun_ambient", new Vector4(0.58f, 0.67f, 0.82f, 0));
@@ -475,7 +682,7 @@ namespace TDU2.World
             }
 
             // ---------------- Meer (TD_Ocean): Fresnel, Reflexion, Glanz, Normalmap-Kacheln – teils nur im ersten Wetterblock angegeben
-            Vector4 O(string n, Vector4 d) => _data.Sample(n, hour, ba, bb, t, _data.Sample(n, hour, 1, 1, 0f, d));
+            Vector4 O(string n, Vector4 d) => ov != null ? _data.Value(ov, 1, n, d) : _data.Sample(n, hour, ba, bb, t, _data.Sample(n, hour, 1, 1, 0f, d));
             Shader.SetGlobalVector(IdOceanFresnel, O("ocean_fresnel", new Vector4(0.3f, 30f, 0.5f, 0f)));
             Shader.SetGlobalVector(IdOceanSpec, O("ocean_specularColorAndCutOff", new Vector4(0.502f, 0.596f, 0.674f, 0f)));
             Shader.SetGlobalVector(IdOceanRefl, O("ocean_reflectionColor", new Vector4(0.498f, 0.498f, 0.498f, 0f)));
@@ -497,9 +704,16 @@ namespace TDU2.World
 
             // ---------------- Regen, Nässe
             Rain = Mathf.Clamp01(S("rain_alpha").x / 120f);
-            float wetTarget = Mathf.Clamp01(S("rain_ground_wet").x / 0.7f);
+            // Nässe nur, wenn der Block nasse Straßen überhaupt einschaltet (rain_ground_global_intensity): in game_weathers.xmb
+            // haben Sonne/Wolken beides 0, Regen/nach dem Regen 0,5-0,7 und 0,75-1. Die Kino-Wetter tragen rain_ground_wet = 1
+            // bei global 0 (= trocken, z.B. Meeting_Tess, Intro).
+            float wetTarget = Mathf.Clamp01(S("rain_ground_wet").x / 0.7f) * Mathf.Clamp01(S("rain_ground_global_intensity", Vector4.one).x);
             // nass werden in ~1 min, abtrocknen in ~6 min
             _wet = Mathf.MoveTowards(_wet, wetTarget, Time.deltaTime * (wetTarget > _wet ? 1f / 60f : 1f / 360f));
+            // Kino-Schnitt bzw. Ende des Kinos: Wetter wechselt hart -> Nässe sofort übernehmen (kein minutenlanges Abtrocknen)
+            // ebenso bei fester Wetterart aus dem Entwicklermenü (sonst blieb die Straße minutenlang trocken bzw. nass)
+            if (ov != _wetOv || StoryLock != _wetLock || ForceKind != _wetForce || _wetSnap)
+            { _wetOv = ov; _wetLock = StoryLock; _wetForce = ForceKind; _wetSnap = false; _wet = wetTarget; }
             GroundWet = _wet;
             // Es regnet -> Straße ist mindestens so nass wie der Regen (auch wenn ein Block rain_ground_wet nicht setzt)
             _wetShown = inside ? 0f : Mathf.Max(_wet, Rain);
@@ -770,4 +984,4 @@ namespace TDU2.World
             }
         }
     }
-}
+}

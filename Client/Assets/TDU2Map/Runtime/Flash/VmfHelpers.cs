@@ -201,6 +201,32 @@ namespace TDU2.Flash
         /// <summary>Linksklick ohne getroffenen Flash-Button: Tasten-Symbol oder Textfeld suchen.</summary>
         void HandleFreeClick(Vector2 gui)
         {
+            FindFreeTargets(gui, out string hint, out string field);
+            if (hint != null)
+            {
+                if (HintClicked != null) HintClicked(hint);
+                else Input(hint);
+                return;
+            }
+            if (field != null) TextFieldClicked?.Invoke(field);
+        }
+
+        /// <summary>
+        /// Klick mit Abonnenten (Login-Popup): Tasten-Symbole und Textfelder auch dann, wenn ein Flash-Button darüber liegt
+        /// (Hintergrund-/Fokus-Buttons des Popups verdeckten sie: Klick ins Feld setzte keinen Fokus, OK/Zurück reagierten nicht).
+        /// true = Tasten-Symbol behandelt (dann keinen Button auslösen).
+        /// </summary>
+        bool HandleSubscribedClick(Vector2 gui)
+        {
+            if (HintClicked == null && TextFieldClicked == null) return false;
+            FindFreeTargets(gui, out string hint, out string field);
+            if (hint != null && HintClicked != null) { HintClicked(hint); return true; }
+            if (field != null) TextFieldClicked?.Invoke(field);
+            return false;
+        }
+
+        void FindFreeTargets(Vector2 gui, out string hintOut, out string fieldOut)
+        {
             // Tasten-Symbole (oberstes zuerst)
             string hint = null; int hintOrder = -1, order = 0;
             string field = null; int fieldOrder = -1;
@@ -232,13 +258,7 @@ namespace TDU2.Flash
                 }
             }
             Walk(Root, true);
-            if (hint != null)
-            {
-                if (HintClicked != null) HintClicked(hint);
-                else Input(hint);
-                return;
-            }
-            if (field != null) TextFieldClicked?.Invoke(field);
+            hintOut = hint; fieldOut = field;
         }
 
         static Rect Grow(Rect r, float px) => new Rect(r.x - px, r.y - px, r.width + 2 * px, r.height + 2 * px);

@@ -72,7 +72,7 @@ namespace TDU2.Flash
     {
         public sealed class Result { public int Width, Height; public Color32[] Pixels; public float OriginX, OriginY, Scale; }
 
-        const int SS = 3;
+        const int SS = 2;
 
         // Arbeitspuffer je Thread wiederverwenden (Rastern läuft auch im Hintergrund-Thread des VmfPlayer) – sonst je große
         // Shape zig MB Garbage -> GC-Ruckler im Spiel

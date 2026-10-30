@@ -213,7 +213,9 @@ namespace TDU2.Vehicles
                 }
             }
 
-            public void Shift(Vector3 d) { for (int i = 0; i < _count; i++) _p[i].Pos -= d; }
+            // Partikel liegen in Weltkoordinaten (Mesh am Ursprung). Das Objekt ist ein Root-Objekt und wurde vom Floating Origin
+            // schon mitverschoben – zurück auf den Ursprung, sonst wären die Partikel doppelt verschoben.
+            public void Shift(Vector3 d) { for (int i = 0; i < _count; i++) _p[i].Pos -= d; if (_go != null) _go.transform.position = Vector3.zero; }
 
             public void Update(float dt)
             {

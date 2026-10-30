@@ -34,7 +34,10 @@ namespace TDU2
             _restore.Clear();
         }
 
-        void LateUpdate()
+        // In Update (Reihenfolge -10000, vor allen anderen Skripten) statt LateUpdate: Bäume/Gras werden in ihrem Update per
+        // Graphics.DrawMesh mit Weltmatrizen eingereiht – eine Verschiebung erst in LateUpdate zeichnete sie für ein Bild
+        // ~1 km daneben (Flackern/Blitzen beim Verschieben). Kamera, Effekte, Spuren laufen danach mit den neuen Koordinaten.
+        void Update()
         {
             var f = Focus != null ? Focus : (Camera.main != null ? Camera.main.transform : null);
             if (f == null) return;
@@ -63,7 +66,25 @@ namespace TDU2
             Physics.SyncTransforms();
             _restorePending = _restore.Count > 0;
             TotalOffset += delta;
+            ResetCameraHistory();
             Shifted?.Invoke(delta);
+        }
+
+        /// <summary>
+        /// Kamera springt um die Verschiebung: Verlauf von TAA/Bewegungsunschärfe (PostProcessLayer.ResetHistory) verwerfen,
+        /// sonst blitzt ein Bild mit Bewegungsvektoren über 1 km auf. Per Reflexion – kein Verweis auf das Post-Processing-Paket.
+        /// </summary>
+        static void ResetCameraHistory()
+        {
+            foreach (var cam in Camera.allCameras)
+            {
+                if (cam == null) continue;
+                foreach (var mb in cam.GetComponents<MonoBehaviour>())
+                {
+                    if (mb == null || mb.GetType().Name != "PostProcessLayer") continue;
+                    try { mb.GetType().GetMethod("ResetHistory", Type.EmptyTypes)?.Invoke(mb, null); } catch { }
+                }
+            }
         }
     }
 }

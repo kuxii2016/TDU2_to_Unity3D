@@ -71,7 +71,7 @@ namespace TDU2.World
                 {
                     mat = MaterialFactory.CreateObjectMaterial(def, getTex, sprite, tintUv, fourUv);
                     res.Materials[cacheMat] = mat;
-                    if (mat != null && mat != MaterialFactory.Water && mat != MaterialFactory.Fallback) res.Owned.Add(mat);
+                    if (mat != null && mat != MaterialFactory.Water && mat != MaterialFactory.Fallback && !MaterialFactory.IsShared(mat)) res.Owned.Add(mat);
                 }
                 if (mat == null) continue; // ausgeblendet (z.B. Leuchteffekte am Tag)
                 keep.Add(i);

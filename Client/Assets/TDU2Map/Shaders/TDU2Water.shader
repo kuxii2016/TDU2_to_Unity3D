@@ -138,10 +138,27 @@ Shader "TDU2/Water"
                 float spec = pow(saturate(dot(r, l)), specPow);
                 spec = max(0.0, spec - specCut);
                 float lum = saturate(dot(_LightColor0.rgb, float3(0.3, 0.59, 0.11)));
+                float lit = lum;
+                if (_PoolTint.a > 0.0)
+                {
+                    // Pool/Brunnen in Interieurs: dort gibt es oft keine Reflection Probe (unity_SpecCube0 schwarz) und kein Sonnenlicht
+                    // -> Spiegelung aus dem Umgebungslicht (SH/Ambient), Wasserfarbe mit dem Umgebungslicht beleuchten (sonst schwarz)
+                    float3 sh = max(ShadeSH9(float4(r, 1.0)), unity_AmbientSky.rgb);
+                    if (dot(refl, float3(0.333, 0.333, 0.333)) < 0.08) refl = max(refl, sh * reflC);
+                    float ambLum = dot(max(ShadeSH9(float4(0, 1, 0, 1)), unity_AmbientSky.rgb), float3(0.3, 0.59, 0.11));
+                    lit = saturate(max(lum, ambLum * 1.5));
+                }
                 float3 col = refl * fres + specC * spec * lum * sunUp;
-                // Pool/Brunnen: Wasserfarbe statt nur Spiegelung (sonst sieht man fast nur den Beckenboden)
-                float alpha = max(fres, _PoolTint.a);
-                col += _PoolTint.rgb * max(0.0, alpha - fres) * (0.35 + 0.65 * lum);
+                float alpha = fres;
+                if (_PoolTint.a > 0.0)
+                {
+                    // Pool/Brunnen: Wasserkörper (Farbe x Deckung) unter der Spiegelung: rgb = Spiegelung x F + Wasser x (1 - F) x a,
+                    // Deckung = F + (1 - F) x a (vormultipliziert). Vorher nur Wasser x (a - F) -> bei F ~ a fast schwarz.
+                    float3 water = _PoolTint.rgb * (0.45 + 0.55 * lit);
+                    float a0 = _PoolTint.a;
+                    col += water * (1.0 - fres) * a0;
+                    alpha = fres + (1.0 - fres) * a0;
+                }
 
                 fixed4 o = fixed4(col, alpha);
                 UNITY_APPLY_FOG_COLOR(i.fogCoord, o, fixed4(unity_FogColor.rgb * alpha, alpha));

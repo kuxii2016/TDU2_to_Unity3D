@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Text;
 using TDU2.Formats;
 using TDU2.IO;
 using UnityEngine;
@@ -53,6 +55,64 @@ namespace TDU2.Flash
             internal int SeenDraw = -10;
             internal bool Revealed;
             internal float RevealSince, FrozenUntil;
+        }
+
+        // Flash profiling
+        [NonSerialized] public static float LastFrameTimeMs;
+        [NonSerialized] public static float LastDrawTimeMs;
+        [NonSerialized] public static float LastTickTimeMs;
+        [NonSerialized] public static float LastRasterIntegrateTimeMs;
+        [NonSerialized] public static float LastMouseTimeMs;
+        [NonSerialized] public static float LastApplyTimeMs;
+        [NonSerialized] public static int LastDrawCalls;
+        [NonSerialized] public static int LastShapeDraws;
+        [NonSerialized] public static int LastTextDraws;
+        [NonSerialized] public static int LastQuadBatches;
+        [NonSerialized] public static long LastRasterPendingBytes;
+        [NonSerialized] public static int LastRasterQueueCount;
+        [NonSerialized] public static int LastRasterDoneCount;
+        static readonly Queue<float> _frameTimeHist = new Queue<float>(300);
+        static readonly Queue<float> _drawTimeHist = new Queue<float>(300);
+        static readonly Queue<float> _tickTimeHist = new Queue<float>(300);
+        static readonly Queue<int> _drawCallHist = new Queue<int>(300);
+        static readonly object _histLock = new object();
+        internal static void PushFlashMetric(float frameMs, float drawMs, float tickMs, int drawCalls)
+        {
+            lock (_histLock)
+            {
+                _frameTimeHist.Enqueue(frameMs);
+                while (_frameTimeHist.Count > 300) _frameTimeHist.Dequeue();
+                _drawTimeHist.Enqueue(drawMs);
+                while (_drawTimeHist.Count > 300) _drawTimeHist.Dequeue();
+                _tickTimeHist.Enqueue(tickMs);
+                while (_tickTimeHist.Count > 300) _tickTimeHist.Dequeue();
+                _drawCallHist.Enqueue(drawCalls);
+                while (_drawCallHist.Count > 300) _drawCallHist.Dequeue();
+            }
+        }
+        public static float[] GetFrameHistory() { lock (_histLock) return _frameTimeHist.ToArray(); }
+        public static float[] GetDrawHistory() { lock (_histLock) return _drawTimeHist.ToArray(); }
+        public static float[] GetTickHistory() { lock (_histLock) return _tickTimeHist.ToArray(); }
+        public static int[] GetDrawCallHistory() { lock (_histLock) return _drawCallHist.ToArray(); }
+        public static void ClearFlashMetrics() { lock (_histLock) { _frameTimeHist.Clear(); _drawTimeHist.Clear(); _tickTimeHist.Clear(); _drawCallHist.Clear(); } }
+        public static string GetFlashLogPath()
+        {
+            try { return Path.Combine(Application.persistentDataPath, "FlashPerfLog.csv"); }
+            catch { return Path.Combine(Environment.CurrentDirectory, "FlashPerfLog.csv"); }
+        }
+        public static void AppendFlashLog()
+        {
+            try
+            {
+                string path = GetFlashLogPath();
+                bool exists = File.Exists(path);
+                using (var sw = new StreamWriter(path, true, Encoding.UTF8))
+                {
+                    if (!exists) sw.WriteLine("timestamp,frameMs,drawMs,tickMs,mouseMs,applyMs,rasterIntMs,drawCalls,shapeDraws,textDraws,quadBatches,pendingBytes,rasterQueue,rasterDone");
+                    sw.WriteLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + "," + LastFrameTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastDrawTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastTickTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastMouseTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastApplyTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastRasterIntegrateTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastDrawCalls + "," + LastShapeDraws + "," + LastTextDraws + "," + LastQuadBatches + "," + LastRasterPendingBytes + "," + LastRasterQueueCount + "," + LastRasterDoneCount);
+                }
+            }
+            catch {}
         }
 
         /// <summary>Begrenzung eines Clips im Koordinatensystem seines Eltern-Clips (für _width/_height); null = leer.</summary>
@@ -467,6 +527,8 @@ namespace TDU2.Flash
             d.Matrix.Tx = p.x; d.Matrix.Ty = p.y; d.Position = null; d.ScriptMatrix = true;
         }
 
+        DisplayObject _rPressBtn;
+
         void UpdateMouse()
         {
             if (!MouseEnabled || !Visible || Root == null) { _hoverBtn = null; _pressBtn = null; _mouseDown = false; _dragD = null; return; }
@@ -483,9 +545,31 @@ namespace TDU2.Flash
                 _hoverBtn = hit;
                 if (hit != null) RunButton(hit, _mouseDown ? 0x20 : 0x01);              // dragOver / rollOver
             }
-            if (UnityEngine.Input.GetMouseButtonDown(0)) { _mouseDown = true; _pressBtn = _hoverBtn; if (_hoverBtn != null) RunButton(_hoverBtn, 0x04); }
+            if (UnityEngine.Input.GetMouseButtonDown(0))
+            {
+                _mouseDown = true; _pressBtn = _hoverBtn;
+                // Linksklick: wie im Spiel _root.WhatMouseButton = 0 – bei JEDEM Linksklick, nicht nur in nativen Listen. Die Profilzeilen
+                // (main.vmf Button 274) prüfen "WhatMouseButton == 0 ? A() : Profil löschen/gesperrt"; ungesetzt (undefined) landete jeder
+                // Klick auf ein Profil im Dialog "lock_profile" (Sperrton, Menü weg).
+                StoreClipVar(Root, "WhatMouseButton", 0.0);
+                if (_hoverBtn != null) RunButton(_hoverBtn, 0x04);
+            }
+            // Rechtsklick auf eine Zeile der nativen Liste: wie im Spiel _root.WhatMouseButton = 1 (z.B. Steuerung: Belegung löschen)
+            if (UnityEngine.Input.GetMouseButtonDown(1)) _rPressBtn = _hoverBtn != null && InActiveList(_hoverBtn.Parent) ? _hoverBtn : null;
+            if (UnityEngine.Input.GetMouseButtonUp(1))
+            {
+                if (_rPressBtn != null && _rPressBtn == _hoverBtn)
+                {
+                    StoreClipVar(Root, "WhatMouseButton", 1.0);
+                    RunButton(_rPressBtn, 0x08);
+                    StoreClipVar(Root, "WhatMouseButton", 0.0);
+                }
+                _rPressBtn = null;
+            }
             if (UnityEngine.Input.GetMouseButtonUp(0))
             {
+                // Login-Popup u.ä.: Felder/Tasten-Symbole unter einem Button trotzdem bedienbar
+                if (_mouseDown && _hoverBtn != null && HandleSubscribedClick(pt)) { _mouseDown = false; _pressBtn = null; return; }
                 if (_mouseDown && _pressBtn != null)
                 {
                     if (_pressBtn == _hoverBtn) RunButton(_pressBtn, 0x08);              // release
@@ -552,18 +636,29 @@ namespace TDU2.Flash
         void Update()
         {
             if (Root == null) return;
+            var swU = Stopwatch.StartNew();
             if (Visible && !_wasVisible) _holdUntil = Time.unscaledTime + FirstShowHoldSeconds;   // wird gerade eingeblendet
             _wasVisible = Visible;
+            var swR = Stopwatch.StartNew();
             IntegrateRasters();   // fertige Hintergrund-Rasterungen -> Texturen (VmfPlayerAsync.cs)
+            try { UploadTick(); } catch {}
+            LastRasterIntegrateTimeMs = (float)swR.Elapsed.TotalMilliseconds;
+            var swM = Stopwatch.StartNew();
             UpdateMouse();
+            LastMouseTimeMs = (float)swM.Elapsed.TotalMilliseconds;
             _accum += Time.unscaledDeltaTime;   // Menüs laufen auch bei angehaltenem Spiel (Pause)
             float step = 1f / Mathf.Max(1f, Movie.FrameRate);
             int guard = 0;
+            var swT = Stopwatch.StartNew();
             while (_accum >= step && guard++ < 4) { _accum -= step; Tick(Root); RunEnterFrames(); }
             if (guard >= 4) _accum = 0f;
+            LastTickTimeMs = (float)swT.Elapsed.TotalMilliseconds;
+            var swA = Stopwatch.StartNew();
             ApplyForcedVisibility();   // ForceVisible (VmfHelpers) gilt auch nach _visible-Änderungen des Films
             ApplyPins();               // festgehaltene Werte/Labels (VmfHelpers: PinText/PinValue/PinLabel/PinScope)
             ApplyPatches();            // Korrekturen aus TDU2FlashPatches (VmfPatches.cs)
+            LastApplyTimeMs = (float)swA.Elapsed.TotalMilliseconds;
+            LastFrameTimeMs = (float)swU.Elapsed.TotalMilliseconds;
         }
 
         void Tick(Instance inst)
@@ -711,11 +806,13 @@ namespace TDU2.Flash
             GUI.depth = GuiDepth;   // in jedem Ereignis setzen (Unity sortiert die OnGUI-Aufrufe nach der Tiefe des Layout-Durchgangs)
             if (!Visible || Root == null || Event.current.type != EventType.Repaint) return;
             GUI.depth = GuiDepth;
+            var swD = Stopwatch.StartNew();
+            LastDrawCalls = 0; LastShapeDraws = 0; LastTextDraws = 0; LastQuadBatches = 0;
             ApplyClipTextures();
             if (_mat == null)
             {
                 var sh = Shader.Find("TDU2/FlashQuad");
-                if (sh == null) return;
+                if (sh == null) { LastDrawTimeMs = (float)swD.Elapsed.TotalMilliseconds; return; }
                 _mat = new Material(sh) { hideFlags = HideFlags.HideAndDontSave };
             }
             if (_textStyle == null)
@@ -734,7 +831,7 @@ namespace TDU2.Flash
                 {
                     _probe = true; _missing = false;
                     try { Draw(Root, stage, cx, null); } finally { _probe = false; }
-                    if (_missing) return;
+                    if (_missing) { LastDrawTimeMs = (float)swD.Elapsed.TotalMilliseconds; return; }
                 }
                 _holdUntil = 0f;
             }
@@ -749,6 +846,18 @@ namespace TDU2.Flash
             FlushBatch();
             GL.PopMatrix();
             if (Highlight != null) DrawHighlight(Highlight);
+            LastDrawTimeMs = (float)swD.Elapsed.TotalMilliseconds;
+            try
+            {
+                lock (_histLock)
+                {
+                    LastRasterPendingBytes = _pendingBytes;
+                    LastRasterQueueCount = _rasterJobs.Count;
+                    LastRasterDoneCount = _rasterDone.Count;
+                }
+            }
+            catch {}
+            PushFlashMetric(LastFrameTimeMs, LastDrawTimeMs, LastTickTimeMs, LastDrawCalls);
         }
 
         /// <summary>Debug: dieses Objekt im Spielbild rot umrahmen (Flash Debugger).</summary>
@@ -947,9 +1056,9 @@ namespace TDU2.Flash
                 if (background)
                 {
                     RequestRaster(s.Id, target, true);
-                    // Prüfdurchgang (Einblenden): auch eine nur unscharfe kleinere Stufe zählt als "fehlt" -> erst scharf zeigen
-                    if (!haveSmaller || _probe) { _missing = true; return (null, default); }
-                    found = true;
+                    // Wenn schon eine kleinere Stufe da ist, sofort zeigen
+                    if (haveSmaller) { found = true; }
+                    else { _missing = true; return (null, default); }
                 }
                 else if (haveSmaller && Time.frameCount == _rasterFrame && _rasterMs > RasterBudgetMs)
                     found = true;
@@ -1014,6 +1123,7 @@ namespace TDU2.Flash
         void DrawText(VmfMovie.EditText t, Matrix2D m, ColorTransform cx, Instance ctx, string overrideText = null)
         {
             if (_probe) return;
+            LastDrawCalls++; LastTextDraws++;
             string s = overrideText;
             if (s == null && !string.IsNullOrEmpty(t.Variable))
             {

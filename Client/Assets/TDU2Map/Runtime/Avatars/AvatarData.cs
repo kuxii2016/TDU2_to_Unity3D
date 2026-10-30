@@ -40,6 +40,11 @@ namespace TDU2.Avatars
         public int Ethnic;     // 0 occidental, 1 asiatisch, 2 afrikanisch (Kopf und Hautfarbe)
         public List<int> Items = new List<int>();
         public List<int> Colors = new List<int>();
+        /// <summary>Gesicht aus der .avt (AvatarConfiguration): EyeID (Frau 25..49, Mann 0..24 -> Zelle des 5x5-Iris-Atlas),
+        /// EyebrowsID (0..7 -> Zelle des 2x4-Brauen-Atlas), EyebrowsColor. -1 / Alpha &lt; 0 = nicht gesetzt (Material-Vorgabe).</summary>
+        public int EyeId = -1, BrowId = -1;
+        public Color BrowColor = new Color(0f, 0f, 0f, -1f);
+        public bool HasBrowColor => BrowColor.a >= 0f;
 
         public string Encode()
         {
@@ -49,6 +54,13 @@ namespace TDU2.Avatars
             {
                 if (i > 0) sb.Append(',');
                 sb.Append(Items[i].ToString(CultureInfo.InvariantCulture)).Append(':').Append((i < Colors.Count ? Colors[i] : 0).ToString(CultureInfo.InvariantCulture));
+            }
+            // optionaler 5. Teil (ältere Leser ignorieren ihn): "e<Auge>,<Braue>[,r,g,b]"
+            if (EyeId >= 0 || BrowId >= 0 || HasBrowColor)
+            {
+                var ic = CultureInfo.InvariantCulture;
+                sb.Append(";e").Append(EyeId.ToString(ic)).Append(',').Append(BrowId.ToString(ic));
+                if (HasBrowColor) sb.Append(',').Append(BrowColor.r.ToString("0.###", ic)).Append(',').Append(BrowColor.g.ToString("0.###", ic)).Append(',').Append(BrowColor.b.ToString("0.###", ic));
             }
             return sb.ToString();
         }
@@ -71,6 +83,16 @@ namespace TDU2.Avatars
                     if (kv.Length > 1) int.TryParse(kv[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out col);
                     c.Items.Add(h); c.Colors.Add(col);
                 }
+            if (parts.Length > 4 && parts[4].StartsWith("e", StringComparison.Ordinal))
+            {
+                var f = parts[4].Substring(1).Split(',');
+                var ic = CultureInfo.InvariantCulture;
+                if (f.Length > 0) int.TryParse(f[0], NumberStyles.Integer, ic, out c.EyeId);
+                if (f.Length > 1) int.TryParse(f[1], NumberStyles.Integer, ic, out c.BrowId);
+                if (f.Length > 4 && float.TryParse(f[2], NumberStyles.Float, ic, out float r) && float.TryParse(f[3], NumberStyles.Float, ic, out float g)
+                    && float.TryParse(f[4], NumberStyles.Float, ic, out float b))
+                    c.BrowColor = new Color(r, g, b, 1f);
+            }
             return c;
         }
 
@@ -130,9 +152,70 @@ namespace TDU2.Avatars
         static readonly string[] PnjSlots = { "hair", "top", "bottom", "gloves", "shoes", "glasses", "helmet", "dress", "beard", "accessories" };
 
         /// <summary>Aussehen einer Figur (DBPNJ._configid, z.B. "SPT_Clothes_Seller04"); null = unbekannt.</summary>
-        public static AvatarConfig PnjConfig(string configId) => configId != null && _pnj.TryGetValue(configId, out var p) ? p.cfg.Clone() : null;
+        public static AvatarConfig PnjConfig(string configId)
+        {
+            if (configId == null || !_pnj.TryGetValue(configId, out var p)) return null;
+            var c = p.cfg.Clone();
+            ApplyAvt(c, configId);
+            return c;
+        }
+
+        static Dictionary<string, byte[]> _avt;
+        static readonly Dictionary<string, string> _pnjFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Gesicht der Figur aus avatar/config/pnj.bnk &lt;configid&gt;.avt (Varianten wie "STO_Tess_Wintory" -> "STO_Tess").
+        /// Format (DbgAvatarEditor, AvatarConfiguration): u16 Wurzel-Schlüssel, dann Einträge {u16 Länge (inkl. Schlüssel), u16 Schlüssel,
+        /// Daten} big-endian. Schlüssel: 0xCD26 BodyID (Geschlecht = %2, Herkunft = /2), 0x82B9 EyeID, 0xC881 EyebrowsID,
+        /// 0xC643 EyebrowsColor (float4).
+        /// </summary>
+        static void ApplyAvt(AvatarConfig c, string configId)
+        {
+            byte[] d = null;
+            lock (_lock)
+            {
+                if (_avt == null)
+                {
+                    _avt = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+                    try
+                    {
+                        var path = Path.Combine(BnkDir ?? "", "avatar", "config", "pnj.bnk");
+                        var b = File.Exists(path) ? BnkArchive.Open(path) : null;
+                        if (b != null) foreach (var e in b.All(".avt")) _avt[Path.GetFileNameWithoutExtension(e.Name)] = b.Read(e);
+                    }
+                    catch (Exception ex) { DebugManager.Error("pnj.bnk: " + ex.Message); }
+                }
+                string id = _pnjFile.TryGetValue(configId, out var file) ? System.IO.Path.GetFileNameWithoutExtension(file) : configId;
+                if (!_avt.TryGetValue(id, out d)) id = configId;
+                while (!_avt.TryGetValue(id, out d))
+                {
+                    int u = id.LastIndexOf('_');
+                    if (u < 4) break;
+                    id = id.Substring(0, u);
+                }
+            }
+            if (d == null || d.Length < 6) return;
+            int BE16(int o) => (d[o] << 8) | d[o + 1];
+            float BEF(int o) => BitConverter.ToSingle(new[] { d[o + 3], d[o + 2], d[o + 1], d[o] }, 0);
+            for (int p = 2; p + 4 <= d.Length;)
+            {
+                int len = BE16(p), key = BE16(p + 2), q = p + 4, n = len - 2;
+                if (len < 2 || p + 2 + len > d.Length) break;
+                int val = n == 2 ? BE16(q) : n == 1 ? d[q] : -1;
+                switch (key)
+                {
+                    case 0xCD26: if (val >= 0 && val <= 5) { c.Sex = val % 2; c.Ethnic = val / 2; } break;
+                    case 0x82B9: if (val >= 0) c.EyeId = val; break;
+                    case 0xC881: if (val >= 0) c.BrowId = val; break;
+                    case 0xC643: if (n >= 12) c.BrowColor = new Color(BEF(q), BEF(q + 4), BEF(q + 8), 1f); break;
+                }
+                p += 2 + len;
+            }
+        }
         /// <summary>DBPNJ._pnj_name (z.B. "Clothes seller Highlife").</summary>
         public static string PnjName(string configId) => configId != null && _pnj.TryGetValue(configId, out var p) ? p.name : null;
+        /// <summary>Alle Figuren (DBPNJ._configid), sortiert – Animations-Betrachter im Entwicklermenü.</summary>
+        public static List<string> PnjIds() { var l = new List<string>(_pnj.Keys); l.Sort(StringComparer.OrdinalIgnoreCase); return l; }
 
         public static readonly string[] BodyFlags =
         {
@@ -197,6 +280,9 @@ namespace TDU2.Avatars
                             cfg.Items.Add(h); cfg.Colors.Add(r.I("_" + slot + "_color"));
                         }
                         _pnj[id] = (cfg, r.S("_pnj_name", ""));
+                        // _fileconfigid = Name der .avt in avatar/config/pnj.bnk (z.B. SPT_Hostess_CD_Asia -> SPT_CDlrH02)
+                        string file = r.S("_fileconfigid", "");
+                        if (!string.IsNullOrEmpty(file)) _pnjFile[id] = file;
                     }
                 string clothesDir = Path.Combine(bnkDir ?? "", "avatar", "clothes");
                 try

@@ -600,19 +600,24 @@ namespace TDU2.Traffic
         TrafficTrack Cur(Car c) => c.Phase == 1 && c.Junction != null ? (TrafficTrack)c.Junction : c.Lane;
 
         /// <summary>Punkt auf dem geplanten Weg <paramref name="ahead"/> Meter voraus.</summary>
-        Vector3 PointAhead(Car c, float ahead)
+        void PointAhead(Car c, float ahead, out Vector3 pos)
         {
             float s = c.S + ahead;
             if (c.Phase == 0)
             {
-                if (s <= c.Lane.Length || c.Junction == null) { c.Lane.Sample(s, out var p, out _); return p; }
+                if (s <= c.Lane.Length || c.Junction == null) { c.Lane.Sample(s, out pos, out _); return; }
                 s -= c.Lane.Length;
-                if (s <= c.Junction.Length || c.Next == null) { c.Junction.Sample(s, out var p, out _); return p; }
+                if (s <= c.Junction.Length || c.Next == null) { c.Junction.Sample(s, out pos, out _); return; }
                 s -= c.Junction.Length;
-                c.Next.Sample(s, out var q, out _); return q;
+                c.Next.Sample(s, out pos, out _); return;
             }
-            if (s <= c.Junction.Length || c.Next == null) { c.Junction.Sample(s, out var p, out _); return p; }
-            c.Next.Sample(s - c.Junction.Length, out var r, out _); return r;
+            if (s <= c.Junction.Length || c.Next == null) { c.Junction.Sample(s, out pos, out _); return; }
+            c.Next.Sample(s - c.Junction.Length, out pos, out _);
+        }
+        Vector3 PointAhead(Car c, float ahead)
+        {
+            PointAhead(c, ahead, out var pos);
+            return pos;
         }
 
         struct Obstacle { public Vector3 P, V, F; public float HalfLen; public Car Car; public bool Player; }
@@ -1472,23 +1477,98 @@ namespace TDU2.Traffic
         {
             if (!ShowDebug || _lanes == null || Manager == null || Manager.Streamer == null || Manager.Streamer.MapRoot == null) return;
             var root = Manager.Streamer.MapRoot;
+            var cam = Camera.main;
             foreach (var c in _cars.Values)
             {
-                if (!c.Mine || c.Lane == null) continue;
-                Gizmos.color = c.Mode != 0 ? Color.red : c.WaitT > 0f ? Color.yellow : Color.green;
-                Vector3 prev = root.TransformPoint(c.Pos);
-                for (float s = 2f; s < 40f; s += 2f)
+                if (c.Lane == null && c.Junction == null) continue;
+                if (c.Go == null && !c.HasVis) continue;
+                Vector3 wpos = c.Go != null ? c.Go.transform.position : root.TransformPoint(c.HasVis ? c.VisPos : c.Pos);
+                if (cam != null)
                 {
-                    var p = root.TransformPoint(PointAhead(c, s));
-                    Gizmos.DrawLine(prev, p); prev = p;
+                    float d = Vector3.Distance(cam.transform.position, wpos);
+                    if (d > 250f) continue;
+                }
+                float kmh = (c.Mine ? c.V : (c.HasVis ? c.VisVel.magnitude : 0f)) * 3.6f;
+                if (c.Mode == 1) Gizmos.color = Color.magenta;
+                else if (c.Mode == 2) Gizmos.color = Color.gray;
+                else if (c.WaitT > 0.1f) Gizmos.color = Color.yellow;
+                else if (kmh > 60f) Gizmos.color = Color.red;
+                else if (kmh > 40f) Gizmos.color = Color.cyan;
+                else Gizmos.color = Color.green;
+                Gizmos.DrawWireSphere(wpos + Vector3.up * 1.2f, 0.4f);
+                if (c.Mine || (c.Go != null && cam != null && Vector3.Distance(cam.transform.position, wpos) < 120f))
+                {
+                    Vector3 prev = wpos;
+                    float maxS = 60f;
+                    for (float s = 3f; s < maxS; s += 3f)
+                    {
+                        PointAheadCar(c, s, out Vector3 pa);
+                        var p = root.TransformPoint(pa);
+                        Gizmos.color = new Color(Gizmos.color.r, Gizmos.color.g, Gizmos.color.b, 1f - s / maxS);
+                        Gizmos.DrawLine(prev, p); prev = p;
+                    }
+                    if (c.Next != null)
+                    {
+                        Gizmos.color = Color.white;
+                        c.Next.Sample(Mathf.Min(10f, c.Next.Length), out Vector3 npt, out _);
+                        var np = root.TransformPoint(npt);
+                        Gizmos.DrawLine(prev, np);
+                    }
                 }
             }
+        }
+
+        void PointAheadCar(Car c, float ahead, out Vector3 pos)
+        {
+            float s = c.S + ahead;
+            if (c.Phase == 0)
+            {
+                if (c.Lane == null) { pos = rootOf(c); return; }
+                if (s <= c.Lane.Length || c.Junction == null) { c.Lane.Sample(s, out pos, out _); return; }
+                s -= c.Lane.Length;
+                if (c.Junction == null || c.Next == null) { c.Lane.Sample(c.Lane.Length, out pos, out _); return; }
+                if (s <= c.Junction.Length) { c.Junction.Sample(s, out pos, out _); return; }
+                s -= c.Junction.Length;
+                c.Next.Sample(s, out pos, out _); return;
+            }
+            if (c.Junction == null) { pos = rootOf(c); return; }
+            if (s <= c.Junction.Length || c.Next == null) { c.Junction.Sample(s, out pos, out _); return; }
+            c.Next.Sample(s - c.Junction.Length, out pos, out _);
+        }
+
+        Vector3 rootOf(Car c)
+        {
+            if (Manager == null || Manager.Streamer == null || Manager.Streamer.MapRoot == null) return c.Go != null ? c.Go.transform.position : Vector3.zero;
+            var root = Manager.Streamer.MapRoot;
+            if (c.Go != null) return c.Go.transform.position;
+            if (c.HasVis) return root.TransformPoint(c.VisPos);
+            return root.TransformPoint(c.Pos);
         }
 
         void OnGUI()
         {
             if (!ShowDebug) return;
             GUI.Label(new Rect(10, Screen.height - 60, 900, 22), $"Verkehr: {_cars.Count} Autos ({OwnedCount} eigene) – {_status}");
+            if (Manager == null || Manager.Streamer == null || Manager.Streamer.MapRoot == null) return;
+            var root = Manager.Streamer.MapRoot;
+            var cam = Camera.main;
+            if (cam == null) return;
+            GUI.skin.label.fontSize = 10;
+            foreach (var c in _cars.Values)
+            {
+                if (c.Go == null && !c.HasVis) continue;
+                Vector3 wpos = c.Go != null ? c.Go.transform.position : root.TransformPoint(c.HasVis ? c.VisPos : c.Pos);
+                float dcam = Vector3.Distance(cam.transform.position, wpos);
+                if (dcam > 80f) continue;
+                Vector3 sp = cam.WorldToScreenPoint(wpos + Vector3.up * 2.2f);
+                if (sp.z < 0) continue;
+                float kmh = (c.Mine ? c.V : (c.HasVis ? c.VisVel.magnitude : 0f)) * 3.6f;
+                string mode = c.Removed ? "REM" : !c.Mine ? "NET" : c.Mode == 1 ? "CRASH" : c.Mode == 2 ? "STOP" : c.Phase == 1 ? "JUNC" : (c.WaitT > 0.1f ? "WAIT" : "DRIVE");
+                string txt = $"{(c.Type?.Name ?? "-")} | {kmh:0} km/h | {mode} | L{c.Lane?.Lane ?? -1}";
+                Rect r = new Rect(sp.x - 80, Screen.height - sp.y - 10, 160, 16);
+                GUI.Label(r, txt);
+            }
+            GUI.skin.label.fontSize = 12;
         }
     }
 

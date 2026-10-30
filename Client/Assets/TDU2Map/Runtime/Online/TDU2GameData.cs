@@ -303,7 +303,7 @@ namespace TDU2.Online
             if (ok && r.playerId == 0) { TDU2Session.SaveAsync(); ok = false; }   // Sitzung verloren (Server neu gestartet?) -> mit Token neu anmelden
             if (!ok) _failCount++; else _failCount = 0;
             bool online = ok || (_failCount < 2 && Online);   // einen Aussetzer tolerieren
-            if (online && r != null && r.ok) { ApplyPlayers(r); TDU2Party.Ensure(gameObject).OnStatus(r); PlayerCount = IslandPlayerCount(r.online); TDU2Session.Online = r.online; TDU2Session.ApplyRadio(r); }
+            if (online && r != null && r.ok) { ApplyPlayers(r); TDU2Party.Ensure(gameObject).OnStatus(r); PlayerCount = IslandPlayerCount(r.online); TDU2Session.Online = r.online; TDU2Session.ApplyRadio(r); TDU2News.OnStatus(r.newsLatest); }
             if (online != Online)
             {
                 Online = online;

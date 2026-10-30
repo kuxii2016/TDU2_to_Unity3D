@@ -57,6 +57,7 @@ Shader "TDU2/Grass"
             return c;
         }
 
+        float _TDU2TerrainLower;   // global (TDU2MapStreamer)
         void vert(inout appdata_full v)
         {
             v.normal = normalize(mul((float3x3)unity_WorldToObject, float3(0, 1, 0)));
@@ -76,6 +77,8 @@ Shader "TDU2/Grass"
             // Gras seitlich bewegen
             v.vertex.x += wind;
             v.vertex.z += wind * 0.5;
+            // mit dem dargestellten Gelände absenken (TDU2/Terrain: _TDU2TerrainLower), sonst schwebt die Grasbasis
+            v.vertex.xyz += mul((float3x3)unity_WorldToObject, float3(0, -_TDU2TerrainLower, 0));
         }
 
         void surf(Input IN, inout SurfaceOutput o)

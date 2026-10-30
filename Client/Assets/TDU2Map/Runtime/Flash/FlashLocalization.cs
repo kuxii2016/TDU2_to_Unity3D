@@ -61,6 +61,7 @@ namespace TDU2.Flash
                             var t = it.S("Text") ?? it.S("Line");
                             if (t != null) lines[it.I("HashCode")] = t.Replace("\r\n", "\n").Replace('\r', '\n');
                         }
+                        _lines = lines;
                         var droot = XmbFile.Parse(CprCrypto.Decrypt(File.ReadAllBytes(dataPath)));
                         var loc = droot.Get("DBLoc");
                         if (loc != null)
@@ -79,6 +80,19 @@ namespace TDU2.Flash
                 _texts = result; _loadedKey = key;
                 return result;
             }
+        }
+
+        static Dictionary<int, string> _lines;
+
+        /// <summary>
+        /// Text der Sprachdatenbank (db_&lt;lang&gt;.cpr) zu einem HashCode – so benennt das Spiel Händler (DBCarShop._libelle_hc),
+        /// Häuser (DBHouse._housename_hc) usw. null, wenn unbekannt.
+        /// </summary>
+        public static string Text(string bnkDir, string lang, int hash)
+        {
+            if (hash <= 0) return null;
+            if (!string.IsNullOrEmpty(bnkDir)) Load(bnkDir, lang);
+            lock (_lock) return _lines != null && _lines.TryGetValue(hash, out var t) && !string.IsNullOrEmpty(t) ? t : null;
         }
 
         static IEnumerable<XmbNode> ItemsOf(XmbNode root)

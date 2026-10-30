@@ -46,7 +46,9 @@ namespace TDU2.World
         public static float HaloIntensity = Renderconfig.HaloIntensity;
         public static float WindStrength = Renderconfig.WindStrength;
         public static float ObjectBrightness = Renderconfig.ObjectBrightness, WrapLighting = Renderconfig.WrapLighting;
-        static Material _water, _fallback;
+        static Material _water, _fallback, _pool;
+        /// <summary>Pool-/Brunnenwasser: Farbe (a = Mindest-Deckung) für "TDU2/Water" _PoolTint.</summary>
+        public static Color PoolColor = new Color(0.10f, 0.42f, 0.55f, 0.55f);
         public static bool IsSrp => GraphicsSettings.currentRenderPipeline != null;
 
         static Shader SrpLit()
@@ -88,6 +90,7 @@ namespace TDU2.World
         static readonly ulong SemMaterial = TDU2.IO.Bin.KeyFromString("MATERIAL");
         static readonly ulong SemTex = TDU2.IO.Bin.KeyFromString("TEX");
         static readonly ulong SemNeon = TDU2.IO.Bin.KeyFromString("NEONGLOW");
+        static readonly ulong SemFrontColor = MaterialDef.KeyFromName("FRONTCOLOR"), SemBackColor = MaterialDef.KeyFromName("BACKCOLOR");
         static readonly ulong SemDiffuse = TDU2.IO.Bin.KeyFromString("DIFFUSE");
         static readonly ulong SemMarks = TDU2.IO.Bin.KeyFromString("MARKS");
         static readonly ulong SemMarks2 = TDU2.IO.Bin.KeyFromString("MARKS2");
@@ -102,6 +105,10 @@ namespace TDU2.World
             if (def.TryGetLayer(SemTex, out layer)) return true;
             if (def.TryGetLayer(SemDiffuse, out layer)) return true;
             if (def.TryGetLayer(SemNeon, out layer)) return true;
+            // Schaufenster (Shader-Set 0x18AA57B81C6CFF57, z.B. SB_ShopingA): FRONTCOLOR = komplette Ladenfront
+            // (store_front_d, Innenraum schon gemalt; Alpha nur für die Parallax-Rückwand BACKCOLOR) -> als Farbe.
+            if (def.TryGetLayer(SemFrontColor, out layer) && layer.TextureKey != 0) return true;
+            if (def.TryGetLayer(SemBackColor, out layer) && layer.TextureKey != 0) return true;
             return false;
         }
 
@@ -147,13 +154,37 @@ namespace TDU2.World
             }
         }
 
+        /// <summary>
+        /// Wasserfläche für Pools/Brunnen (TD_Water: "Oasis_*", "Water"): Meer-Shader mit eigener Wasserfarbe und Deckung. Die
+        /// Originalmaterialien tragen in COLOR/NORMAL nur Normalmaps und Kacheln (Spiegelung/Brechung als Render-Targets) – als
+        /// gewöhnliches Material gezeichnet sind sie dunkel/schwarz, als Meer (Farbe aus der Gelände-Colormap) fast unsichtbar.
+        /// </summary>
+        public static Material PoolWater
+        {
+            get
+            {
+                var w = Water;
+                if (_pool == null || _pool.shader != w.shader)
+                {
+                    if (_pool != null) UnityUtil.SafeDestroy(_pool);
+                    _pool = new Material(w) { name = "TDU2_PoolWater" };
+                    if (_pool.HasProperty("_PoolTint")) _pool.SetColor("_PoolTint", PoolColor);
+                    else { _pool.color = PoolColor; if (_pool.HasProperty("_BaseColor")) _pool.SetColor("_BaseColor", PoolColor); }
+                }
+                return _pool;
+            }
+        }
+
+        /// <summary>Gemeinsame Materialien (nicht pro Objekt besitzen/zerstören).</summary>
+        public static bool IsShared(Material m) => m != null && (m == _water || m == _fallback || m == _pool);
+
         /// <param name="getTexture">key, wrapU, wrapV -> Texture2D (lokal oder global)</param>
         public static Material CreateObjectMaterial(MaterialDef def, Func<ulong, TextureWrapMode, TextureWrapMode, Texture2D> getTexture, bool sprite = false, bool tintUv = false, bool fourUv = false)
         {
             if (def == null) return Fallback;
             if (def.IsOcean) return Water;
             // Pools/Brunnen ("Water"): im Spiel Reflexions-Shader mit Normalmaps -> eigene Wasserfläche verwenden
-            if (def.Name != null && def.Name.Equals("Water", StringComparison.OrdinalIgnoreCase)) return Water;
+            if (def.IsPoolWater || (def.Name != null && def.Name.Equals("Water", StringComparison.OrdinalIgnoreCase))) return PoolWater;
 
             var blend = GetBlend(def, out float alphaRef, out bool twoSided);
             Texture2D color = null, shadow = null, detail = null;
@@ -310,6 +341,14 @@ namespace TDU2.World
                     // Glas/Fenster: Alpha aus der DETAIL-Textur (vitre, glass_*), COLOR ist die Lightmap
                     bool detailAlpha = detail != null && detail.format != TextureFormat.DXT1;
                     m.SetFloat("_AlphaSource", detailAlpha ? 1f : 0f);
+                    // TD_Ground (Original-Pixelshader, Varianten mit DetailMap): Farbe = COLOR x DETAIL.r, Alpha = DETAIL.a –
+                    // nie COLOR.a (Colormap/Lightmap). DXT1-Detail = deckend.
+                    if (def.IsGround && detail != null)
+                    {
+                        m.SetFloat("_AlphaSource", 1f);
+                        if (m.HasProperty("_DetailGray")) m.SetFloat("_DetailGray", 1f);
+                        m.SetFloat("_DetailBoost", lightmap ? 2f : 1.25f);
+                    }
                     m.SetFloat("_Lit", lightmap ? 0f : 1f);
                     m.SetFloat("_Intensity", blend == EdenBlend.Additive ? GlowIntensity : 1f);
                     if (blend == EdenBlend.Additive) m.SetFloat("_Lit", 0f);
@@ -318,8 +357,60 @@ namespace TDU2.World
             }
             m.name = def.Name ?? "TDU2Mat";
             m.enableInstancing = true;
+            // Textur noch nicht bekannt (liegt in einer Bank, die erst später geladen/indiziert wird) -> weiße Fläche.
+            // Merken und nachreichen, sobald der globale Texturindex sie kennt (RetryPendingTextures).
+            if (!IsSrp)
+            {
+                if (color == null && cl.TextureKey != 0 && m.mainTexture == null && m.HasProperty("_MainTex"))
+                    AddPending(m, "_MainTex", cl, def, false);
+                if (detail == null && dl.TextureKey != 0 && m.HasProperty("_DetailTex"))
+                    AddPending(m, "_DetailTex", dl, def, true);
+            }
             return m;
         }
+
+        // ------------------------------------------------------------------ fehlende Texturen nachreichen
+        sealed class PendingTex { public Material Mat; public string Prop; public ulong Key; public TextureWrapMode U, V; public bool Detail, Road; public string Name; public float Since; }
+        static readonly System.Collections.Generic.List<PendingTex> _pending = new System.Collections.Generic.List<PendingTex>();
+
+        /// <summary>Materialien, deren Textur noch fehlt (weiß dargestellt).</summary>
+        public static int PendingTextures => _pending.Count;
+
+        static void AddPending(Material m, string prop, MaterialLayer l, MaterialDef def, bool detail)
+        {
+            _pending.Add(new PendingTex
+            {
+                Mat = m, Prop = prop, Key = l.TextureKey, U = TextureDef.WrapFromEden(l.AddressU), V = TextureDef.WrapFromEden(l.AddressV),
+                Detail = detail, Road = def.IsRoad, Name = def.Name ?? "?", Since = Time.unscaledTime,
+            });
+        }
+
+        /// <summary>
+        /// Main-Thread, regelmäßig (TDU2MapStreamer): fehlende Texturen aus dem globalen Index nachladen und einsetzen.
+        /// </summary>
+        public static int RetryPendingTextures(Func<ulong, TextureWrapMode, TextureWrapMode, Texture2D> get)
+        {
+            if (_pending.Count == 0 || get == null) return 0;
+            int fixedN = 0;
+            for (int i = _pending.Count - 1; i >= 0; i--)
+            {
+                var p = _pending[i];
+                if (p.Mat == null) { _pending.RemoveAt(i); continue; }
+                Texture2D t = null;
+                try { t = get(p.Key, p.U, p.V); } catch (Exception) { }
+                if (t == null) continue;
+                p.Mat.SetTexture(p.Prop, t);
+                if (p.Detail)
+                {
+                    if (p.Mat.HasProperty("_DetailMode")) p.Mat.SetFloat("_DetailMode", 1f);
+                    if (p.Mat.HasProperty("_DetailUV")) p.Mat.SetFloat("_DetailUV", p.Road ? 1f : 0f);
+                }
+                _pending.RemoveAt(i);
+                fixedN++;
+            }
+            return fixedN;
+        }
+
 
         /// <summary>
         /// Original-Pixelshader der Interieur-/Casino-Sets (Euro/Shaders/*.sob disassembliert):
@@ -329,9 +420,24 @@ namespace TDU2.World
         ///   TD_Gouraud:       Farbe = Textur x Vertexfarbe, unbeleuchtet (Neon, LEDs, Bildschirme, Leuchtschilder)
         ///   TD_NEONDECAL:     Farbe = Vertexfarbe x rgbExposure (x Leuchtmaske), unbeleuchtet (Gewinn-/Neon-Anzeigen)
         /// </summary>
+        // TD_NEONDECAL: Leuchtmaske (NEONGLOW-Ebene) je Material. Ohne Animation bleibt das Neon aus (schwarze Maske);
+        // hat die Bank eine .uva für die Ebene (Fahrschulen, Casino …), setzt InteriorFx die Maske ein und lässt sie laufen.
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Material, Texture> _neonMasks = new System.Runtime.CompilerServices.ConditionalWeakTable<Material, Texture>();
+
+        /// <summary>Leuchtmaske eines Neon-Materials (TD_NEONDECAL mit NEONGLOW-Ebene), sonst false.</summary>
+        public static bool TryGetNeonMask(Material m, out Texture mask)
+        {
+            mask = null;
+            return m != null && _neonMasks.TryGetValue(m, out mask) && mask != null;
+        }
+
         static void ApplyOriginalShader(MaterialDef def, Material m, bool transparent)
         {
             ulong ss = def.ShaderSet;
+            if (ss == ShaderNeonDecal && m.mainTexture != null && def.TryGetLayer(TDU2.IO.Bin.KeyFromString("NEONGLOW"), out _))
+            {
+                try { _neonMasks.Remove(m); _neonMasks.Add(m, m.mainTexture); } catch (Exception) { }
+            }
             if (ss == ShaderActors || ss == ShaderCasinoScroll)
             {
                 if (transparent) { if (m.HasProperty("_Lit")) m.SetFloat("_Lit", 0f); return; }
@@ -437,7 +543,8 @@ namespace TDU2.World
         {
             if (_water != null) UnityUtil.SafeDestroy(_water);
             if (_fallback != null) UnityUtil.SafeDestroy(_fallback);
-            _water = null; _fallback = null;
+            if (_pool != null) UnityUtil.SafeDestroy(_pool);
+            _water = null; _fallback = null; _pool = null;
         }
     }
 }

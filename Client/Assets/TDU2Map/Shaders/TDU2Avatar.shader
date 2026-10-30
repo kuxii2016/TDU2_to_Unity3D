@@ -33,6 +33,7 @@ Shader "TDU2/Avatar"
         _LayerOn ("Layer aktiv (xyz)", Vector) = (0,0,0,0)
         _LayerUV ("UV-Satz je Layer (xyz: 0..2)", Vector) = (1,2,2,0)
         _AlphaLum ("Alpha aus Helligkeit (DXT1-Masken: Augenbrauen, Wimpern)", Float) = 0
+        _UVOff ("UVOFF (Atlas-Zelle: Iris, Augenbrauen)", Vector) = (0,0,0,0)
         _Ombre ("Brillenglas: Farbe/Deckkraft lerp(BCOLOR, TCOLOR, TEX.a)", Float) = 0
         _BColor ("BCOLOR (Glas unten)", Color) = (1,1,1,0.5)
         _TColor ("TCOLOR (Glas oben)", Color) = (0,0,0,1)
@@ -57,7 +58,7 @@ Shader "TDU2/Avatar"
 
         sampler2D _MainTex, _BumpMap, _DetailTex, _Layer1, _Layer2, _Layer3, _GlossTex, _RampTex;
         fixed4 _Color, _BaseClr, _ClrL1, _ClrL2, _ClrL3, _PrimClr, _ScdClr, _SkinClr, _DclClr;
-        float4 _UVScale, _LayerOn, _LayerUV, _Spec, _CarInteg, _AtteFact, _Coeffs;
+        float4 _UVScale, _LayerOn, _LayerUV, _Spec, _CarInteg, _AtteFact, _Coeffs, _UVOff;
         half _Mode, _BumpOn, _DetailOn, _InCar, _Brightness, _GlossOn, _RampOn, _RampScale, _AlphaLum, _Ombre;
         fixed4 _BColor, _TColor;
         // Innenräume (TDU2Interiors): Licht ist dort eingebacken, die Sonne scheint nicht hinein. Statt Sonne ein weiches
@@ -239,7 +240,7 @@ Shader "TDU2/Avatar"
             else if (_Mode < 2.5)
             {
                 // TD_Avatar (Zähne, Wimpern, Augenbrauen, Accessoires, Gurt): Farbe = TEX x COLOR, Deckkraft = TEX.a
-                fixed4 t = tex2D(_MainTex, uv);
+                fixed4 t = tex2D(_MainTex, uv + _UVOff.xy);
                 c = t * _Color;
                 // Augenbrauen/Wimpern: DXT1 ohne Alpha, weiße Härchen auf Schwarz = Maske; Farbe = _Color (Haarfarbe)
                 if (_AlphaLum > 0.5) c = fixed4(_Color.rgb, max(t.r, max(t.g, t.b)) * _Color.a);
@@ -257,8 +258,8 @@ Shader "TDU2/Avatar"
             }
             else
             {
-                // Augen
-                c = tex2D(_MainTex, uv) * _Color;
+                // Augen: Iris-Zelle des 5x5-Atlas eye_switch über UVOFF
+                c = tex2D(_MainTex, uv + _UVOff.xy) * _Color;
                 c.a = 1;
                 specK = 0.6; specP = 60;
             }

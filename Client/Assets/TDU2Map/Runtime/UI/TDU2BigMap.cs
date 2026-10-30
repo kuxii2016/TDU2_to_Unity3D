@@ -120,13 +120,13 @@ namespace TDU2.Vehicles
         {
             if (Manager == null) Manager = GetComponent<TDU2VehicleManager>();
             EnsureLoaded();
-#if ENABLE_LEGACY_INPUT_MANAGER
+            #if ENABLE_LEGACY_INPUT_MANAGER
             if (!_open)
             {
                 var pm = GetComponent<TDU2PauseMenu>();
                 if (pm != null && pm.IsOpen) return;
                 if (Manager != null && Manager.Suspended) return;   // im Interieur keine Karte
-                if (TDU2Controls.Pressed("map") && _ui != null && Manager?.Streamer?.MapRoot != null) Open();
+                if (TDU2Controls.Pressed("map") && _ui != null && Manager?.Streamer?.MapRoot != null && !Story.TDU2Story.BlocksMap) Open();
                 return;
             }
             if (_contestEnterCup >= 0 && !_closing && (Time.unscaledTime >= _contestEnterAt || (_ui.Root != null && _ui.Root.Frame >= 60)))
@@ -147,7 +147,7 @@ namespace TDU2.Vehicles
             // Zurück wie im Spiel an den Film (Tooltip/Mini-Menü schließen bzw. Karte: "gofr"); reagiert er nicht, direkt schließen
             if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace)) { if (!_ui.Input("B")) Close(); return; }
             HandleInput();
-#endif
+            #endif
             UpdateCamera(false);
             RenderMap();
             UpdateOverlay();
@@ -424,22 +424,22 @@ namespace TDU2.Vehicles
                 _savedShadows = QualitySettings.shadows; QualitySettings.shadows = ShadowQuality.Disable;
                 _savedLodBias = QualitySettings.lodBias; QualitySettings.lodBias = Mathf.Min(_savedLodBias, MapLodBias);
                 _perfDisabled.Clear();
-#if UNITY_2023_1_OR_NEWER
+                #if UNITY_2023_1_OR_NEWER
                 var grass = FindObjectsByType<TDU2.World.GrassRenderer>(FindObjectsSortMode.None);
                 var veg = FindObjectsByType<TDU2.World.VegetationRenderer>(FindObjectsSortMode.None);
-#else
+                #else
                 var grass = FindObjectsOfType<TDU2.World.GrassRenderer>();
                 var veg = FindObjectsOfType<TDU2.World.VegetationRenderer>();
-#endif
+                #endif
                 foreach (var b in grass) if (b != null && b.enabled) { b.enabled = false; _perfDisabled.Add(b); }
                 foreach (var b in veg) if (b != null && b.enabled) { b.enabled = false; _perfDisabled.Add(b); }
                 // Punkt-/Spotlichter (Laternen, Scheinwerfer) kosten von oben über die ganze Insel viel und sieht man nicht
                 _hiddenLights.Clear();
-#if UNITY_2023_1_OR_NEWER
+                #if UNITY_2023_1_OR_NEWER
                 var lights = FindObjectsByType<Light>(FindObjectsSortMode.None);
-#else
+                #else
                 var lights = FindObjectsOfType<Light>();
-#endif
+                #endif
                 foreach (var l in lights) if (l != null && l.enabled && l.type != LightType.Directional) { l.enabled = false; _hiddenLights.Add(l); }
             }
             else
@@ -642,7 +642,7 @@ namespace TDU2.Vehicles
             yield return null;
             while (Time.unscaledTime < until && !st.ReadyAround(st.MapRoot.TransformPoint(s.Position), 400f)) yield return null;
             var car = Manager.Current != null ? Manager.Current.Car : null;
-            if (!it.Inside && it.EnterSpot(s, car)) Debug.Log("[TDU2] Karte: ins Interieur " + s.Code);
+            if (!it.Inside && it.EnterSpot(s, car)) Debug.Log("Karte: ins Interieur " + s.Code);
             done = true;
         }
 
@@ -653,11 +653,11 @@ namespace TDU2.Vehicles
             get
             {
                 if (_interiors == null && Manager != null) _interiors = Manager.GetComponentInChildren<TDU2Interiors>();
-#if UNITY_2023_1_OR_NEWER
+                #if UNITY_2023_1_OR_NEWER
                 if (_interiors == null) _interiors = FindFirstObjectByType<TDU2Interiors>();
-#else
+                #else
                 if (_interiors == null) _interiors = FindObjectOfType<TDU2Interiors>();
-#endif
+                #endif
                 return _interiors;
             }
         }
@@ -787,7 +787,7 @@ namespace TDU2.Vehicles
         void HandleInput()
         {
             if (Time.frameCount - _openFrame < 3) return;
-#if ENABLE_LEGACY_INPUT_MANAGER
+            #if ENABLE_LEGACY_INPUT_MANAGER
             float w = _curWidth;
             var north = North(); var east = East();
             Vector3 move = Vector3.zero;
@@ -897,7 +897,7 @@ namespace TDU2.Vehicles
             if (Input.GetKeyDown(KeyCode.T) && _contestCup >= 0 && _hover >= 0 && _spots[_hover].race >= 0) { _pendingStart = (_spots[_hover].cup, _spots[_hover].race); Close(); return; }
             if (Input.GetKeyDown(KeyCode.T)) { _cursorWorld = GroundPoint(mp); if (_hover >= 0) { TeleportToSpot(_spots[_hover].spot); Close(); } else if (OnRoad(out _)) { TeleportToCursor(); Close(); } else Sound("wrong"); }
             ClampTarget();
-#endif
+            #endif
         }
 
         Vector3 North() { var r = Manager.Streamer.MapRoot; var v = r.TransformVector(Vector3.back); v.y = 0f; return v.normalized; }   // Spiel -Z = oben auf der Karte
@@ -1008,6 +1008,7 @@ namespace TDU2.Vehicles
                     {
                         string label = TDU2Minimap.SpotLabel(s.Code);
                         if (label == null) continue;
+                        //How we get the Orginal names from Langfile?
                         _spots.Add(new MapSpot { spot = s, label = label, cup = cupByCode.TryGetValue(s.Code, out int ci) ? ci : -1 });
                     }
                 // Lesezeichen (nur auf der großen Karte, gespeichert je Spieler und Insel)
@@ -1105,11 +1106,11 @@ namespace TDU2.Vehicles
             }
 
             // Cursor an der Maus
-#if ENABLE_LEGACY_INPUT_MANAGER
+            #if ENABLE_LEGACY_INPUT_MANAGER
             var mouse = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
-#else
+            #else
             var mouse = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
-#endif
+            #endif
             var cl = _ui.GuiToLocal("/", mouse);
             if (cl.HasValue) _ui.SetPosition("/curseur", cl.Value);
             // Über Tooltip/Menüs liegt der Kartencursor des Films darunter -> dort den Mauszeiger von Windows zeigen (immer obenauf)
@@ -1124,9 +1125,9 @@ namespace TDU2.Vehicles
             // Nur bei Änderung umschalten (sonst startet das Bild jedes Mal neu).
             if (Time.frameCount % 4 == 0)
             {
-#if ENABLE_LEGACY_INPUT_MANAGER
+                #if ENABLE_LEGACY_INPUT_MANAGER
                 _cursorWorld = GroundPoint(Input.mousePosition);
-#endif
+                #endif
                 if (!_miniMenu)
                 {
                     bool offroad = _hover < 0 && _hoverPlayer < 0 && !OnRoad(out _);
@@ -1310,6 +1311,17 @@ namespace TDU2.Vehicles
         }
 
         /// <summary>Marken im Bestand eines Händlers (häufigste zuerst), z.B. "Ferrari" oder "Audi / Volkswagen".</summary>
+        /// <summary>Name eines Händlers/Shops/Hauses aus der Sprachdatenbank (z.B. "Audi (Norden)", "Salines-Villa"); null = keiner.</summary>
+        string SpotDbName(Spot s)
+        {
+            var db = Manager?.Database;
+            if (db == null || s == null || string.IsNullOrEmpty(s.Code)) return null;
+            int hash = 0;
+            if (s.Code.StartsWith("EPH", StringComparison.OrdinalIgnoreCase)) { var h = db.HouseForSpot(s, IslandName()); if (h != null) hash = h.NameHash; }
+            else { var sh = db.ShopForSpot(s, IslandName()); if (sh != null) hash = sh.NameHash; }
+            return FlashLocalization.Text(_bnkDir, TDU2PauseMenu.SavedLanguage(), hash);
+        }
+
         string DealerBrands(string code)
         {
             var db = Manager?.Database; var shop = db?.ShopFor(code);
@@ -1480,7 +1492,7 @@ namespace TDU2.Vehicles
             _ui.SetClipTexture("/tool_tip/infos/picture/lure_map", SpotPicture(s));
             if (ms.cup >= 0) { SetContestVars(ms.cup); return; }
             if (label != "carDealer" && label != "bikeDealer" && label != "home") return;
-            var db = Manager?.Database; var shop = label == "home" ? null : db?.ShopFor(s.Code);
+            var db = Manager?.Database; var shop = label == "home" ? null : db?.ShopForSpot(s, IslandName());
             var cars = label == "home" ? HouseCars(s.Code) : new List<CarPhysics>();
             if (shop != null) foreach (int id in shop.CarIds) if (id != 0 && db.ById.TryGetValue(id, out var c)) cars.Add(c);
             const string txt = "/tool_tip/infos/txt";
@@ -1598,7 +1610,10 @@ namespace TDU2.Vehicles
             string name = TDU2Minimap.ExtraSpotNames.TryGetValue(s.Code, out var extraName) ? extraName : LocalizedSpotName(label, s.Code);
             if (ms.bookmark >= 0) name = Txt("m_Bookmark", "Lesezeichen") + " " + ms.bookmark;
             _ui.SetValue("/:IsSpotFavorite", TDU2Bookmarks.IsFavorite(s.Code));
-            if (label == "carDealer" || label == "bikeDealer") { var b = DealerBrands(s.Code); if (!string.IsNullOrEmpty(b)) name = b; }
+            // wie im Spiel: Name aus der Sprachdatenbank (Händler/Shops DBCarShop._libelle_hc, Häuser DBHouse._housename_hc)
+            var dbName = ms.bookmark < 0 && ms.cup < 0 ? SpotDbName(s) : null;
+            if (!string.IsNullOrEmpty(dbName)) name = dbName;
+            else if (label == "carDealer" || label == "bikeDealer") { var b = DealerBrands(s.Code); if (!string.IsNullOrEmpty(b)) name = b; }
             var ch = Champs;
             if (ms.cup >= 0 && ch != null)
             {
@@ -1648,7 +1663,7 @@ namespace TDU2.Vehicles
             var db = Manager?.Database;
             if (ms.label == "carDealer" || ms.label == "bikeDealer" || ms.label == "carRental")
             {
-                var shop = db?.ShopFor(ms.spot.Code);
+                var shop = db?.ShopForSpot(ms.spot, IslandName());
                 int n = 0; if (shop != null) foreach (int id in shop.CarIds) if (id != 0) n++;
                 _ui.SetVariable("/:nb_cars", n > 0 ? n.ToString() : "");
                 _ui.SetVariable("/:NbCarsForRent", n > 0 ? n.ToString() : "");
@@ -1663,7 +1678,7 @@ namespace TDU2.Vehicles
             else if (ms.label == "home")
             {
                 // Haus: Garagenplätze, Stufe und die dort abgestellten Autos (infos.CarsList(false) liest /:nb_cars, /:carN_car_name, carN_gp, carN_state)
-                var house = db?.HouseFor(ms.spot.Code);
+                var house = db?.HouseForSpot(ms.spot, IslandName());
                 var cars = HouseCars(ms.spot.Code);
                 int places = house != null && house.CarSlots > 0 ? house.CarSlots : cars.Count;
                 _ui.SetVariable("/:nb_cars", cars.Count.ToString());

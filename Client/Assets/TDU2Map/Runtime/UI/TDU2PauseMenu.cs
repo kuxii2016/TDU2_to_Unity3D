@@ -72,6 +72,9 @@ namespace TDU2.Vehicles
             if (!_open && inside && ti.EscOwned) menuKey = false;
             if (!_open && TDU2AccessoryMenu.OwnsEscape) menuKey = false;   // ESC schließt das Zubehörmenü (Verdeck/Fenster/Blinker)
             if (TDU2BigMap.IsOpen) { if (menuKey && !_open) Debug.Log("[TDU2] Pausemenü gesperrt: große Karte offen"); return; }   // große Karte offen: ESC gehört ihr
+            if (!_open && Story.TDU2Story.BlocksPauseMenu) { if (menuKey) Debug.Log("[TDU2] Pausemenü gesperrt: Kino/Laufmodus der Geschichte"); return; }
+            if (!_open && TDU2TDUMedia.IsOpen) return;   // Fernseher (TDU Media): ESC gehört dem Film
+            if (!_open && TDU2CarWash.IsActive) return;   // Waschanlage: ESC gehört dem Menü/Kino
             if (!_open && Racing.RacingSchoolMenu.BlocksPauseMenu) { if (menuKey) Debug.Log("[TDU2] Pausemenü gesperrt: " + Racing.RacingSchoolMenu.BlockReason()); return; }   // Rennschul-Menü/Ergebnis offen: ESC gehört dem Film
             if (_dumpAt > 0f && Time.unscaledTime >= _dumpAt) { _dumpAt = -1f; Dump("nach dem Öffnen"); }
             if (Input.GetKeyDown(KeyCode.F9)) Dump("F9");
@@ -829,11 +832,17 @@ namespace TDU2.Vehicles
         }
 
         /// <summary>Wartet das Menü auf eine Taste: nächste Taste zuweisen (ESC = abbrechen). true = Eingabe verbraucht.</summary>
+        float _binderSince = -1f;
+
         bool UpdateBinder()
         {
-            if (!InBinder()) return false;
+            if (!InBinder()) { _binderSince = -1f; return false; }
+            // erst nach dem Öffnen der Eingabe-Box zuweisen (die Taste/der Klick, der sie geöffnet hat, zählt nicht)
+            if (_binderSince < 0f) { _binderSince = Time.unscaledTime; return true; }
+            if (Time.unscaledTime - _binderSince < 0.15f) return true;
             var key = TDU2Controls.AnyKeyDown();
             if (key == KeyCode.None) return true;
+            _binderSince = -1f;
             var act = SelectedControl();
             if (key != KeyCode.Escape && act != null)
             {
@@ -856,6 +865,20 @@ namespace TDU2.Vehicles
                     return true;
                 case "opts:cont:canc":            // verwerfen
                     TDU2Controls.Load();
+                    return true;
+                case "opts:cont:bind:open":       // Liste (Fahren/Laufen/Menü) geöffnet: frisch füllen, oben beginnen
+                    if (_controlsList != null)
+                    {
+                        TDU2Controls.Load();
+                        FillControls(_controlsList);
+                        _controlsList.Selected = 0; _controlsList.Top = 0;
+                        _ui.ListRefresh(_controlsList);
+                        _ui.ListLoaded(_controlsList);
+                    }
+                    return true;
+                case "opts:cont:dflt":            // Standardbelegung
+                    TDU2Controls.ResetDefaults();
+                    if (_controlsList != null) { FillControls(_controlsList); _ui.ListRefresh(_controlsList); }
                     return true;
                 case "opts:cont:bind:delt":       // Belegung löschen
                     {

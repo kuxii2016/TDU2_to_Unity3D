@@ -39,6 +39,10 @@ namespace TDU2.Interior
         public static float MinFloorReflection = 0f;
 
         static readonly ConcurrentDictionary<string, List<UvaLink>> _links = new ConcurrentDictionary<string, List<UvaLink>>(StringComparer.OrdinalIgnoreCase);
+        // Welt (Sektoren, Spot-Exteriors): bleibt erhalten. Eine Exterior-Bank steht auf Hawaii oft mehrfach auf der Karte
+        // (EGAMHA ×4, EAS_A ×3 …) und wird von parallelen Lade-Threads vorbereitet – mit dem einmaligen Entnehmen aus _links
+        // bekam nur das erste Gebäude seine Animationen (bzw. ein Interieur/Kino derselben Bank nahm sie weg).
+        static readonly ConcurrentDictionary<string, List<UvaLink>> _worldLinks = new ConcurrentDictionary<string, List<UvaLink>>(StringComparer.OrdinalIgnoreCase);
         static readonly ulong SemDetail = Bin.KeyFromString("DETAIL"), SemDetail1 = Bin.KeyFromString("DETAIL1"), SemColor = Bin.KeyFromString("COLOR");
         static readonly ulong SemReflection = Key8("REFLECTION");
         static ulong Key8(string s)
@@ -112,7 +116,8 @@ namespace TDU2.Interior
                 }
             }
             catch (Exception ex) { DebugManager.Error("Interieur-UVA: " + ex.Message); }
-            if (list.Count > 0) _links[bank.FilePath] = list; else _links.TryRemove(bank.FilePath, out _);
+            if (list.Count > 0) { _links[bank.FilePath] = list; _worldLinks[bank.FilePath] = list; }
+            else { _links.TryRemove(bank.FilePath, out _); _worldLinks.TryRemove(bank.FilePath, out _); }
         }
 
         static void PrepareRest(BnkArchive bank)
@@ -261,7 +266,7 @@ namespace TDU2.Interior
                         if (!trans && tag.Length == 0 && meshInfo.Length == 0) continue;   // nur Auffälliges/Transparentes ausführlich
                         if (n++ >= 300) continue;
                         sb.Append("\n    ").Append(r.name).Append(" / ").Append(m.name).Append(" [").Append(m.shader != null ? m.shader.name : "-")
-                          .Append(", Queue ").Append(m.renderQueue).Append(", Tex ").Append(m.mainTexture != null ? m.mainTexture.name : "-")
+                          .Append(", Queue ").Append(m.renderQueue).Append(", Tex ").Append(m.HasProperty("_MainTex") && m.mainTexture != null ? m.mainTexture.name : "-")
                           .Append(r.enabled ? "" : ", aus").Append(']').Append(tag).Append(meshInfo);
                     }
                 }
@@ -377,7 +382,7 @@ namespace TDU2.Interior
                     var m = mats[i];
                     if (m == null) continue;
                     // Pool/Brunnen ("Water"): MaterialFactory liefert die fast durchsichtige Meeresfläche -> eigene, sichtbare Wasserfläche
-                    if (m == MaterialFactory.Water || (prep != null && prep.WaterMats.Contains(m.name ?? "")))
+                    if (m == MaterialFactory.Water || MaterialFactory.IsShared(m) && m.name == "TDU2_PoolWater" || (prep != null && prep.WaterMats.Contains(m.name ?? "")))
                     {
                         var ws = MaterialFactory.Water;
                         if (ws == null) continue;
@@ -447,7 +452,7 @@ namespace TDU2.Interior
                         nUva++;
                     }
                     else if (bestDetail != null && bestMain == null) bestMain = bestDetail;
-                    if (bestMain != null) { anim.Items.Add((m, bestMain.Anim)); nUva++; }
+                    if (bestMain != null) { UseNeonMask(m); anim.Items.Add((m, bestMain.Anim)); nUva++; }
                 }
                 if (changed) r.sharedMaterials = mats;
                 // größte waagerechte Fläche mit Spiegelung = Bodenebene
@@ -508,7 +513,7 @@ namespace TDU2.Interior
                 }
             }
             else if (PlanarReflections)
-                DebugManager.Error("Bodenspiegelung " + root.name + ": keine Bodenebene (" + mirrorCands.Count + " Kandidaten; " + LastPlaneInfo + ")");
+                DebugManager.Warning("Bodenspiegelung " + root.name + ": keine Bodenebene (" + mirrorCands.Count + " Kandidaten; " + LastPlaneInfo + ")");
             // Umgebungs-Cubemap des Interieurs (REFLECTION-Ebene, z.B. cubecar) als Reflection Probe: Autos spiegeln den Raum statt des Himmels
             bool probe = false;
             if (prep != null && prep.Cube != null)
@@ -563,8 +568,8 @@ namespace TDU2.Interior
         {
             if (root == null || string.IsNullOrEmpty(bankPath)) return 0;
             List<UvaLink> links;
-            if (keep) { if (!_links.TryGetValue(bankPath, out links)) return 0; }
-            else if (!_links.TryRemove(bankPath, out links)) return 0;
+            if (keep) { if (!_worldLinks.TryGetValue(bankPath, out links) && !_links.TryGetValue(bankPath, out links)) return 0; }
+            else if (!_links.TryRemove(bankPath, out links) && !_worldLinks.TryGetValue(bankPath, out links)) return 0;
             if (links == null || links.Count == 0) return 0;
             RaceUvaAnimator anim = null; DetailUva du = null;
             var done = new HashSet<Material>();
@@ -591,11 +596,21 @@ namespace TDU2.Interior
                     else
                     {
                         if (anim == null) { anim = root.GetComponent<RaceUvaAnimator>(); if (anim == null) anim = root.gameObject.AddComponent<RaceUvaAnimator>(); }
+                        UseNeonMask(m);
                         anim.Items.Add((m, best.Anim));
                     }
                     n++;
                 }
             return n;
+        }
+
+        /// <summary>
+        /// Neon (TD_NEONDECAL): Farbe = Vertexfarbe x Leuchtmaske. Ohne Animation steht die Maske auf Schwarz (Neon aus);
+        /// mit .uva die echte NEONGLOW-Maske einsetzen – die Animation verschiebt sie (Lauflicht, blinkende Birnen, Pfeile).
+        /// </summary>
+        static void UseNeonMask(Material m)
+        {
+            if (MaterialFactory.TryGetNeonMask(m, out var mask) && m.mainTexture != mask) m.mainTexture = mask;
         }
 
         /// <summary>Nacht: Sonne unter dem Horizont bzw. schwach.</summary>
@@ -741,7 +756,8 @@ namespace TDU2.Interior
                 _rendering = true;
                 try
                 {
-                    Render(c); _src = c; _srcFrame = Time.frameCount;
+                    if (!Render(c)) { _srcFrame = -1; return; }
+                    _src = c; _srcFrame = Time.frameCount;
                     _renders++;
                     if (Time.unscaledTime >= _nextLog)
                     {
@@ -759,8 +775,13 @@ namespace TDU2.Interior
                 Shader.SetGlobalFloat(IdOn, on ? 1f : 0f);
             }
 
-            void Render(Camera src)
+            /// <summary>false = nicht gerendert (Kamera unter/auf der Spiegelebene, z.B. Kino-Kamera unter dem Boden: die schräge
+            /// Projektion wäre entartet -> "Screen position out of view frustum").</summary>
+            bool Render(Camera src)
             {
+                var bb = _r.bounds;
+                float planeY = _hasPlane ? PlaneY : bb.max.y;
+                if (src.transform.position.y <= planeY + 0.05f || src.nearClipPlane <= 0f || src.farClipPlane <= src.nearClipPlane) return false;
                 int w = Mathf.Max(64, (int)(src.pixelWidth * ReflectionScale)), h = Mathf.Max(64, (int)(src.pixelHeight * ReflectionScale));
                 if (_rt == null || _rt.width != w || _rt.height != h)
                 {
@@ -790,7 +811,10 @@ namespace TDU2.Interior
                 var refl = Reflection(plane);
                 _cam.worldToCameraMatrix = src.worldToCameraMatrix * refl;
                 var cp = CameraSpacePlane(_cam, pos, normal, 0.02f);
-                _cam.projectionMatrix = src.CalculateObliqueMatrix(cp);
+                // eigene Projektion mit begrenzter Sichtweite (Story-Kameras: Near 0,05 m, Far bis 60 km -> die schräge Matrix
+                // verliert sonst die Genauigkeit), dann schräge Clip-Ebene
+                _cam.projectionMatrix = Matrix4x4.Perspective(src.fieldOfView, src.aspect, Mathf.Max(0.1f, src.nearClipPlane), Mathf.Min(src.farClipPlane, 3000f));
+                _cam.projectionMatrix = _cam.CalculateObliqueMatrix(cp);
                 var sp = src.transform.position;
                 _cam.transform.position = refl.MultiplyPoint(sp);
 
@@ -810,6 +834,7 @@ namespace TDU2.Interior
                 Shader.SetGlobalTexture(IdTex, _rt);
                 Shader.SetGlobalFloat(IdY, pos.y);
                 Shader.SetGlobalFloat(IdOn, 1f);
+                return true;
             }
 
             static Vector4 CameraSpacePlane(Camera c, Vector3 pos, Vector3 normal, float offset)
@@ -859,4 +884,4 @@ namespace TDU2.Interior
             }
         }
     }
-}
+}

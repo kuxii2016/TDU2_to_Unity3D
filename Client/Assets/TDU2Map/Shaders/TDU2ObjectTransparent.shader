@@ -11,6 +11,7 @@ Shader "TDU2/ObjectTransparent"
         _DetailUV ("Detail UV (0 = UV-Satz 2, 1 = letzter UV-Satz)", Float) = 0
         _DetailBoost ("Detail Boost", Float) = 2
         _AlphaSource ("Alpha (0 = COLOR, 1 = DETAIL)", Float) = 0
+        _DetailGray ("Detail nur R (TD_Ground: COLOR x DETAIL.r)", Float) = 0
         _Lit ("Beleuchtung (0 = aus/Lightmap, 1 = an)", Range(0,1)) = 1
         _Intensity ("Intensität", Float) = 1
         _NightOnly ("Nur nachts leuchten (Straßenlampen, Neon) – Wetter/Tageszeit", Float) = 0
@@ -41,7 +42,7 @@ Shader "TDU2/ObjectTransparent"
             #include "Lighting.cginc"
             sampler2D _MainTex; float4 _MainTex_ST; fixed4 _Color;
             sampler2D _DetailTex; float4 _DetailTex_ST;
-            half _DetailMode, _DetailUV, _DetailBoost, _AlphaSource, _Lit, _Intensity, _TDU2NoClip, _NightOnly, _VcMul;
+            half _DetailMode, _DetailUV, _DetailBoost, _DetailGray, _AlphaSource, _Lit, _Intensity, _TDU2NoClip, _NightOnly, _VcMul;
             float _TDU2DayDim;   // global (TDU2Weather): 1 = Tag -> Nachtleuchten aus
             struct appdata
             {
@@ -80,7 +81,7 @@ Shader "TDU2/ObjectTransparent"
                 if (_DetailMode > 0.5)
                 {
                     fixed4 d = tex2D(_DetailTex, i.uv.zw);
-                    c.rgb = saturate(c.rgb * d.rgb * _DetailBoost);
+                    c.rgb = saturate(c.rgb * (_DetailGray > 0.5 ? d.rrr : d.rgb) * _DetailBoost);
                     c.a = lerp(c.a, d.a * _Color.a, _AlphaSource);
                 }
                 c *= lerp(fixed4(1,1,1,1), i.color, _VcMul);

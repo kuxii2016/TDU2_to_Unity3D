@@ -85,6 +85,9 @@ namespace TDU2.World
         public Transform Viewer;
         public Transform MapRoot;
         public float MaxDistance = 800f;
+        /// <summary>Sichtweiten-Faktor für alle Vegetations-Renderer (TDU2RenderDistance: x4 … /4).</summary>
+        public static float DistanceMultiplier = 1f;
+        float _appliedMul = 1f;
         /// <summary>true, wenn die Library-Meshes vorgespiegelt sind (siehe ObjectLibrary.MirrorMeshes).</summary>
         public bool MirroredMeshes;
         public bool CullLastLod = false;
@@ -148,7 +151,8 @@ namespace TDU2.World
 
         void Rebucket(Vector3 viewerLocal)
         {
-            float maxSq = MaxDistance * MaxDistance;
+            float mul = DistanceMultiplier;
+            float maxSq = MaxDistance * mul * MaxDistance * mul;
             foreach (var b in _batches)
             {
                 foreach (var l in b.PerLod) l.Clear();
@@ -160,7 +164,7 @@ namespace TDU2.World
                     float d = Mathf.Sqrt(dSq);
                     int chosen = -1;
                     for (int l = 0; l < lods.Length; l++)
-                        if (d <= lods[l].MaxDistance) { chosen = l; break; }
+                        if (d <= lods[l].MaxDistance * mul) { chosen = l; break; }
                     if (chosen < 0 && !CullLastLod) chosen = lods.Length - 1;
                     if (chosen >= 0) b.PerLod[chosen].Add(i);
                 }
@@ -218,10 +222,11 @@ namespace TDU2.World
                 Shader.SetGlobalVector("_TDU2BillboardFwd", new Vector4(vm.m20, vm.m21, vm.m22, 1f));
             }
             var vl = MapRoot != null ? MapRoot.InverseTransformPoint(cam.position) : cam.position;
-            if (++_frame % RebucketEveryFrames == 0 || (vl - _lastViewer).sqrMagnitude > 25f)
+            if (++_frame % RebucketEveryFrames == 0 || (vl - _lastViewer).sqrMagnitude > 25f || _appliedMul != DistanceMultiplier)
             {
                 Rebucket(vl);
                 _lastViewer = vl;
+                _appliedMul = DistanceMultiplier;
             }
             if (Colliders && _frame % 10 == 0) UpdateColliders(vl);
 
@@ -242,6 +247,12 @@ namespace TDU2.World
                         {
                             var mat = lod.Materials[s];
                             if (mat == null) continue;
+                            // gemeinsame Materialien ohne Instancing (Pool-Wasser TD_Water, Fallback): einzeln zeichnen
+                            if (!mat.enableInstancing)
+                            {
+                                for (int k = 0; k < n; k++) Graphics.DrawMesh(lod.Mesh, _tmp[k], mat, layer, null, s, null, Shadows, true);
+                                continue;
+                            }
                             Graphics.DrawMeshInstanced(lod.Mesh, s, mat, _tmp, n, null, Shadows, true, layer);
                         }
                         done += n;

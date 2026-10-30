@@ -64,6 +64,9 @@ namespace TDU2.World
             trig.sharedMesh = BoxMesh(sc, ss + new Vector3(1.2f, 0.2f, 1.2f));
             trig.convex = true;
             trig.isTrigger = true;
+            // Auslöser nur gegen Fahrzeuge (Spieler/Verkehr liegen auf Layer 2): sonst meldet der kinematische Auslöser jeden
+            // Physikschritt seine Überlappung mit Boden, Gehweg, Gebäuden (OnTriggerStay ~10.000x je Bild, Physics.SendTriggerEvents 4 ms).
+            trig.excludeLayers = ~(1 << 2);
             body._trigger = trig;
             body._rb = go.AddComponent<Rigidbody>();
             body._rb.isKinematic = true;

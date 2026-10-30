@@ -666,7 +666,7 @@ namespace TDU2.Vehicles
             // Eine Speiche zur Mitte füllte den Kreisel aus ("Stern"). Lange Lücken (> NodeGap) werden deshalb an die
             // nächste andere Straße angeschlossen (Ring / Hauptstraße); findet sich keine, wird trotzdem zum Knoten
             // geschlossen (sonst bleiben an großen Kreuzungen Lücken).
-            const float NodeGap = 14f, JoinMax = 45f, SCell = 16f;
+            const float NodeGap = 14f, JoinMax = 45f, SCell = 16f, MaxArmJoin = 160f;
             var handled = new bool[ends.Count];
             var sgrid = new Dictionary<long, List<int>>();
             long SKey(int gx, int gz) => ((long)gx << 32) ^ (uint)gz;
@@ -748,6 +748,7 @@ namespace TDU2.Vehicles
                         nodeDiag.AppendLine($"  node {nodeId} road {road.Id} {(side == 0 ? "Start" : "Ende")}: gap={gap:0.0} -> FremdstraÃŸe in {(hit - e).magnitude:0.0}");
                         continue;
                     }
+                    if (gap > 80f) { nSkip++; nodeDiag.AppendLine($"  node {nodeId} road {road.Id} {(side == 0 ? "Start" : "Ende")}: gap={gap:0.0} -> VERWORFEN (>80)"); continue; }   // unplausible Knotenlage: nicht quer über die Insel ziehen
                     if (gap > NodeGap)
                     {
                         if (ei >= 0) handled[ei] = true;
@@ -757,7 +758,6 @@ namespace TDU2.Vehicles
                         nodeDiag.AppendLine($"  node {nodeId} road {road.Id} {(side == 0 ? "Start" : "Ende")}: gap={gap:0.0} -> RING (kein Treffer)");
                         continue;
                     }
-                    if (gap > 80f) { nSkip++; nodeDiag.AppendLine($"  node {nodeId} road {road.Id} {(side == 0 ? "Start" : "Ende")}: gap={gap:0.0} -> VERWORFEN (>80)"); continue; }   // unplausible Knotenlage: nicht quer Ã¼ber die Insel ziehen (LÃ¼ckenfÃ¼ller Ã¼bernimmt)
                     if (gap > 0.5f) AddQuad(verts, cols, idx, e, c, half, col);   // Zufahrt bis zur Knotenmitte
                     if (ei >= 0) handled[ei] = true;
                     if (!nodeStyle.TryGetValue(nodeId, out var ns) || half > ns.half) nodeStyle[nodeId] = (half, col);
@@ -788,14 +788,14 @@ namespace TDU2.Vehicles
                 {
                     // Nur zwei Arme: gerade Verbindung (Gegenverkehr/versetzte StraÃŸe), KEIN Bogen (der erzeugte die Beule).
                     var a = arms[0]; var b = arms[1];
-                    if ((a.p - b.p).sqrMagnitude >= 1f)
+                    if ((a.p - b.p).sqrMagnitude >= 1f && (a.p - b.p).sqrMagnitude <= MaxArmJoin * MaxArmJoin)
                         AddQuad(verts, cols, idx, a.p, b.p, Mathf.Max(a.half, b.half), a.half >= b.half ? a.c : b.c);
                     continue;
                 }
                 for (int i = 0; i < arms.Count; i++)
                 {
                     var a = arms[i]; var b = arms[(i + 1) % arms.Count];
-                    if ((a.p - b.p).sqrMagnitude < 1f) continue;
+                    if ((a.p - b.p).sqrMagnitude < 1f || (a.p - b.p).sqrMagnitude > MaxArmJoin * MaxArmJoin) continue;
                     // Bogen am Kreisrand andeuten: Zwischenpunkt auf dem Kreis um c mit Radius |a.p-c|
                     Vector2 mid = RingArc(c, a.p, b.p, 3);
                     Color col = a.half >= b.half ? a.c : b.c;
@@ -841,7 +841,7 @@ namespace TDU2.Vehicles
         {
             var net = _net;
             if (net == null || net.Junctions.Count == 0) return;
-            int drawn = 0, skipped = 0;
+            int drawn = 0, skipped = 0, holes = 0;
             foreach (var kv in net.Junctions)
             {
                 var jn = kv.Value;
@@ -855,16 +855,108 @@ namespace TDU2.Vehicles
                             if (t >= 4) { col = RoadMain; break; }
                         }
                 }
+                // Umrisse bereinigen: einzelne Ausreißer-Punkte (Ibiza JDET 14: ein Punkt 11 km entfernt -> Streifen quer über die Karte)
+                var polys = new List<Vector2[]>();
                 foreach (var outline in jn.Outlines)
                 {
-                    if (outline.Length < 3) { skipped++; continue; }
-                    var poly = new Vector2[outline.Length];
-                    for (int i = 0; i < outline.Length; i++) poly[i] = Map(root, new Vector3(outline[i].x, 0f, outline[i].y));
-                    AddPolygon(verts, cols, idx, poly, col);
+                    var clean = CleanOutline(outline);
+                    if (clean == null) { skipped++; continue; }
+                    var poly = new Vector2[clean.Count];
+                    for (int i = 0; i < clean.Count; i++) poly[i] = Map(root, new Vector3(clean[i].x, 0f, clean[i].y));
+                    polys.Add(poly);
+                }
+                // Kreisel: ein Umriss liegt ganz in einem anderen = Mittelinsel (Loch) -> nur den Ring zeichnen
+                var isHole = new bool[polys.Count];
+                for (int a = 0; a < polys.Count; a++)
+                    for (int b = 0; b < polys.Count; b++)
+                        if (a != b && !isHole[b] && Contains(polys[b], polys[a])) isHole[a] = true;
+                for (int a = 0; a < polys.Count; a++)
+                {
+                    if (isHole[a]) continue;
+                    Vector2[] hole = null;
+                    for (int b = 0; b < polys.Count; b++) if (isHole[b] && Contains(polys[a], polys[b])) { hole = polys[b]; break; }
+                    if (hole != null) { AddRing(verts, cols, idx, polys[a], hole, col); holes++; }
+                    else AddPolygon(verts, cols, idx, polys[a], col);
                     drawn++;
                 }
             }
-            RoadLog.Line($"AddJunctionAreas: {drawn} Umrisse gezeichnet, {skipped} Ã¼bersprungen");
+            RoadLog.Line($"AddJunctionAreas: {drawn} Umrisse gezeichnet ({holes} Kreisel mit Mittelinsel), {skipped} übersprungen");
+        }
+
+        /// <summary>Punkte, die weit (&gt; 120 m) vom Median des Umrisses liegen, entfernen; zu kleine Umrisse verwerfen.</summary>
+        static List<Vector2> CleanOutline(Vector2[] o)
+        {
+            if (o == null || o.Length < 3) return null;
+            var xs = new float[o.Length]; var zs = new float[o.Length];
+            for (int i = 0; i < o.Length; i++) { xs[i] = o[i].x; zs[i] = o[i].y; }
+            Array.Sort(xs); Array.Sort(zs);
+            var med = new Vector2(xs[xs.Length / 2], zs[zs.Length / 2]);
+            var res = new List<Vector2>(o.Length);
+            foreach (var p in o) if ((p - med).sqrMagnitude <= 120f * 120f) res.Add(p);
+            return res.Count < 3 ? null : res;
+        }
+
+        /// <summary>Liegen alle Punkte von inner im Polygon outer (Kartenebene)?</summary>
+        static bool Contains(Vector2[] outer, Vector2[] inner)
+        {
+            foreach (var p in inner) if (!PointIn(outer, p)) return false;
+            return true;
+        }
+
+        static bool PointIn(Vector2[] poly, Vector2 p)
+        {
+            bool c = false;
+            for (int i = 0, j = poly.Length - 1; i < poly.Length; j = i++)
+            {
+                var a = poly[i]; var b = poly[j];
+                if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) c = !c;
+            }
+            return c;
+        }
+
+        /// <summary>Weitester Schnitt eines Strahls von c in Richtung d mit dem Polygonrand (0 = kein Treffer).</summary>
+        static float RayPoly(Vector2 c, Vector2 d, Vector2[] poly)
+        {
+            float best = 0f;
+            for (int i = 0, j = poly.Length - 1; i < poly.Length; j = i++)
+            {
+                Vector2 a = poly[j], e = poly[i] - poly[j];
+                float den = d.x * e.y - d.y * e.x;
+                if (Mathf.Abs(den) < 1e-6f) continue;
+                var w = a - c;
+                float t = (w.x * e.y - w.y * e.x) / den;
+                float u = (w.x * d.y - w.y * d.x) / den;
+                if (t > 0f && u >= 0f && u <= 1f && t > best) best = t;
+            }
+            return best;
+        }
+
+        /// <summary>Kreiselfläche: Ring zwischen Außenumriss und Mittelinsel (radial um die Inselmitte abgetastet).</summary>
+        static void AddRing(List<Vector3> verts, List<Color32> cols, List<int> idx, Vector2[] outer, Vector2[] inner, Color col)
+        {
+            Vector2 c = Vector2.zero;
+            foreach (var p in inner) c += p;
+            c /= inner.Length;
+            const int N = 48;
+            int b0 = verts.Count;
+            for (int k = 0; k < N; k++)
+            {
+                float a = k * 2f * Mathf.PI / N;
+                var d = new Vector2(Mathf.Cos(a), Mathf.Sin(a));
+                float ri = RayPoly(c, d, inner), ro = RayPoly(c, d, outer);
+                if (ro < ri) ro = ri;
+                verts.Add(c + d * ri); cols.Add(col);
+                verts.Add(c + d * ro); cols.Add(col);
+            }
+            for (int k = 0; k < N; k++)
+            {
+                int i0 = b0 + 2 * k, i1 = b0 + 2 * ((k + 1) % N);
+                // beidseitig: Wicklung egal (Spiegelung der Karte)
+                idx.Add(i0); idx.Add(i0 + 1); idx.Add(i1 + 1);
+                idx.Add(i0); idx.Add(i1 + 1); idx.Add(i1);
+                idx.Add(i0); idx.Add(i1 + 1); idx.Add(i0 + 1);
+                idx.Add(i0); idx.Add(i1); idx.Add(i1 + 1);
+            }
         }
 
         /// <summary>FÃ¼llt ein (nahezu) konvexes Polygon als FÃ¤cher um den Schwerpunkt.</summary>

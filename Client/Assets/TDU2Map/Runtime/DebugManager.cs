@@ -28,6 +28,8 @@ public class DebugManager : MonoBehaviour
     public Islands StartIsland = Islands.ibiza;
     public string StartMap => StartIsland.ToString();
     public string StartVehicle = "delta_integrale_evo_2";
+    [UnityEngine.Tooltip("Geschichte beim nächsten Login ab diesem Schritt neu beginnen (setzt den gespeicherten Fortschritt einmalig): -1 = gespeicherter Stand, 0 = Intro (Avatar-Wahl), 1 First Garage, 2 First Freeride, 3 Meeting Tess, 4 Driving Tess, 5 Solar Crown außen, 6 innen, 7 Gebrauchtwagenhändler. Auch per Startparameter -STORYSTEP n.")]
+    public int StoryStartStep = -1;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -41,6 +43,14 @@ public class DebugManager : MonoBehaviour
         Clear();
         INIT("TDU2toUNITY3d Port Started: " + DateTime.Now.ToString("dd.MM.yyyy - HH:mm:ss"));
     }
+
+    public static void switchGamemode(Gamemode gamemode)
+    {
+        Info("--------------------------------------------------\n");
+        Info("|              GAME MODE : " + (Gamemode)gamemode);
+        Info("--------------------------------------------------\n");
+    }
+
 
     public static void Debug(string Message) => Tracer.Print(NameOfCallingClass() + "()=>" + Message, "DEBUG");
     public static void Info(string Message) => Tracer.Print(NameOfCallingClass() + "()=>" + Message, "INFO");

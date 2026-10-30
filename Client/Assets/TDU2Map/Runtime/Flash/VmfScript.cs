@@ -141,8 +141,15 @@ namespace TDU2.Flash
         public void ListMove(FlashList l, int delta)
         {
             if (l == null || l.Rows.Count == 0) return;
+            ListSelect(l, l.Selected + delta, true);
+        }
+
+        /// <summary>Zeile (Index in Rows) auswählen; scrollt bei Bedarf (wie die native Liste).</summary>
+        public void ListSelect(FlashList l, int index, bool sound)
+        {
+            if (l == null || l.Rows.Count == 0) return;
             int oldLine = l.SelectedLine;
-            int sel = Mathf.Clamp(l.Selected + delta, 0, l.Rows.Count - 1);
+            int sel = Mathf.Clamp(index, 0, l.Rows.Count - 1);
             if (sel == l.Selected) return;
             CallOn(l.Owner, "PlayAnimSelectionOut", (double)oldLine);
             l.Selected = sel;
@@ -152,10 +159,23 @@ namespace TDU2.Flash
             if (top != l.Top) { l.Top = top; ListRefresh(l); }
             StoreClipVar(l.Owner, "line_view", (double)l.SelectedLine);   // LineValidate liest die gewählte Zeile aus line_view
             CallOn(l.Owner, "PlayAnimSelectionIn", (double)l.SelectedLine);
-            FSCommand?.Invoke("sndp:move", "");
+            if (sound) FSCommand?.Invoke("sndp:move", "");
         }
 
-        object ListMethod(FlashList l, string name)
+        /// <summary>Liegt der Clip im Besitzer-Clip der aktiven nativen Liste (Zeilen-Buttons)?</summary>
+        bool InActiveList(Instance inst)
+        {
+            var o = _activeList?.Owner;
+            if (o == null || !_activeList.Active) return false;
+            for (int guard = 0; inst != null && guard < 64; guard++)
+            {
+                if (inst == o) return true;
+                inst = inst.Owner?.Parent;
+            }
+            return false;
+        }
+
+        object ListMethod(FlashList l, string name, object[] args = null)
         {
             switch (name)
             {
@@ -169,6 +189,15 @@ namespace TDU2.Flash
                     CallOn(Child(l.Owner, "scrollBar"), "myLifeScroll");
                     return Undefined;
                 case "Deactivate": l.Active = false; return Undefined;
+                case "OnRollOver":
+                    // Zeilen-Button (on rollOver): Maus über Zeile N (1-basiert) -> diese Zeile auswählen, sonst löst der
+                    // Klick nicht aus (der Button validiert nur die gewählte Zeile)
+                    if (l.Active && args != null && args.Length > 0)
+                    {
+                        int line = (int)ToNum(args[0]);
+                        if (line >= 1 && line <= l.ViewSize && l.Top + line - 1 < l.Rows.Count) ListSelect(l, l.Top + line - 1, true);
+                    }
+                    return Undefined;
                 case "OnValidate": ListValidated?.Invoke(l); return Undefined;
             }
             return Undefined;   // OnSortInvert, OnHeaderClic …
@@ -1071,7 +1100,7 @@ namespace TDU2.Flash
                 case AsObject o:
                     if (o.Members.TryGetValue(name, out var mv) && mv is AsFunction ofn) return Invoke(ofn, null, args);
                     return Undefined;
-                case FlashList fl: return ListMethod(fl, name);
+                case FlashList fl: return ListMethod(fl, name, args);
                 case ButtonObj bo:
                     if (bo.Members.TryGetValue(name, out var bm) && bm is AsFunction bfn) return Invoke(bfn, bo, args);
                     return Undefined;
@@ -1133,6 +1162,49 @@ namespace TDU2.Flash
                 DebugManager.Error("Flash-Input " + function + ": " + ex.Message); 
             }
             return true;
+        }
+
+        /// <summary>
+        /// Funktion eines bestimmten Clips aufrufen (z.B. Call("/", "ItemType", "over") oder Call("/cursor", "A")) – wie das Spiel
+        /// (FlashPlayer::invoke). Liefert false, wenn der Clip oder die Funktion fehlt.
+        /// </summary>
+        public bool Call(string path, string function, params object[] args)
+        {
+            if (Root == null || string.IsNullOrEmpty(function)) return false;
+            var inst = string.IsNullOrEmpty(path) || path == "/" ? Root : ResolveClip(Root, path);
+            if (inst == null || !(GetMember(inst, function) is AsFunction fn)) return false;
+            var a = new object[args?.Length ?? 0];
+            for (int i = 0; i < a.Length; i++) a[i] = args[i] is int iv ? (object)(double)iv : args[i] is float fv ? (object)(double)fv : args[i];
+            try { InvokeTop(fn, inst, a); }
+            catch (Exception ex) { DebugManager.Error("Flash-Call " + path + "." + function + ": " + ex.Message); }
+            return true;
+        }
+
+        /// <summary>
+        /// Tastendruck an die Tasten-Buttons des Films (on(keyPress …), Bedingung Bits 9..15 = Tastencode: 1 links, 2 rechts,
+        /// 3 Pos1, 4 Ende, 5 Einfg, 6 Entf, 8 Rück, 13 Enter, 14 hoch, 15 runter, 16 BildAuf, 17 BildAb, 18 Tab, 19 Esc, sonst ASCII).
+        /// Läuft für alle sichtbaren Buttons mit diesem Code (wie der Flash Player). true = mindestens einer reagierte.
+        /// </summary>
+        public bool SendKey(int keyCode)
+        {
+            if (Root == null || keyCode <= 0) return false;
+            var hits = new List<(Instance parent, byte[] code)>();
+            void Walk(Instance inst)
+            {
+                foreach (var d in inst.List.Values)
+                {
+                    if (!d.Visible) continue;
+                    if (d.Sprite != null) { Walk(d.Sprite); continue; }
+                    if (!Movie.Chars.TryGetValue(d.CharId, out var ch) || !(ch is VmfMovie.Button b)) continue;
+                    foreach (var ba in b.Actions)
+                        if (((ba.Conditions >> 9) & 0x7F) == keyCode) hits.Add((inst, ba.Code));
+                }
+            }
+            Walk(Root);
+            _inActions++;
+            try { foreach (var (p, code) in hits) ExecFrameActions(p, code); }
+            finally { _inActions--; if (_inActions == 0) DrainActionQueue(); }
+            return hits.Count > 0;
         }
 
         // ------------------------------------------------------------------ Debug-Schnittstelle (Editor-Fenster "TDU2/Flash Debugger")
@@ -1290,6 +1362,51 @@ namespace TDU2.Flash
                 if (inst != null && Shown(inst)) res.Add(path.Length == 0 ? "/" : path);
             }
             return res;
+        }
+
+        /// <summary>
+        /// Skript-Wert über einen Punkt-Pfad ab einem Clip lesen, auch in Arrays/Objekten ("/main_page", "setSquare.3.0").
+        /// null = nicht vorhanden (undefined).
+        /// </summary>
+        public string GetScriptValue(string clipPath, string memberPath)
+        {
+            var o = WalkScript(clipPath, memberPath);
+            return o == null || o is Undef ? null : ToStr(o);
+        }
+
+        /// <summary>Skript-Wert über einen Punkt-Pfad setzen ("/main_page", "setSquare.3.0", "survey"); false = Pfad nicht gefunden.</summary>
+        public bool SetScriptValue(string clipPath, string memberPath, object value)
+        {
+            if (string.IsNullOrEmpty(memberPath)) return false;
+            int dot = memberPath.LastIndexOf('.');
+            object owner = dot < 0 ? (object)ClipOrRoot(clipPath) : WalkScript(clipPath, memberPath.Substring(0, dot));
+            if (owner == null || owner is Undef) return false;
+            if (value is int iv) value = (double)iv; else if (value is float fv) value = (double)fv;
+            string member = dot < 0 ? memberPath : memberPath.Substring(dot + 1);
+            if (owner is AsArray arr && member == "length")
+            {
+                // Array kürzen (z.B. Reiter ausblenden: "setTab.length" = 3)
+                int n = value is double dv ? (int)dv : -1;
+                if (n >= 0 && n < arr.Items.Count) arr.Items.RemoveRange(n, arr.Items.Count - n);
+                return true;
+            }
+            SetMember(owner, member, value);
+            return true;
+        }
+
+        Instance ClipOrRoot(string clipPath) => string.IsNullOrEmpty(clipPath) || clipPath == "/" ? Root : ResolveClip(Root, clipPath);
+
+        object WalkScript(string clipPath, string memberPath)
+        {
+            var inst = ClipOrRoot(clipPath);
+            if (inst == null || string.IsNullOrEmpty(memberPath)) return Undefined;
+            object o = inst;
+            foreach (var part in memberPath.Split('.'))
+            {
+                if (o == null || o is Undef) return Undefined;
+                o = GetMember(o, part);
+            }
+            return o;
         }
 
         /// <summary>Funktion eines bestimmten Clips aufrufen ("/pause_menu/menu_sq", "Clic", 2).</summary>

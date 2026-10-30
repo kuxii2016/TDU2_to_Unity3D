@@ -55,7 +55,8 @@ namespace TDU2.World
             foreach (var t in holder.GetComponentsInChildren<Transform>(true))
             {
                 string n = t.name.ToUpperInvariant();
-                List<Renderer> dst = n.Contains("HALO_R") ? r : n.Contains("HALO_O") ? o : n.Contains("HALO_G") ? g : null;
+                // HALO_x = Lichtschein (Sprite), R/O/G = leuchtende Linsenscheibe (SF_TLigh_HaloA) – beides nur bei aktiver Farbe
+                List<Renderer> dst = n.Contains("HALO_R") || n == "R" ? r : n.Contains("HALO_O") || n == "O" ? o : n.Contains("HALO_G") || n == "G" ? g : null;
                 if (dst == null) continue;
                 foreach (var rr in t.GetComponentsInChildren<Renderer>(true)) if (!dst.Contains(rr)) dst.Add(rr);
             }
