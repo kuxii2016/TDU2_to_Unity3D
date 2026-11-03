@@ -9,6 +9,20 @@ The goal is to bring as much of the original game's functionality as possible in
 This project is more than just a map viewer or a simple graphics port. It is an ongoing attempt to rebuild the systems that make TDU2 what it is, using custom code and a more flexible foundation for future development.
 
 ## Screenshots
+<p align="center">
+  <img src="./Screenshots/MP.PNG" width="49%" alt="Screenshot 1">
+  <img src="./Screenshots/MP2.PNG" width="49%" alt="Screenshot 2">
+</p>
+
+<p align="center">
+  <img src="./Screenshots/MP_INVITE.PNG" width="49%" alt="Screenshot 1">
+  <img src="./Screenshots/MP_LIVING.PNG" width="49%" alt="Screenshot 2">
+</p>
+
+<p align="center">
+  <img src="./Screenshots/MP_GARAGE.PNG" width="49%" alt="Screenshot 1">
+  <img src="./Screenshots/MP_GARAGESYNC.PNG" width="49%" alt="Screenshot 2">
+</p>
 
 <p align="center">
   <img src="./Screenshots/Unbenannt.PNG" width="49%" alt="Screenshot 1">
