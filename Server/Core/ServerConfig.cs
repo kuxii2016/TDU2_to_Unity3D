@@ -15,6 +15,21 @@ public sealed class ServerConfig
     public string startIsland = "ibiza";
     public long startMoney = 25000;
     public int maxPlayers = 64;
+    // Lobbys: der Server verteilt die Spieler einer Insel auf Lobbys (Spieler sehen nur ihre Lobby). 0 = eine Lobby je Insel.
+    public int maxPlayersPerLobby = 16;
+    /// <summary>Abstand der "status"-Abfragen der Clients (ms) – Spielerliste/Lobby, Einladungen.</summary>
+    public int statusIntervalMs = 2000;
+    // UDP-Weiterleitung (Server = Relay, Clients brauchen keine offenen Ports, NAT/CGNAT egal):
+    /// <summary>Spieler weiter weg als … m bekommen nur jedes <see cref="farRelayDivider"/>-te Zustandspaket (0 = immer alle).</summary>
+    public float relayRange = 1500f;
+    public int farRelayDivider = 4;
+    /// <summary>Verkehrspakete nur an Spieler innerhalb … m (0 = alle der Lobby).</summary>
+    public float trafficRange = 1200f;
+    /// <summary>Socket-Puffer der UDP-Verbindung (Bytes) – zu kleine Puffer verlieren bei vielen Spielern Pakete.</summary>
+    public int udpBufferBytes = 4 * 1024 * 1024;
+    // P2P: Spieler einer Lobby senden Zustand/Verkehr direkt zueinander (UDP-Hole-Punching), der Server vermittelt nur.
+    // Wer keine Direktverbindung bekommt (symmetrisches NAT/CGNAT, Firewall), läuft automatisch über das Relay des Servers.
+    public bool p2pEnabled = true;
     public string motd = "Willkommen auf dem TDU2-Server";
     // Web-Moderationspanel (im selben Prozess). Abschalten mit webEnabled=false.
     public bool webEnabled = true;

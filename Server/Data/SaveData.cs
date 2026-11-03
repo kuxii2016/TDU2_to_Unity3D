@@ -26,6 +26,7 @@ public sealed class SaveData
     public MyLifeData myLife = new();               // MyTDULife: Stimmung, Profil, Kästen, Avatar-Foto
     public string interior = "";                    // zuletzt betretenes Interieur ("SPOT|bank", leer = draußen)
     public List<CarConfigEntry> carConfigs = new(); // Ausstattung je Auto (Autohändler: Felgen, Lack, Innenraum)
+    public int story = -1;                          // Schritt der Geschichte (Client TDU2StoryProgress, -1 = nie begonnen)
     public string savedAt = "";
 }
 

@@ -17,4 +17,8 @@ public sealed class NetRequest
     public int target;          // invite/invreply/profile: Spielernummer
     public bool accept;         // invreply
     public string kind = "";    // invite: "codriving", "game|…", "room|…"
+    public int since;           // news: höchste schon bekannte News-Id (0 = alle holen)
+    public int choice;          // vote: gewählte Antwort (0-basiert), target = Umfrage-Id
+    public bool p2p;            // status: Client kann P2P (Hole-Punching)
+    public string localEp = ""; // status: lokaler UDP-Endpunkt "ip:port" (Mitspieler im selben LAN)
 }

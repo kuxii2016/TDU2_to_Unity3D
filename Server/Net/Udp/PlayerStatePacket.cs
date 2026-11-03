@@ -10,7 +10,7 @@ namespace TDU2Server.Net.Udp;
 /// </summary>
 public sealed class PlayerStatePacket : UdpPacketHandler
 {
-    public const byte In = 1, Out = 2;
+    public const byte In = UdpPacketIds.StateIn, Out = UdpPacketIds.StateOut;
     const int StateMin = 12;          // seq + carId + Farbe/Flags/Licht/frei
     const double RelayTimeout = 15;   // Empfänger ohne UDP seit … s bekommen nichts
 
@@ -22,6 +22,26 @@ public sealed class PlayerStatePacket : UdpPacketHandler
     public override int MinLength => HeaderSize + StateMin;
     public override int MaxLength => 1200;
 
+    /// <summary>Zustand (Auto, Position, Insel) in die Sitzung übernehmen – auch für Zustände im Relay-Umschlag.</summary>
+    public static void ApplyState(ServerContext ctx, TDU2Server.Sessions.Session s, byte[] d, int st, int len)
+    {
+        if (len < StateMin) return;
+        s.CarId = BitConverter.ToInt32(d, st + 4);
+        s.Color = d[st + 8];
+        s.InCar = (d[st + 9] & 1) != 0;
+        if (len >= 24)
+        {
+            s.Px = BitConverter.ToSingle(d, st + 12);
+            s.Pz = BitConverter.ToSingle(d, st + 20);
+        }
+        if (len >= 81 && d[st + 80] != 0 && d[st + 80] != s.Island)
+        {
+            s.Island = d[st + 80];
+            Log.Info($"{s.Nick}: Insel {Islands.Name(s.Island)}");
+            ctx.Lobbies.Assign(s);   // andere Insel = andere Lobby
+        }
+    }
+
     public override async Task HandleAsync(byte[] d, IPEndPoint from)
     {
         int pid = PlayerIdOf(d);
@@ -31,23 +51,14 @@ public sealed class PlayerStatePacket : UdpPacketHandler
         s.LastUdp = DateTime.UtcNow;
 
         const int st = HeaderSize;
-        s.CarId = BitConverter.ToInt32(d, st + 4);
-        s.Color = d[st + 8];
-        s.InCar = (d[st + 9] & 1) != 0;
-        if (d.Length >= st + 24)
-        {
-            s.Px = BitConverter.ToSingle(d, st + 12);
-            s.Pz = BitConverter.ToSingle(d, st + 20);
-        }
-        if (d.Length >= st + 81 && d[st + 80] != 0 && d[st + 80] != s.Island)
-        {
-            s.Island = d[st + 80];
-            Log.Info($"{s.Nick}: Insel {Islands.Name(s.Island)}");
-        }
+        ApplyState(Ctx, s, d, st, d.Length - st);
+        s.RelayCount++;
 
         int len = 3 + (d.Length - st);
         WriteHeader(_out, Out, pid);
         Buffer.BlockCopy(d, st, _out, 3, d.Length - st);
-        await Udp.RelayAsync(s, new ReadOnlyMemory<byte>(_out, 0, len), RelayTimeout);
+        var cfg = Ctx.Config;
+        Udp.Relay(s, new ReadOnlyMemory<byte>(_out, 0, len), RelayTimeout, cfg.relayRange, Math.Max(1, cfg.farRelayDivider));
+        await Task.CompletedTask;
     }
 }

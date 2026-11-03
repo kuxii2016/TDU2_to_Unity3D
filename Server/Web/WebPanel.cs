@@ -83,6 +83,12 @@ public sealed class WebPanel
         app.MapGet("/chat", (HttpContext http) => Require(http, u => Results.Content(Pages.ChatPage(u.Nick, u.Permission), "text/html")));
         app.MapGet("/accounts", (HttpContext http) => Require(http, u => Results.Content(Pages.AccountsPage(u.Nick, u.Permission), "text/html")));
         app.MapGet("/players", (HttpContext http) => Require(http, u => Json(PlayerList())));
+        app.MapGet("/players/info", (HttpContext http) => Require(http, u =>
+        {
+            int pid = int.TryParse(http.Request.Query["id"], out var p) ? p : 0;
+            var info = PlayerInfo(pid);
+            return info == null ? Results.Json(new { ok = false, error = "Spieler nicht online" }, statusCode: 404) : Json(info);
+        }));
         app.MapGet("/chat/list", (HttpContext http) => Require(http, u => Json(_ctx.Chat.Recent(500).Select(c => new { time = c.At.ToString("HH:mm:ss"), nick = c.Nick, id = c.PlayerId, text = c.Text }))));
         app.MapGet("/events", (HttpContext http) => Require(http, u => Json(_ctx.Audit.Recent(300).Select(e => new { time = e.At.ToString("HH:mm:ss"), kind = e.Kind, nick = e.Nick, text = e.Text }))));
         app.MapGet("/islands", (HttpContext http) => Require(http, u => Json(new[] {
@@ -135,6 +141,49 @@ public sealed class WebPanel
             return Json(new { ok });
         }));
 
+        // ---- Lobbys ----
+        app.MapGet("/lobbies", (HttpContext http) => Require(http, u => Results.Content(Pages.LobbiesPage(u.Nick, u.Permission), "text/html")));
+        app.MapGet("/lobbies/list", (HttpContext http) => Require(http, u => Json(LobbyList())));
+
+        app.MapPost("/lobbies/move", (HttpContext http) => Require(http, u =>
+        {
+            if (Data.Account.Rank(u.Permission) < 2) return Json(new { ok = false, error = "keine_rechte" });
+            var f = http.Request.ReadFormAsync().GetAwaiter().GetResult();
+            int pid = int.TryParse(f["playerId"], out var p) ? p : 0;
+            int lobby = int.TryParse(f["lobby"], out var l) ? l : -1;
+            bool force = f["force"].ToString() == "1";
+            bool notify = f["notify"].ToString() == "1";
+            var s = _ctx.Actions.Find(pid);
+            if (lobby < 0) return Json(new { ok = false, error = "Ziel fehlt" });
+            int from = s?.Lobby ?? 0;
+            if (!_ctx.Lobbies.Move(s, lobby, force, out string err, out int target)) return Json(new { ok = false, error = err });
+            if (notify && target != from) s.Notice($"news:0:Du wurdest in Lobby {target} verschoben.");
+            _ctx.Audit.Add("mod", u.Nick, $"{s.Nick} (#{pid}) von Lobby {from} nach Lobby {target} verschoben{(force ? " (trotz voll)" : "")}");
+            Log.Info($"[Mod] {u.Nick}: {s.Nick} (#{pid}) Lobby {from} → {target}");
+            return Json(new { ok = true, lobby = target });
+        }));
+
+        app.MapPost("/lobbies/delete", (HttpContext http) => Require(http, u =>
+        {
+            if (Data.Account.Rank(u.Permission) < 2) return Json(new { ok = false, error = "keine_rechte" });
+            var f = http.Request.ReadFormAsync().GetAwaiter().GetResult();
+            int id = int.TryParse(f["id"], out var i) ? i : 0;
+            bool ok = _ctx.Lobbies.Delete(id, _ctx.Actions.Find, out int moved);
+            if (ok) { _ctx.Audit.Add("mod", u.Nick, $"Lobby {id} gelöscht, {moved} Spieler verteilt"); Log.Info($"[Mod] {u.Nick}: Lobby {id} gelöscht ({moved} Spieler verteilt)"); }
+            return Json(new { ok, moved, error = ok ? "" : "Lobby existiert nicht" });
+        }));
+
+        app.MapPost("/lobbies/create", (HttpContext http) => Require(http, u =>
+        {
+            if (Data.Account.Rank(u.Permission) < 2) return Json(new { ok = false, error = "keine_rechte" });
+            var f = http.Request.ReadFormAsync().GetAwaiter().GetResult();
+            int island = int.TryParse(f["island"], out var i) ? i : 0;
+            if (island != Islands.Ibiza && island != Islands.Hawaii) return Json(new { ok = false, error = "Insel wählen" });
+            var l = _ctx.Lobbies.CreateEmpty(island);
+            _ctx.Audit.Add("mod", u.Nick, $"Lobby {l.Id} ({Islands.Name(island)}) angelegt");
+            return Json(new { ok = true, id = l.Id });
+        }));
+
         // ---- Konten ----
         app.MapGet("/accounts/list", (HttpContext http) => Require(http, u =>
         {
@@ -163,6 +212,7 @@ public sealed class WebPanel
                 ok = true, nick = a.nick, email = a.email, permission = a.permission, nationality = a.nationality,
                 created = a.created, lastLogin = a.lastLogin, banned = a.IsBanned, bannedUntil = a.bannedUntil, banReason = a.banReason,
                 tokens = a.tokenHashes.Count,
+                carCatalog = _ctx.Config.starterCars ?? new(),
                 save = new
                 {
                     island = a.save?.island, money = a.save?.money ?? 0, currentCar = a.save?.currentCar,
@@ -283,6 +333,42 @@ public sealed class WebPanel
             return Json(new { ok = true });
         }));
 
+        app.MapPost("/accounts/car", (HttpContext http) => Require(http, u =>
+        {
+            if (Data.Account.Rank(u.Permission) < 3) return Json(new { ok = false, error = "keine_rechte" });
+            var f = http.Request.ReadFormAsync().GetAwaiter().GetResult();
+            string nick = f["nick"].ToString();
+            string action = (f["action"].ToString() ?? "add").Trim().ToLowerInvariant();
+            string car = (f["car"].ToString() ?? "").Trim();
+            var a = _ctx.Accounts.Load(nick);
+            if (a?.save == null) return Json(new { ok = false, error = "not_found" });
+            var s = a.save;
+
+            if (action == "setcurrent")
+            {
+                if (!s.ownedCars.Any(c => string.Equals(c, car, StringComparison.OrdinalIgnoreCase)))
+                    return Json(new { ok = false, error = "not_owned" });
+                s.currentCar = s.ownedCars.First(c => string.Equals(c, car, StringComparison.OrdinalIgnoreCase));
+                _ctx.Accounts.Store(a);
+                _ctx.Audit.Add("mod", u.Nick, $"Konto {a.nick}: aktives Auto → {s.currentCar}");
+                Log.Info($"[Mod] {u.Nick}: {a.nick} – aktives Auto → {s.currentCar}");
+                return Json(new { ok = true, current = s.currentCar });
+            }
+
+            // add
+            if (!System.Text.RegularExpressions.Regex.IsMatch(car, "^[A-Za-z0-9_\\-.]{1,64}$"))
+                return Json(new { ok = false, error = "invalid_name" });
+            if (s.ownedCars.Any(c => string.Equals(c, car, StringComparison.OrdinalIgnoreCase)))
+                return Json(new { ok = false, error = "already_owned" });
+            if (s.ownedCars.Count >= 500) return Json(new { ok = false, error = "too_many" });
+            s.ownedCars.Add(car);
+            if (string.IsNullOrEmpty(s.currentCar)) s.currentCar = car;
+            _ctx.Accounts.Store(a);
+            _ctx.Audit.Add("mod", u.Nick, $"Konto {a.nick}: Auto '{car}' hinzugefügt");
+            Log.Info($"[Mod] {u.Nick}: {a.nick} – Auto '{car}' hinzugefügt");
+            return Json(new { ok = true });
+        }));
+
         app.MapPost("/accounts/delete", (HttpContext http) => Require(http, u =>
         {
             if (Data.Account.Rank(u.Permission) < 3) return Json(new { ok = false, error = "keine_rechte" });
@@ -292,6 +378,101 @@ public sealed class WebPanel
             if (online != null) _ctx.Actions.Kick(online.PlayerId, "Konto gelöscht");
             bool ok = _ctx.Accounts.Delete(nick);
             if (ok) { _ctx.Audit.Add("mod", u.Nick, $"Konto {nick} gelöscht"); Log.Info($"[Mod] {u.Nick}: Konto {nick} gelöscht"); }
+            return Json(new { ok });
+        }));
+
+        // ---- News (TDU Media, News-Kanal des Clients) ----
+        app.MapGet("/news", (HttpContext http) => Require(http, u => Results.Content(Pages.NewsPage(u.Nick, u.Permission), "text/html")));
+        app.MapGet("/news/list", (HttpContext http) => Require(http, u => Json(_ctx.News.All().Select(n => new
+        {
+            id = n.id, header = n.header, message = n.message, icon = n.icon, island = n.island, islandName = n.island == 0 ? "Alle" : Islands.Name(n.island),
+            author = n.author, created = n.created, updated = n.updated, hasImage = n.hasImage, kind = n.kind ?? "", version = n.version ?? "",
+            category = n.category ?? "",
+        }))));
+        app.MapGet("/news/image", (HttpContext http) => Require(http, u =>
+        {
+            int id = int.TryParse(http.Request.Query["id"], out var i) ? i : 0;
+            string b64 = _ctx.News.ImageBase64(id);
+            if (b64 == null) return Results.NotFound();
+            var bytes = Convert.FromBase64String(b64);
+            return Results.File(bytes, bytes.Length > 0 && bytes[0] == 0x89 ? "image/png" : "image/jpeg");
+        }));
+        app.MapPost("/news/save", (HttpContext http) => Require(http, u =>
+        {
+            if (Data.Account.Rank(u.Permission) < 2) return Json(new { ok = false, error = "keine_rechte" });
+            var f = http.Request.ReadFormAsync().GetAwaiter().GetResult();
+            string header = f["header"].ToString(), message = f["message"].ToString(), icon = f["icon"].ToString();
+            string kind = f["kind"].ToString(), version = f["version"].ToString(), category = f["category"].ToString();
+            int island = int.TryParse(f["island"], out var isl) ? isl : 0;
+            int id = int.TryParse(f["id"], out var i) ? i : 0;
+            if (string.IsNullOrWhiteSpace(header)) return Json(new { ok = false, error = "Überschrift fehlt" });
+            if (string.IsNullOrWhiteSpace(message)) return Json(new { ok = false, error = "Text fehlt" });
+            byte[] image = null;
+            string imgB64 = f["image"].ToString();
+            if (!string.IsNullOrWhiteSpace(imgB64))
+            {
+                image = Data.NewsStore.CheckImage(imgB64, out string imgErr);
+                if (image == null) return Json(new { ok = false, error = imgErr });
+            }
+            bool removeImage = f["removeImage"].ToString() == "1";
+            var n = id > 0 ? _ctx.News.Update(id, header, message, icon, island, image, removeImage, kind, version, category)
+                           : _ctx.News.Add(header, message, icon, island, u.Nick, image, kind, version, category);
+            if (n == null) return Json(new { ok = false, error = "not_found" });
+            _ctx.Audit.Add("mod", u.Nick, $"News {(id > 0 ? "bearbeitet" : "angelegt")} #{n.id}: {n.header}");
+            Log.Info($"[Mod] {u.Nick}: News {(id > 0 ? "bearbeitet" : "angelegt")} #{n.id} ({Islands.Name(n.island)}): {n.header}");
+            return Json(new { ok = true, id = n.id });
+        }));
+        app.MapPost("/news/delete", (HttpContext http) => Require(http, u =>
+        {
+            if (Data.Account.Rank(u.Permission) < 2) return Json(new { ok = false, error = "keine_rechte" });
+            var f = http.Request.ReadFormAsync().GetAwaiter().GetResult();
+            int id = int.TryParse(f["id"], out var i) ? i : 0;
+            bool ok = _ctx.News.Delete(id);
+            if (ok) { _ctx.Audit.Add("mod", u.Nick, $"News #{id} gelöscht"); Log.Info($"[Mod] {u.Nick}: News #{id} gelöscht"); }
+            return Json(new { ok });
+        }));
+
+        // ---- Umfragen (TDU Media, Umfrage-Kanal des Clients) ----
+        app.MapGet("/surveys", (HttpContext http) => Require(http, u => Results.Content(Pages.SurveysPage(u.Nick, u.Permission), "text/html")));
+        app.MapGet("/surveys/list", (HttpContext http) => Require(http, u =>
+        {
+            var list = _ctx.Surveys.All(out var raw);
+            return Json(list.Select(s => new
+            {
+                id = s.id, question = s.question, text = s.text, answers = s.answers, counts = s.counts, total = s.total, open = s.open,
+                closed = raw.TryGetValue(s.id, out var it) && !it.open, created = s.created, closes = s.closes,
+                island = it?.island ?? 0, islandName = (it?.island ?? 0) == 0 ? "Alle" : Islands.Name(it.island), author = it?.author ?? "",
+            }));
+        }));
+        app.MapPost("/surveys/save", (HttpContext http) => Require(http, u =>
+        {
+            if (Data.Account.Rank(u.Permission) < 2) return Json(new { ok = false, error = "keine_rechte" });
+            var f = http.Request.ReadFormAsync().GetAwaiter().GetResult();
+            string question = f["question"].ToString(), text = f["text"].ToString(), closes = f["closes"].ToString();
+            var answers = f["answers"].ToString().Replace("\r", "").Split('\n');
+            int island = int.TryParse(f["island"], out var isl) ? isl : 0;
+            var s = _ctx.Surveys.Add(question, text, answers, island, closes, u.Nick, out string err);
+            if (s == null) return Json(new { ok = false, error = err });
+            _ctx.Audit.Add("mod", u.Nick, $"Umfrage angelegt #{s.id}: {s.question}");
+            Log.Info($"[Mod] {u.Nick}: Umfrage angelegt #{s.id} ({(s.island == 0 ? "alle Inseln" : Islands.Name(s.island))}): {s.question}");
+            return Json(new { ok = true, id = s.id });
+        }));
+        app.MapPost("/surveys/state", (HttpContext http) => Require(http, u =>
+        {
+            if (Data.Account.Rank(u.Permission) < 2) return Json(new { ok = false, error = "keine_rechte" });
+            var f = http.Request.ReadFormAsync().GetAwaiter().GetResult();
+            int id = int.TryParse(f["id"], out var i) ? i : 0;
+            string action = f["action"].ToString();
+            bool ok = action switch
+            {
+                "close" => _ctx.Surveys.SetOpen(id, false),
+                "open" => _ctx.Surveys.SetOpen(id, true),
+                "reset" => _ctx.Surveys.ResetVotes(id),
+                "delete" => _ctx.Surveys.Delete(id),
+                _ => false,
+            };
+            string what = action switch { "close" => "geschlossen", "open" => "geöffnet", "reset" => "Stimmen zurückgesetzt", "delete" => "gelöscht", _ => action };
+            if (ok) { _ctx.Audit.Add("mod", u.Nick, $"Umfrage #{id} {what}"); Log.Info($"[Mod] {u.Nick}: Umfrage #{id} {what}"); }
             return Json(new { ok });
         }));
 
@@ -352,6 +533,84 @@ public sealed class WebPanel
             since = s.Since.ToString("HH:mm:ss"), minutes = (int)(DateTime.Now - s.Since).TotalMinutes,
             remote = s.Conn?.Remote ?? "",
         }).ToList();
+    }
+
+    /// <summary>Alle wichtigen Daten eines Online-Spielers (Verbindung, P2P, Lobby, Zustand, Konto).</summary>
+    object PlayerInfo(int pid)
+    {
+        var s = _ctx.Actions.Find(pid);
+        if (s == null) return null;
+        var now = DateTime.UtcNow;
+        string Ago(DateTime t) => t == DateTime.MinValue ? "nie" : (now - t).TotalSeconds < 120 ? $"vor {(now - t).TotalSeconds:0} s" : $"vor {(now - t).TotalMinutes:0} Min.";
+        var cfg = _ctx.Config;
+        var all = _ctx.Actions.Players();
+        var lobby = _ctx.Lobbies.Get(s.Lobby);
+        // Partner, denen der Server die Endpunkte dieses Spielers für P2P vermittelt (gleiche Lobby, beide P2P-fähig, UDP bekannt)
+        var peers = all.Where(o => o != s && TDU2Server.Sessions.LobbyManager.SameLobby(s, o)).Select(o => new
+        {
+            id = o.PlayerId, nick = o.Nick,
+            p2p = s.P2P && o.P2P && s.UdpEndPoint != null && o.UdpEndPoint != null,
+            sameLan = s.UdpEndPoint != null && o.UdpEndPoint != null && Equals(s.UdpEndPoint.Address, o.UdpEndPoint.Address),
+        }).ToList();
+        var a = _ctx.Accounts.Load(s.Nick);
+        string invites; lock (s.Lock) invites = string.Join(", ", s.Invites.Select(i => $"{i.Nick} ({i.Kind})"));
+        int notices; lock (s.Lock) notices = s.Notices.Count;
+        return new
+        {
+            ok = true,
+            id = s.PlayerId, nick = s.Nick,
+            since = s.Since.ToString("dd.MM. HH:mm:ss"), minutes = (int)(DateTime.Now - s.Since).TotalMinutes,
+            // Verbindung
+            tcp = s.Conn?.Remote ?? "", ip = (s.Conn?.Remote ?? "").Split(':')[0],
+            udp = s.UdpEndPoint?.ToString() ?? "", udpLast = Ago(s.LastUdp), udpActive = s.UdpEndPoint != null && s.UdpActive(now, 10),
+            udpIpDiffers = s.UdpEndPoint != null && !string.IsNullOrEmpty(s.Conn?.Remote) && s.Conn.Remote.Split(':')[0] != s.UdpEndPoint.Address.ToString(),
+            statusLast = Ago(s.LastStatus), statusIntervalMs = cfg.statusIntervalMs,
+            localEp = s.LocalEp ?? "",
+            // P2P
+            p2pServer = cfg.p2pEnabled, p2p = s.P2P, relayCount = s.RelayCount,
+            peers,
+            // Lobby
+            lobby = s.Lobby, lobbyCount = lobby?.Count ?? 0, lobbyMax = cfg.maxPlayersPerLobby,
+            island = Islands.Name(s.Island),
+            // Zustand
+            carId = s.CarId, color = s.Color, inCar = s.InCar && s.UdpActive(now, 10),
+            px = Math.Round(s.Px, 1), pz = Math.Round(s.Pz, 1),
+            money = s.Money, nbCars = s.NbCars, nationality = s.Nationality,
+            rideWith = s.RideWith, passenger = s.Passenger, invites, notices,
+            mood = s.Mood, moodText = s.MoodTxt, hasAvatar = !string.IsNullOrEmpty(s.Avatar), photoVer = s.PhotoVer,
+            // Konto
+            permission = a?.permission ?? "", email = a?.email ?? "", created = a?.created ?? "", lastLogin = a?.lastLogin ?? "",
+            banned = a?.IsBanned ?? false,
+        };
+    }
+
+    object LobbyList()
+    {
+        var now = DateTime.UtcNow;
+        var players = _ctx.Actions.Players();
+        object Member(TDU2Server.Sessions.Session s) => new
+        {
+            id = s.PlayerId, nick = s.Nick, island = Islands.Name(s.Island), islandCode = s.Island,
+            carId = s.CarId, inCar = s.InCar && (now - s.LastUdp).TotalSeconds < 10,
+            rideWith = s.RideWith, passenger = s.Passenger, p2p = s.P2P,
+            udp = s.UdpEndPoint != null && s.UdpActive(now, 10),
+            minutes = (int)(DateTime.Now - s.Since).TotalMinutes,
+        };
+        var lobbies = _ctx.Lobbies.All().Select(l =>
+        {
+            List<int> ids;
+            lock (l.Members) ids = l.Members.ToList();
+            var members = players.Where(p => ids.Contains(p.PlayerId)).OrderBy(p => p.Nick, StringComparer.OrdinalIgnoreCase).Select(Member).ToList();
+            return new
+            {
+                id = l.Id, island = Islands.Name(l.Island), islandCode = l.Island, count = l.Count,
+                created = l.Created.ToLocalTime().ToString("HH:mm:ss"), minutes = (int)(now - l.Created).TotalMinutes,
+                members,
+                missing = ids.Count - members.Count,   // Nummern ohne Sitzung (sollte 0 sein)
+            };
+        }).ToList();
+        var without = players.Where(p => p.Lobby == 0).Select(Member).ToList();
+        return new { max = _ctx.Config.maxPlayersPerLobby, online = players.Count, lobbies, without };
     }
 
     IResult Require(HttpContext http, Func<WebAuth.User, IResult> onOk)

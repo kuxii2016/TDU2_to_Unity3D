@@ -46,6 +46,7 @@ public sealed class InviteReplyHandler : RequestHandler
     {
         host.Notice($"joined:{me.PlayerId}:{me.Nick}");
         Log.Info($"{me.Nick} folgt der Einladung von {host.Nick} ({kind})");
+        Ctx.Lobbies.JoinHost(me, host);   // Gast in die Lobby des Gastgebers
         var resp = new NetResponse { ok = true, inviteKind = kind };
         var parts = kind.Split('|');
         if (parts.Length > 1 && parts[0] == "room" && parts[1].StartsWith("EPH", StringComparison.OrdinalIgnoreCase))
@@ -68,6 +69,7 @@ public sealed class InviteReplyHandler : RequestHandler
     {
         if (host.Passenger != 0 || host.RideWith != 0) return Fail("busy");
         Ctx.Sessions.EndRide(me);
+        Ctx.Lobbies.JoinHost(me, host);
         me.RideWith = host.PlayerId;
         host.Passenger = me.PlayerId;
         host.Notice($"accepted:{me.PlayerId}:{me.Nick}");

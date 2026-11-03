@@ -42,6 +42,7 @@ public static class SaveSanitizer
         sv.myLife = CleanLife(sv.myLife, old?.myLife);
         sv.interior ??= "";
         if (sv.interior.Length > 96) sv.interior = "";
+        sv.story = Math.Clamp(sv.story, -1, 11);
 
         sv.savedAt = DateTime.UtcNow.ToString("o");
         return sv;

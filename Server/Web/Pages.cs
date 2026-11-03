@@ -147,7 +147,12 @@ dialog::backdrop{background:rgba(4,7,11,.72);backdrop-filter:blur(3px)}
 .tag em{font-style:normal;color:var(--accent);font-size:.72rem;font-weight:700}
 .tag .x{background:transparent;border:0;color:var(--muted);cursor:pointer;font-size:1rem;line-height:1;padding:2px 5px;border-radius:6px}
 .tag .x:hover{color:#fff;background:var(--danger)}
+.tag .mini{background:transparent;border:1px solid var(--line);color:var(--muted);cursor:pointer;font-size:.7rem;line-height:1;padding:3px 6px;border-radius:6px}
+.tag .mini:hover{color:var(--accent);border-color:var(--accent)}
 .carlist{display:flex;flex-wrap:wrap;gap:8px}
+.addcar{display:flex;gap:8px;margin-top:10px;align-items:stretch}
+.addcar input{flex:1}
+.addcar .btn{white-space:nowrap}
 .plist{display:flex;flex-direction:column;gap:6px}
 .pitem{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:6px 8px 6px 12px;font-size:.84rem}
 .pitem .meta{color:var(--muted);font-size:.78rem}
@@ -197,8 +202,11 @@ const RANK = {player:0,helper:1,mod:2,admin:3,dev:3};
     <div class="brand"><span class="logo">◆</span><span>TDU2 Panel<small>Server Control</small></span></div>
     <nav class="nav">
       {{Nav("/panel", "Dashboard", "▦", active)}}
+      {{Nav("/lobbies", "Lobbys", "◫", active)}}
       {{Nav("/chat", "Chat", "✎", active)}}
       {{Nav("/accounts", "Konten", "☰", active)}}
+      {{Nav("/news", "News", "✉", active)}}
+      {{Nav("/surveys", "Umfragen", "☑", active)}}
       {{Nav("/config", "Konfiguration", "⚙", active)}}
     </nav>
     <div class="side-foot">
@@ -295,6 +303,7 @@ CLOCK_TICK(); setInterval(CLOCK_TICK,1000);
   </div>
 </div>
 
+{PlayerInfoUi}
 <dialog id=""dm"">
   <div class=""dh""><b id=""dmTitle"">Nachricht</b><div class=""grow""></div><button class=""close"" onclick=""dm.close()"">&times;</button></div>
   <div class=""db"">
@@ -340,7 +349,8 @@ async function loadPlayers() {{
     <td class=""muted id"">${{p.px}}, ${{p.pz}}</td>
     <td class=""muted"">${{p.udp?'aktiv '+esc(p.lastUdp):'<span class=""badge off"">offline</span>'}}</td>
     <td class=""muted"">${{esc(p.since)}} · ${{fmt(p.minutes)}}</td>
-    <td><button class=""btn ghost sm"" onclick=""openDm(${{p.id}},'${{esc(p.nick).replace(/'/g,""\\'"")}}')"">Nachricht</button>
+    <td><button class=""btn ghost sm"" onclick=""openInfo(${{p.id}})"">Info</button>
+        <button class=""btn ghost sm"" onclick=""openDm(${{p.id}},'${{esc(p.nick).replace(/'/g,""\\'"")}}')"">Nachricht</button>
         <button class=""btn ghost sm"" onclick=""openKick(${{p.id}},'${{esc(p.nick).replace(/'/g,""\\'"")}}')"">Kick</button></td>
   </tr>`).join('');
 }}
@@ -408,6 +418,193 @@ async function loadChat() {{
   </tr>`).join('');
 }}
 loadChat(); setInterval(loadChat,3000);
+</script>");
+
+    public static string NewsPage(string nick, string permission) => Shell(nick, permission, "/news", "News",
+        "Meldungen für den News- und Updates-Kanal (TDU Media im Spiel)", $@"
+<div class=""card"" style=""max-width:820px;width:100%;margin:0 auto"">
+  <div class=""head""><h2 id=""formTitle"">Neue News</h2><div class=""grow""></div><span class=""badge off"" id=""editBadge"" style=""display:none"">Bearbeiten #<span id=""editId""></span></span></div>
+  <div class=""body"">
+    <div class=""field""><label>Überschrift (max. 80 Zeichen)</label><input id=""header"" maxlength=""80""></div>
+    <div class=""field"" style=""margin-top:14px""><label>Text (max. 2000 Zeichen)</label><textarea id=""message"" maxlength=""2000"" rows=""6"" style=""width:100%""></textarea></div>
+    <div class=""field-row"" style=""margin-top:14px"">
+      <div class=""field""><label>Symbol</label><select id=""icon"">
+        <option value=""info"">Info</option><option value=""update"">Update</option><option value=""event"">Event</option>
+        <option value=""warning"">Warnung</option><option value=""weather"">Wetter</option><option value=""car"">Auto</option>
+        <option value=""club"">Club</option></select></div>
+      <div class=""field""><label>Insel</label><select id=""island""><option value=""0"">Alle</option><option value=""1"">Ibiza</option><option value=""2"">Hawaii</option></select></div>
+    </div>
+    <div class=""field-row"" style=""margin-top:14px"">
+      <div class=""field""><label>Kanal</label><select id=""kind"" onchange=""kindChanged()""><option value="""">News</option><option value=""update"">Updates (Patch-Notes)</option></select></div>
+      <div class=""field"" id=""versionBox"" style=""display:none""><label>Version (z.B. 0.9.3)</label><input id=""version"" maxlength=""24""></div>
+      <div class=""field"" id=""catBox"" style=""display:none""><label>Kategorie (Reiter im Spiel)</label><select id=""category"">
+        <option value=""gmodes"">Packs / Allgemein</option><option value=""vehicles"">Fahrzeuge</option><option value=""avatar"">Avatar</option>
+        <option value=""furnitures"">Möbel</option><option value=""stickers"">Sticker</option></select></div>
+    </div>
+    <div class=""field"" style=""margin-top:14px""><label>Bild (optional, JPEG/PNG – wird auf max. 640×360 verkleinert)</label>
+      <input id=""imgFile"" type=""file"" accept=""image/png,image/jpeg"" onchange=""pickImage(this)"">
+      <div style=""margin-top:8px;display:flex;gap:12px;align-items:center"">
+        <img id=""imgPrev"" style=""max-width:320px;max-height:180px;display:none;border-radius:6px"">
+        <button class=""btn ghost sm"" id=""imgDel"" style=""display:none"" onclick=""removeImg()"">Bild entfernen</button>
+      </div></div>
+    <div class=""hint"" style=""margin-top:12px"">Spieler bekommen neue News automatisch (Abgleich über die Statusabfrage). Bearbeiten schickt die Meldung erneut.</div>
+    <div style=""margin-top:20px"">
+      <button class=""btn"" onclick=""saveNews()"">Veröffentlichen</button>
+      <button class=""btn ghost"" onclick=""resetForm()"">Neu / Abbrechen</button>
+    </div>
+  </div>
+</div>
+<div class=""card"" style=""margin-top:18px"">
+  <div class=""head""><h2>Veröffentlichte News</h2><div class=""grow""></div><span class=""chip"" id=""nCount"">0</span></div>
+  <div class=""tw"" style=""max-height:none""><table id=""news"">
+    <thead><tr><th>#</th><th>Datum</th><th>Kanal</th><th>Bild</th><th>Symbol</th><th>Insel</th><th>Überschrift</th><th>Text</th><th>Von</th><th></th></tr></thead>
+    <tbody><tr><td colspan=""10"" class=""empty"">Lädt…</td></tr></tbody>
+  </table></div>
+</div>
+<script>
+{PermScript(permission)}
+let NEWS=[]; let IMG=''; let REMOVE_IMG=false;
+const CATS={{gmodes:'Packs',vehicles:'Fahrzeuge',avatar:'Avatar',furnitures:'Möbel',stickers:'Sticker'}};
+function kindChanged(){{ const u=document.getElementById('kind').value==='update';
+  document.getElementById('versionBox').style.display=u?'':'none'; document.getElementById('catBox').style.display=u?'':'none'; }}
+function pickImage(inp){{
+  const f=inp.files&&inp.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{{ const im=new Image(); im.onload=()=>{{
+    const s=Math.min(1,640/im.width,360/im.height); const c=document.createElement('canvas');
+    c.width=Math.round(im.width*s); c.height=Math.round(im.height*s);
+    c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+    IMG=c.toDataURL('image/jpeg',0.85); REMOVE_IMG=false;
+    const p=document.getElementById('imgPrev'); p.src=IMG; p.style.display=''; document.getElementById('imgDel').style.display='';
+  }}; im.src=rd.result; }};
+  rd.readAsDataURL(f);
+}}
+function removeImg(){{
+  IMG=''; REMOVE_IMG=true; document.getElementById('imgFile').value='';
+  document.getElementById('imgPrev').style.display='none'; document.getElementById('imgDel').style.display='none';
+}}
+function resetForm(){{
+  IMG=''; REMOVE_IMG=false; document.getElementById('imgFile').value='';
+  document.getElementById('imgPrev').style.display='none'; document.getElementById('imgDel').style.display='none';
+  document.getElementById('header').value=''; document.getElementById('message').value='';
+  document.getElementById('icon').value='info'; document.getElementById('island').value='0';
+  document.getElementById('kind').value=''; document.getElementById('version').value=''; document.getElementById('category').value='gmodes'; kindChanged();
+  document.getElementById('editId').textContent=''; document.getElementById('editBadge').style.display='none';
+  document.getElementById('formTitle').textContent='Neue News';
+}}
+function editNews(id){{
+  const n=NEWS.find(x=>x.id===id); if(!n) return;
+  document.getElementById('header').value=n.header; document.getElementById('message').value=n.message;
+  document.getElementById('icon').value=n.icon||'info'; document.getElementById('island').value=n.island;
+  document.getElementById('kind').value=n.kind||''; document.getElementById('version').value=n.version||'';
+  document.getElementById('category').value=n.category||'gmodes'; kindChanged();
+  document.getElementById('editId').textContent=n.id; document.getElementById('editBadge').style.display='';
+  document.getElementById('formTitle').textContent='News bearbeiten'; window.scrollTo(0,0);
+  IMG=''; REMOVE_IMG=false; document.getElementById('imgFile').value='';
+  const p=document.getElementById('imgPrev');
+  if(n.hasImage){{p.src='/news/image?id='+n.id+'&t='+Date.now(); p.style.display=''; document.getElementById('imgDel').style.display='';}}
+  else {{p.style.display='none'; document.getElementById('imgDel').style.display='none';}}
+}}
+async function saveNews(){{
+  const d={{header:document.getElementById('header').value, message:document.getElementById('message').value,
+    icon:document.getElementById('icon').value, island:document.getElementById('island').value,
+    id:document.getElementById('editId').textContent||'0', image:IMG, removeImage:REMOVE_IMG?'1':'0',
+    kind:document.getElementById('kind').value, version:document.getElementById('version').value,
+    category:document.getElementById('category').value}};
+  const res=await api('/news/save',d,'POST');
+  if(res&&res.ok){{toast('News #'+res.id+' veröffentlicht.'); resetForm(); load();}} else toast('Fehler: '+((res&&res.error)||''),true);
+}}
+async function delNews(id){{
+  if(!confirm('News #'+id+' löschen?')) return;
+  const res=await api('/news/delete',{{id}},'POST');
+  if(res&&res.ok){{toast('News #'+id+' gelöscht.'); load();}} else toast('Löschen fehlgeschlagen',true);
+}}
+async function load(){{
+  NEWS=await api('/news/list')||[];
+  document.getElementById('nCount').textContent=NEWS.length;
+  const tb=document.querySelector('#news tbody');
+  if(!NEWS.length){{tb.innerHTML='<tr><td colspan=""10"" class=""empty"">Noch keine News.</td></tr>';return;}}
+  tb.innerHTML=NEWS.map(n=>`<tr>
+    <td class=""muted id"">${{n.id}}</td>
+    <td class=""muted"">${{esc(new Date(n.created).toLocaleString())}}</td>
+    <td>${{n.kind==='update'?'<span class=""badge on"">Update '+esc(n.version||'')+' · '+esc(CATS[n.category]||'Packs')+'</span>':'<span class=""badge"">News</span>'}}</td>
+    <td>${{n.hasImage?`<img src=""/news/image?id=${{n.id}}"" style=""max-width:96px;max-height:54px;border-radius:4px"">`:'<span class=""muted"">–</span>'}}</td>
+    <td>${{esc(n.icon)}}</td><td>${{esc(n.islandName)}}</td>
+    <td><span class=""name"">${{esc(n.header)}}</span></td>
+    <td style=""white-space:pre-wrap;max-width:360px"">${{esc(n.message)}}</td>
+    <td class=""muted"">${{esc(n.author)}}</td>
+    <td style=""white-space:nowrap""><button class=""btn ghost sm"" onclick=""editNews(${{n.id}})"">Bearbeiten</button>
+      <button class=""btn ghost sm"" onclick=""delNews(${{n.id}})"">Löschen</button></td>
+  </tr>`).join('');
+}}
+load(); setInterval(load,15000);
+</script>");
+
+    public static string SurveysPage(string nick, string permission) => Shell(nick, permission, "/surveys", "Umfragen",
+        "Umfragen für den Umfrage-Kanal (TDU Media im Spiel)", $@"
+<div class=""card"" style=""max-width:820px;width:100%;margin:0 auto"">
+  <div class=""head""><h2>Neue Umfrage</h2></div>
+  <div class=""body"">
+    <div class=""field""><label>Frage (max. 120 Zeichen)</label><input id=""question"" maxlength=""120""></div>
+    <div class=""field"" style=""margin-top:14px""><label>Beschreibung (optional, max. 1000 Zeichen)</label><textarea id=""text"" maxlength=""1000"" rows=""3"" style=""width:100%""></textarea></div>
+    <div class=""field"" style=""margin-top:14px""><label>Antworten (eine pro Zeile, 2 bis 8, max. 60 Zeichen)</label><textarea id=""answers"" rows=""5"" style=""width:100%""></textarea></div>
+    <div class=""field-row"" style=""margin-top:14px"">
+      <div class=""field""><label>Insel</label><select id=""island""><option value=""0"">Alle</option><option value=""1"">Ibiza</option><option value=""2"">Hawaii</option></select></div>
+      <div class=""field""><label>Endet am (optional)</label><input id=""closes"" type=""datetime-local""></div>
+    </div>
+    <div class=""hint"" style=""margin-top:12px"">Jedes Konto hat eine Stimme und kann sie ändern, solange die Umfrage offen ist. Im Spiel: TDU Media &rarr; Umfragen.</div>
+    <div style=""margin-top:20px"">
+      <button class=""btn"" onclick=""saveSurvey()"">Veröffentlichen</button>
+      <button class=""btn ghost"" onclick=""resetForm()"">Leeren</button>
+    </div>
+  </div>
+</div>
+<div class=""card"" style=""margin-top:18px"">
+  <div class=""head""><h2>Umfragen</h2><div class=""grow""></div><span class=""chip"" id=""sCount"">0</span></div>
+  <div class=""body"" id=""surveys""><div class=""empty"">Lädt…</div></div>
+</div>
+<script>
+{PermScript(permission)}
+let SURVEYS=[];
+function resetForm(){{
+  for(const id of ['question','text','answers','closes']) document.getElementById(id).value='';
+  document.getElementById('island').value='0';
+}}
+async function saveSurvey(){{
+  const c=document.getElementById('closes').value;
+  const d={{question:document.getElementById('question').value, text:document.getElementById('text').value,
+    answers:document.getElementById('answers').value, island:document.getElementById('island').value,
+    closes:c?new Date(c).toISOString():''}};
+  const res=await api('/surveys/save',d,'POST');
+  if(res&&res.ok){{toast('Umfrage #'+res.id+' veröffentlicht.'); resetForm(); load();}} else toast('Fehler: '+((res&&res.error)||''),true);
+}}
+async function act(id,action){{
+  const ask={{delete:'Umfrage #'+id+' löschen?',reset:'Alle Stimmen von Umfrage #'+id+' löschen?'}}[action];
+  if(ask&&!confirm(ask)) return;
+  const res=await api('/surveys/state',{{id,action}},'POST');
+  if(res&&res.ok){{toast('Umfrage #'+id+' aktualisiert.'); load();}} else toast('Aktion fehlgeschlagen',true);
+}}
+async function load(){{
+  SURVEYS=await api('/surveys/list')||[];
+  document.getElementById('sCount').textContent=SURVEYS.length;
+  const box=document.getElementById('surveys');
+  if(!SURVEYS.length){{box.innerHTML='<div class=""empty"">Noch keine Umfragen.</div>';return;}}
+  box.innerHTML=SURVEYS.map(s=>{{
+    const rows=s.answers.map((a,i)=>{{const n=s.counts[i]||0; const p=s.total?Math.round(n*100/s.total):0;
+      return `<div style=""margin:6px 0""><div style=""display:flex;justify-content:space-between;gap:12px""><span>${{esc(a)}}</span><span class=""muted"">${{n}} (${{p}} %)</span></div>
+        <div style=""height:8px;border-radius:4px;background:rgba(127,127,127,.2)""><div style=""height:8px;border-radius:4px;width:${{p}}%;background:var(--accent,#4c8dff)""></div></div></div>`;}}).join('');
+    const state=s.open?'<span class=""badge on"">offen</span>':'<span class=""badge off"">geschlossen</span>';
+    return `<div style=""padding:14px 0;border-bottom:1px solid rgba(127,127,127,.2)"">
+      <div style=""display:flex;gap:10px;align-items:center;flex-wrap:wrap""><span class=""muted id"">#${{s.id}}</span><b class=""name"">${{esc(s.question)}}</b>${{state}}
+        <span class=""muted"">${{esc(s.islandName)}} · ${{s.total}} Stimmen · ${{esc(new Date(s.created).toLocaleString())}}${{s.closes?' · endet '+esc(new Date(s.closes).toLocaleString()):''}} · ${{esc(s.author)}}</span></div>
+      ${{s.text?`<div style=""white-space:pre-wrap;margin-top:6px"">${{esc(s.text)}}</div>`:''}}
+      <div style=""margin-top:8px;max-width:560px"">${{rows}}</div>
+      <div style=""margin-top:8px"">${{s.open?`<button class=""btn ghost sm"" onclick=""act(${{s.id}},'close')"">Schließen</button>`:`<button class=""btn ghost sm"" onclick=""act(${{s.id}},'open')"">Wieder öffnen</button>`}}
+        <button class=""btn ghost sm"" onclick=""act(${{s.id}},'reset')"">Stimmen zurücksetzen</button>
+        <button class=""btn ghost sm"" onclick=""act(${{s.id}},'delete')"">Löschen</button></div>
+    </div>`;}}).join('');
+}}
+load(); setInterval(load,15000);
 </script>");
 
     public static string ConfigPage(string nick, string permission) => Shell(nick, permission, "/config", "Konfiguration",
@@ -494,6 +691,12 @@ load();
 
     <div class=""split""><h3>Fahrzeuge (<span id=""e_carcount"">0</span>)</h3>
       <div class=""carlist"" id=""e_cars""></div>
+      <div class=""addcar"">
+        <input id=""e_addcar"" list=""carList"" placeholder=""Auto-ID, z. B. Ferrari_458_Italia"">
+        <datalist id=""carList""></datalist>
+        <button class=""btn sm"" onclick=""addCar()"">Hinzufügen</button>
+      </div>
+      <div class=""hint"" style=""margin-top:6px"">Auto-ID = Dateiname aus DBCarPhysicsData. Wird dem Konto hinzugefügt.</div>
     </div>
 
     <div class=""split""><h3>My House</h3>
@@ -625,14 +828,23 @@ async function openEdit(nick){{
   document.getElementById('e_owned').innerHTML=own.map(([k,v])=>`<span class=""chip"">${{esc(k)}} <b>${{v||0}}</b></span>`).join('');
 
   const cars=s.cars||[];
+  window.__cars=cars;
   document.getElementById('e_carcount').textContent=cars.length;
   document.getElementById('e_cars').innerHTML=cars.length
-    ? cars.map(c=>`<span class=""tag"">${{esc(c)}}${{c===s.currentCar?' <em>aktiv</em>':''}}<button class=""x"" title=""Löschen"" onclick=""delProp('car','${{esc(c).replace(/'/g,""\\'"")}}')"">&times;</button></span>`).join('')
+    ? cars.map((c,i)=>{{
+        const active=c===s.currentCar;
+        return `<span class=""tag"" data-idx=""${{i}}"">${{esc(c)}}${{active?' <em>aktiv</em>':''}}
+          ${{active?'':'<button class=""mini"" data-act=""setcar"">aktiv?</button>'}}
+          <button class=""x"" title=""Löschen"" data-act=""delcar"">&times;</button></span>`;
+      }}).join('')
     : '<span class=""empty-sm"">Keine Fahrzeuge.</span>';
+
+  const dl=document.getElementById('carList');
+  dl.innerHTML=(a.carCatalog||[]).concat(cars).map(c=>`<option value=""${{esc(c)}}"">`).join('');
 
   const hs=s.houseSpots||[];
   document.getElementById('e_houses').innerHTML=hs.length
-    ? hs.map(h=>`<span class=""tag"">${{esc(h)}}<button class=""x"" title=""Löschen"" onclick=""delProp('house','${{esc(h).replace(/'/g,""\\'"")}}')"">&times;</button></span>`).join('')
+    ? hs.map(h=>`<span class=""tag"" data-val=""${{esc(h)}}"">${{esc(h)}}<button class=""x"" title=""Löschen"" data-act=""delhouse"">&times;</button></span>`).join('')
     : '<span class=""empty-sm"">Keine Häuser eingerichtet.</span>';
 
   renderList('e_furniture', s.furnitureList, 'furniture', 'Möbel #');
@@ -660,14 +872,14 @@ async function openEdit(nick){{
 function renderList(id, list, kind, prefix, fmt){{
   const el=document.getElementById(id); const arr=list||[];
   if(!arr.length){{el.innerHTML='<span class=""empty-sm"">Nichts vorhanden.</span>';return;}}
-  el.innerHTML=arr.map(v=>`<div class=""pitem""><span>${{esc(prefix)}}${{fmt?fmt(v):esc(v)}}</span>
-    <button class=""del"" onclick=""delProp('${{kind}}','${{String(v).replace(/'/g,""\\'"")}}')"">Löschen</button></div>`).join('');
+  el.innerHTML=arr.map(v=>`<div class=""pitem"" data-kind=""${{esc(kind)}}"" data-val=""${{esc(String(v))}}""><span>${{esc(prefix)}}${{fmt?fmt(v):esc(v)}}</span>
+    <button class=""del"" data-act=""delprop"">Löschen</button></div>`).join('');
 }}
 function renderBooks(list){{
   const el=document.getElementById('e_bookmarks'); const arr=list||[];
   if(!arr.length){{el.innerHTML='<span class=""empty-sm"">Nichts vorhanden.</span>';return;}}
-  el.innerHTML=arr.map(b=>`<div class=""pitem""><span>#BL${{b.id}} <span class=""meta"">${{esc(b.island||'')}}</span></span>
-    <button class=""del"" onclick=""delProp('bookmark','${{b.id}}')"">Löschen</button></div>`).join('');
+  el.innerHTML=arr.map(b=>`<div class=""pitem"" data-kind=""bookmark"" data-val=""${{esc(String(b.id))}}""><span>#BL${{b.id}} <span class=""meta"">${{esc(b.island||'')}}</span></span>
+    <button class=""del"" data-act=""delprop"">Löschen</button></div>`).join('');
 }}
 function renderStrList(id, list, kind){{
   const el=document.getElementById(id); const arr=list||[];
@@ -675,14 +887,39 @@ function renderStrList(id, list, kind){{
   el.innerHTML=arr.map(item=>{{
     const label=Array.isArray(item)?item[0]+': '+item[1]:item;
     const val=Array.isArray(item)?item[1]:item;
-    return `<div class=""pitem""><span>${{esc(label)}}</span>
-      <button class=""del"" onclick=""delProp('${{kind}}','${{esc(String(val)).replace(/'/g,""\\'"")}}')"">Löschen</button></div>`;
+    return `<div class=""pitem"" data-kind=""${{esc(kind)}}"" data-val=""${{esc(String(val))}}""><span>${{esc(label)}}</span>
+      <button class=""del"" data-act=""delprop"">Löschen</button></div>`;
   }}).join('');
 }}
 async function delProp(kind, value){{
   if(!confirm('Wirklich löschen? ('+kind+': '+value+')')) return;
   const res=await api('/accounts/property',{{nick:cur,kind,value}},'POST');
   if(res&&res.ok){{ toast('Entfernt.'); openEdit(cur); }} else toast('Fehler: '+((res&&res.error)||''),true);
+}}
+document.addEventListener('click',e=>{{
+  const btn=e.target.closest('[data-act]'); if(!btn) return;
+  const act=btn.getAttribute('data-act');
+  const tag=btn.closest('.tag'); const item=btn.closest('.pitem');
+  const idx=tag?(tag.getAttribute('data-idx')!=null?+tag.getAttribute('data-idx'):null):null;
+  const val=tag?tag.getAttribute('data-val'):(item?item.getAttribute('data-val'):null);
+  const kind=item?item.getAttribute('data-kind'):null;
+  if(act==='setcar'&&idx!=null) setCar(idx);
+  else if(act==='delcar'&&idx!=null) delProp('car',window.__cars[idx]);
+  else if(act==='delhouse') delProp('house',val);
+  else if(act==='delprop') delProp(kind,val);
+}});
+async function addCar(){{
+  const inp=document.getElementById('e_addcar');
+  const car=(inp.value||'').trim();
+  if(!car){{ toast('Auto-ID eingeben.',true); return; }}
+  const res=await api('/accounts/car',{{nick:cur,action:'add',car}},'POST');
+  if(res&&res.ok){{ toast('Fahrzeug hinzugefügt.'); inp.value=''; openEdit(cur); load(); }}
+  else toast('Fehler: '+((res&&res.error)||''),true);
+}}
+async function setCar(i){{
+  const car=(window.__cars||[])[i]; if(!car) return;
+  const res=await api('/accounts/car',{{nick:cur,action:'setcurrent',car}},'POST');
+  if(res&&res.ok){{ toast('Aktives Auto gesetzt.'); openEdit(cur); }} else toast('Fehler: '+((res&&res.error)||''),true);
 }}
 async function saveAcc(){{
   const d={{ nick:cur, email:document.getElementById('e_email').value, money:document.getElementById('e_money').value,
@@ -699,6 +936,234 @@ async function delAcc(){{
 }}
 load();
 </script>");
+
+    /// <summary>Dialog „Spieler-Info“ (Verbindung, P2P, Lobby, Zustand, Konto) – auf Dashboard und Lobby-Seite.</summary>
+    const string PlayerInfoUi = """
+<dialog id="pinfo">
+  <div class="dh"><b id="piTitle">Spieler</b><div class="grow"></div>
+    <button class="btn ghost sm" onclick="openInfo(piId)">Aktualisieren</button>
+    <button class="close" onclick="document.getElementById('pinfo').close()">&times;</button></div>
+  <div class="db" id="piBody"></div>
+</dialog>
+<script>
+let piId = 0;
+function piRow(k, v){ return '<div class="prow"><span>'+esc(k)+'</span><b>'+v+'</b></div>'; }
+function yes(b, t, f){ return b ? '<span class="badge on">'+esc(t||'ja')+'</span>' : '<span class="badge off">'+esc(f||'nein')+'</span>'; }
+async function openInfo(id){
+  piId = id;
+  const p = await api('/players/info?id='+id);
+  const dlg = document.getElementById('pinfo');
+  if (!p || !p.ok) { toast('Spieler ist nicht mehr online.', true); if (dlg.open) dlg.close(); return; }
+  document.getElementById('piTitle').textContent = p.nick + '  (#' + p.id + ')';
+  const peers = p.peers.length ? '<div class="plist">' + p.peers.map(o =>
+      '<div class="pitem"><span><b>'+esc(o.nick)+'</b> <span class="id">#'+o.id+'</span></span><span>'
+      + (o.p2p ? '<span class="badge on">P2P vermittelt</span>' : '<span class="badge off">über Server</span>')
+      + (o.sameLan ? ' <span class="badge">gleiche IP</span>' : '') + '</span></div>').join('') + '</div>'
+    : '<div class="empty-sm">Keine Mitspieler in der Lobby.</div>';
+  document.getElementById('piBody').innerHTML = `
+  <div class="profile">
+    <div class="pcard">
+      <h3 class="muted" style="font-size:.78rem;margin-bottom:8px">VERBINDUNG</h3>
+      ${piRow('IP', '<code>'+esc(p.ip)+'</code>')}
+      ${piRow('TCP', esc(p.tcp))}
+      ${piRow('UDP', p.udp ? esc(p.udp) : '–')}
+      ${piRow('UDP aktiv', yes(p.udpActive) + ' ' + esc(p.udpLast))}
+      ${p.udpIpDiffers ? piRow('Hinweis', '<span class="badge isl">UDP-IP ≠ TCP-IP</span>') : ''}
+      ${piRow('Lokaler EP (LAN)', p.localEp ? esc(p.localEp) : '–')}
+      ${piRow('Letzter Status', esc(p.statusLast) + ' <span class="muted">(alle '+p.statusIntervalMs+' ms)</span>')}
+      ${piRow('Online seit', esc(p.since) + ' · ' + p.minutes + ' Min.')}
+    </div>
+    <div class="pcard">
+      <h3 class="muted" style="font-size:.78rem;margin-bottom:8px">P2P &amp; LOBBY</h3>
+      ${piRow('P2P am Server', yes(p.p2pServer, 'an', 'aus'))}
+      ${piRow('Client P2P-fähig', yes(p.p2p))}
+      ${piRow('Zustandspakete', (p.relayCount||0).toLocaleString())}
+      ${piRow('Lobby', p.lobby ? 'Lobby '+p.lobby+' · '+p.lobbyCount+(p.lobbyMax>0?' / '+p.lobbyMax:'')+' Spieler' : '<span class="badge off">keine</span>')}
+      ${piRow('Insel', '<span class="badge isl">'+esc(p.island)+'</span>')}
+      ${piRow('Mitfahrt', p.rideWith ? 'fährt mit #'+p.rideWith : (p.passenger ? 'Beifahrer #'+p.passenger : '–'))}
+      ${piRow('Einladungen', p.invites ? esc(p.invites) : '–')}
+      ${piRow('Offene Meldungen', p.notices)}
+    </div>
+    <div class="pcard">
+      <h3 class="muted" style="font-size:.78rem;margin-bottom:8px">SPIEL &amp; KONTO</h3>
+      ${piRow('Auto', (esc(p.carId)||'–') + ' ' + (p.inCar ? '<span class="badge on">im Auto</span>' : ''))}
+      ${piRow('Position', p.px+', '+p.pz)}
+      ${piRow('Geld', (p.money||0).toLocaleString())}
+      ${piRow('Autos', p.nbCars)}
+      ${piRow('Stimmung', p.mood ? esc(p.mood)+(p.moodText?' – '+esc(p.moodText):'') : '–')}
+      ${piRow('Rolle', '<span class="perm '+esc(p.permission)+'">'+esc(p.permission)+'</span>')}
+      ${piRow('E-Mail', esc(p.email)||'–')}
+      ${piRow('Konto seit', esc(p.created)||'–')}
+      ${piRow('Gesperrt', p.banned ? '<span class="badge ban">ja</span>' : 'nein')}
+    </div>
+  </div>
+  <div class="split"><h3>Mitspieler in der Lobby</h3>${peers}
+    <div class="hint" style="margin-top:8px">„P2P vermittelt“: Beide sind P2P-fähig, der Server gibt ihnen die Endpunkte zum Hole-Punching. Ob die direkte Verbindung zustande kommt, meldet der Client nicht – sonst laufen die Pakete über den Server.</div></div>`;
+  if (!dlg.open) dlg.showModal();
+}
+</script>
+""";
+
+    public static string LobbiesPage(string nick, string permission) => Shell(nick, permission, "/lobbies", "Lobbys",
+        "Spielergruppen je Insel – wer wen sieht", $$"""
+<style>
+.lgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(860px,100%),1fr));gap:20px}
+.lcard .head h2{white-space:nowrap}
+.lcard .head .hint{white-space:nowrap}
+.lcard td .sub{display:block;color:var(--muted);font-size:.76rem;margin-top:2px}
+#pinfo{width:min(1000px,96vw)}
+.lcard.drop{outline:2px dashed var(--accent);outline-offset:3px}
+.lcard .head .cnt{font-variant-numeric:tabular-nums}
+.badge.full{color:var(--danger);border-color:rgba(255,93,108,.4);background:rgba(255,93,108,.1)}
+.lcard tr[draggable=true]{cursor:grab}
+.lcard tr.dragging{opacity:.4}
+.lcard td .acts{display:flex;gap:6px;justify-content:flex-end}
+.lcard select.mv{width:auto;padding:6px 8px;font-size:.8rem;border-radius:8px}
+.toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:end}
+.toolbar .field{margin:0}
+.toolbar select{width:auto;min-width:150px}
+.chk{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-size:.84rem;font-weight:600;cursor:pointer}
+.chk input{width:auto}
+</style>
+<div class="stat-row">
+  <div class="stat"><div class="k">Lobbys</div><div class="v" id="sL">0</div></div>
+  <div class="stat"><div class="k">Spieler online</div><div class="v" id="sP">0</div></div>
+  <div class="stat"><div class="k">Ohne Lobby</div><div class="v" id="sW">0</div></div>
+  <div class="stat"><div class="k">Max. je Lobby</div><div class="v" id="sM">–</div></div>
+</div>
+
+<div class="card">
+  <div class="body toolbar">
+    <div class="field"><label>Anzeigen</label>
+      <select id="fIsland" onchange="render()"><option value="0">Alle Inseln</option><option value="1">Ibiza</option><option value="2">Hawaii</option></select></div>
+    <div class="field mod-only"><label>Neue leere Lobby</label>
+      <div style="display:flex;gap:8px"><select id="cIsland"><option value="1">Ibiza</option><option value="2">Hawaii</option></select>
+      <button class="btn" onclick="createLobby()">Anlegen</button></div></div>
+    <div class="grow"></div>
+    <label class="chk mod-only"><input type="checkbox" id="optNotify"> Spieler beim Verschieben benachrichtigen</label>
+    <label class="chk mod-only"><input type="checkbox" id="optForce"> auch in volle Lobbys</label>
+  </div>
+  <div class="body hint mod-only" style="padding-top:0">Spieler mit der Maus auf eine andere Lobby ziehen oder über „Verschieben“ wählen. Spieler sehen nur Mitspieler ihrer Lobby; die Änderung greift beim nächsten Status-Abruf des Clients (wenige Sekunden).</div>
+</div>
+
+<div class="lgrid" id="lobbies"><div class="card"><div class="empty">Lädt…</div></div></div>
+{{PlayerInfoUi}}
+
+<script>
+{{PermScript(permission)}}
+const CAN = (RANK[PERM]??0) >= 2;
+if (!CAN) document.querySelectorAll('.mod-only').forEach(e=>e.style.display='none');
+let data = null, dragging = null;
+
+function fmt(min){ if(min<60) return min+' Min.'; const h=Math.floor(min/60); return h+' Std. '+(min%60)+' Min.'; }
+function isl(code,name){ return '<span class="badge isl">'+esc(name)+'</span>'; }
+
+function memberRow(m, lobby){
+  const targets = data.lobbies.filter(l => l.id !== lobby && (l.islandCode === m.islandCode || l.islandCode === 0 || m.islandCode === 0));
+  const opts = targets.map(l => '<option value="'+l.id+'">Lobby '+l.id+' ('+l.count+(data.max>0?'/'+data.max:'')+')</option>').join('')
+             + '<option value="0">+ neue Lobby</option>';
+  const ride = m.rideWith ? 'fährt mit #'+m.rideWith : (m.passenger ? 'Beifahrer #'+m.passenger : '');
+  return `<tr ${CAN?'draggable="true"':''} data-id="${m.id}" data-island="${m.islandCode}">
+    <td><span class="name">${esc(m.nick)}</span> <span class="id">#${m.id}</span>${lobby===0?' '+isl(m.islandCode,m.island):''}
+      <span class="sub">online ${fmt(m.minutes)}${ride?' · '+esc(ride):''}</span></td>
+    <td>${esc(m.carId)||'-'}<span class="sub">${m.inCar?'im Auto':'zu Fuß'}</span></td>
+    <td>${m.udp?'<span class="badge on">UDP</span>':'<span class="badge off">kein UDP</span>'} ${m.p2p?'<span class="badge">P2P</span>':''}</td>
+    <td><div class="acts"><button class="btn ghost sm" onclick="openInfo(${m.id})">Info</button>${CAN?`<select class="mv" id="mv${m.id}">${opts}</select>
+      <button class="btn ghost sm" onclick="moveSel(${m.id})">Verschieben</button>
+      <button class="btn ghost sm" onclick="kick(${m.id},'${esc(m.nick).replace(/'/g,"\\'")}')">Kick</button>`:''}</div></td>
+  </tr>`;
+}
+
+function table(members, lobby){
+  if (!members.length) return '<div class="empty">Keine Spieler.</div>';
+  return `<div class="tw" style="max-height:360px"><table>
+    <thead><tr><th>Spieler</th><th>Auto</th><th>Verbindung</th><th></th></tr></thead>
+    <tbody>${members.map(m=>memberRow(m,lobby)).join('')}</tbody></table></div>`;
+}
+
+function render(){
+  if (!data) return;
+  const f = +document.getElementById('fIsland').value;
+  document.getElementById('sL').textContent = data.lobbies.length;
+  document.getElementById('sP').textContent = data.online;
+  document.getElementById('sW').textContent = data.without.length;
+  document.getElementById('sM').textContent = data.max > 0 ? data.max : '∞';
+  const ls = data.lobbies.filter(l => !f || l.islandCode === f);
+  let html = ls.map(l => {
+    const full = data.max > 0 && l.count >= data.max;
+    return `<div class="card lcard" data-lobby="${l.id}" data-island="${l.islandCode}">
+      <div class="head"><h2>Lobby ${l.id}</h2>${isl(l.islandCode,l.island)}
+        <span class="badge ${full?'full':''} cnt">${l.count}${data.max>0?' / '+data.max:''} Spieler</span>
+        <div class="grow"></div>
+        <span class="hint">seit ${esc(l.created)} · ${fmt(l.minutes)}</span>
+        ${CAN?`<button class="btn danger sm" onclick="delLobby(${l.id},${l.count})">Löschen</button>`:''}</div>
+      ${l.missing>0?'<div class="body hint err">'+l.missing+' Spielernummer(n) ohne Sitzung</div>':''}
+      ${table(l.members, l.id)}
+    </div>`;
+  }).join('');
+  const w = data.without.filter(m => !f || m.islandCode === f);
+  if (w.length) html += `<div class="card lcard" data-lobby="-1"><div class="head"><h2>Ohne Lobby</h2><span class="badge off">${w.length} Spieler</span>
+      <div class="grow"></div><span class="hint">noch nicht zugeteilt (z. B. Insel unbekannt)</span></div>${table(w, 0)}</div>`;
+  document.getElementById('lobbies').innerHTML = html || '<div class="card"><div class="empty">Keine Lobbys – niemand online.</div></div>';
+  if (CAN) wireDrag();
+}
+
+function wireDrag(){
+  document.querySelectorAll('.lcard tr[draggable=true]').forEach(tr => {
+    tr.addEventListener('dragstart', e => { dragging = { id:+tr.dataset.id, island:+tr.dataset.island }; tr.classList.add('dragging'); e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', tr.dataset.id); });
+    tr.addEventListener('dragend', () => { tr.classList.remove('dragging'); dragging = null; document.querySelectorAll('.lcard.drop').forEach(c=>c.classList.remove('drop')); });
+  });
+  document.querySelectorAll('.lcard[data-lobby]').forEach(card => {
+    const id = +card.dataset.lobby, island = +(card.dataset.island||0);
+    if (id < 0) return;
+    card.addEventListener('dragover', e => {
+      if (!dragging) return;
+      if (island && dragging.island && island !== dragging.island) return;   // andere Insel: kein Ablegen
+      e.preventDefault(); card.classList.add('drop');
+    });
+    card.addEventListener('dragleave', e => { if (!card.contains(e.relatedTarget)) card.classList.remove('drop'); });
+    card.addEventListener('drop', e => { e.preventDefault(); card.classList.remove('drop'); if (dragging) move(dragging.id, id); });
+  });
+}
+
+async function load(){
+  // nicht neu zeichnen, während eine Auswahl offen ist oder gezogen wird
+  if (dragging || (document.activeElement && document.activeElement.classList.contains('mv'))) return;
+  const d = await api('/lobbies/list'); if (!d) return;
+  data = d; render();
+}
+
+async function move(pid, lobby){
+  const res = await api('/lobbies/move', { playerId: pid, lobby,
+    force: document.getElementById('optForce').checked ? 1 : 0, notify: document.getElementById('optNotify').checked ? 1 : 0 }, 'POST');
+  if (res && res.ok) toast('Verschoben nach Lobby '+res.lobby+'.'); else toast((res&&res.error)||'Verschieben fehlgeschlagen.', true);
+  data = null; await load();
+}
+function moveSel(pid){ const s=document.getElementById('mv'+pid); if (s) { s.blur(); move(pid, +s.value); } }
+
+async function delLobby(id, count){
+  if (!confirm('Lobby '+id+' löschen?'+(count?' Ihre '+count+' Spieler werden auf andere Lobbys verteilt.':''))) return;
+  const res = await api('/lobbies/delete', { id }, 'POST');
+  if (res && res.ok) toast('Lobby '+id+' gelöscht'+(res.moved?', '+res.moved+' Spieler verteilt':'')+'.'); else toast((res&&res.error)||'Löschen fehlgeschlagen.', true);
+  await load();
+}
+
+async function createLobby(){
+  const res = await api('/lobbies/create', { island: document.getElementById('cIsland').value }, 'POST');
+  if (res && res.ok) toast('Lobby '+res.id+' angelegt.'); else toast((res&&res.error)||'Fehlgeschlagen.', true);
+  await load();
+}
+
+async function kick(id, nick){
+  const reason = prompt('Spieler '+nick+' kicken – Grund:', 'Verstoß gegen die Serverregeln'); if (reason === null) return;
+  const res = await api('/actions/kick', { playerId:id, reason }, 'POST');
+  if (res && res.ok) toast(nick+' gekickt.'); else toast('Kick fehlgeschlagen.', true);
+  await load();
+}
+
+load(); setInterval(load, 3000);
+</script>
+""");
 
     static string Initials(string nick)
     {

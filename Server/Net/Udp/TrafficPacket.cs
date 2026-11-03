@@ -9,7 +9,7 @@ namespace TDU2Server.Net.Udp;
 /// </summary>
 public sealed class TrafficPacket : UdpPacketHandler
 {
-    public const byte In = 5, Out = 6;
+    public const byte In = UdpPacketIds.TrafficIn, Out = UdpPacketIds.TrafficOut;
     const double RelayTimeout = 15;
 
     readonly byte[] _out = new byte[1500];
@@ -30,6 +30,7 @@ public sealed class TrafficPacket : UdpPacketHandler
         int payload = d.Length - HeaderSize;
         WriteHeader(_out, Out, pid);
         Buffer.BlockCopy(d, HeaderSize, _out, 3, payload);
-        await Udp.RelayAsync(s, new ReadOnlyMemory<byte>(_out, 0, 3 + payload), RelayTimeout);
+        Udp.Relay(s, new ReadOnlyMemory<byte>(_out, 0, 3 + payload), RelayTimeout, Ctx.Config.trafficRange, 1, dropFar: true);
+        await Task.CompletedTask;
     }
 }

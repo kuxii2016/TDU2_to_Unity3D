@@ -24,6 +24,14 @@ public sealed class RequestRouter
         Add(new LeaveRideHandler(ctx));
         Add(new ProfileHandler(ctx));
         Add(new ForgetHandler(ctx));
+        Add(new NewsHandler(ctx));
+        Add(new NewsImageHandler(ctx));
+        Add(new SurveyHandler(ctx));
+        Add(new VoteHandler(ctx));
+        Add(new LobbiesHandler(ctx));
+        Add(new LobbyJoinHandler(ctx));
+        Add(new RecentHandler(ctx));
+        Add(new FriendHandler(ctx));
     }
 
     void Add(RequestHandler h) => _handlers[h.Op] = h;

@@ -11,7 +11,7 @@ namespace TDU2Server.Net.Udp;
 /// </summary>
 public sealed class ChatPacket : UdpPacketHandler
 {
-    public const byte In = 4, Out = 3;
+    public const byte In = UdpPacketIds.ChatIn, Out = UdpPacketIds.ChatOut;
     const int MaxText = 120;
     const double ActiveTimeout = 30;
 
@@ -52,8 +52,9 @@ public sealed class ChatPacket : UdpPacketHandler
         foreach (var x in Ctx.Sessions.Players)
         {
             var ep = x == s ? (x.UdpEndPoint ?? from) : x.UdpEndPoint;
+            await Task.CompletedTask;
             if (ep == null || (x != s && !x.UdpActive(now, ActiveTimeout))) continue;
-            for (int i = 0; i < 2; i++) await Udp.SendAsync(o, ep);   // UDP kann Pakete verlieren; Clients verwerfen Doppelte
+            for (int i = 0; i < 2; i++) Udp.Send(o, ep);   // UDP kann Pakete verlieren; Clients verwerfen Doppelte
         }
     }
 }

@@ -3,7 +3,7 @@ namespace TDU2Server.Core;
 /// <summary>Konsolenbefehle: list, accounts, reload, say, quit.</summary>
 public sealed class ConsoleCommands
 {
-    public const string Help = "list, accounts, reload, say <Text>, panel, quit";
+    public const string Help = "list, lobbies, traffic, accounts, reload, say <Text>, panel, quit";
 
     readonly ServerContext _ctx;
     readonly Action _stop;
@@ -28,6 +28,20 @@ public sealed class ConsoleCommands
             switch (p[0].ToLowerInvariant())
             {
                 case "list": ListOnline(); break;
+                case "traffic":
+                    {
+                        var u = _ctx.Udp;
+                        if (u == null) break;
+                        double h = Math.Max(1.0 / 60, (DateTime.UtcNow - u.Since).TotalHours);
+                        double gb = u.BytesOut / 1e9, relay = u.RelayBytes / 1e9;
+                        int p2p = _ctx.Sessions.All.Count(s => s.P2P), all = _ctx.Sessions.Count;
+                        Log.Info($"UDP gesendet: {gb:0.000} GB in {h:0.0} h ({gb / h:0.000} GB/h), davon Relay {relay:0.000} GB; {u.PacketsOut} Pakete; P2P-Clients {p2p}/{all}");
+                        break;
+                    }
+                case "lobbies":
+                    foreach (var l in _ctx.Lobbies.All())
+                        Log.Info($"  Lobby {l.Id} ({Islands.Name(l.Island)}): {l.Count}/{(_ctx.Config.maxPlayersPerLobby > 0 ? _ctx.Config.maxPlayersPerLobby.ToString() : "∞")} Spieler");
+                    break;
                 case "accounts": foreach (var n in _ctx.Accounts.Names()) Log.Info("  " + n); break;
                 case "reload":
                     _ctx.Config = ServerConfig.Load(_ctx.ConfigFile);
@@ -70,6 +84,6 @@ public sealed class ConsoleCommands
         var all = _ctx.Sessions.All.ToList();
         Log.Info($"{all.Count} online");
         foreach (var s in all)
-            Log.Info($"  #{s.PlayerId} {s.Nick}  ({s.Conn?.Remote}, UDP {s.UdpEndPoint?.ToString() ?? "-"}, Auto {s.CarId}, Insel {Islands.Name(s.Island)}, seit {s.Since:HH:mm:ss})");
+            Log.Info($"  #{s.PlayerId} {s.Nick}  ({s.Conn?.Remote}, UDP {s.UdpEndPoint?.ToString() ?? "-"}, Auto {s.CarId}, Insel {Islands.Name(s.Island)}, Lobby {s.Lobby}, seit {s.Since:HH:mm:ss})");
     }
 }

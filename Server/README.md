@@ -126,12 +126,30 @@ Eine JSON-Zeile (UTF-8, `\n`) je Anfrage, eine JSON-Zeile je Antwort: `{"ok":tru
 | `{"op":"invreply","session":..,"target":id,"accept":b}` | Einladung annehmen/ablehnen |
 | `{"op":"leaveride","session":..}` | Mitfahrt beenden (als Beifahrer oder Fahrer) |
 | `{"op":"profile","session":..,"target":id}` | MyTDULife eines Spielers (mit Foto) |
+| `{"op":"news","session":..,"since":id}` | News mit Id > since (`news`, neueste zuerst), `newsLatest`, `newsIds` |
+| `{"op":"newsimg","session":..,"target":id}` | Bild einer News (`newsImage`, JPEG/PNG als Base64) |
+| `{"op":"surveys","session":..}` | Umfragen (`surveys`: Frage, Antworten, Summen `counts`, `total`, eigene Stimme `myVote`, `open`) |
+| `{"op":"vote","session":..,"target":id,"choice":n}` | Abstimmen (Antwort n, 0-basiert); Antwort wie `surveys`. Fehler `closed`, `not_found`, `bad_choice` |
 
 Einladungsarten `k`: `codriving` (Beifahrer), `game|<Ort>` (zu mir auf die Straße),
 `room|<SPOT>|<Bank>|<Ort>` (zu mir ins Interieur/Haus; bei Häusern liefert `invreply` in `save` Autos, Beklebungen und Einrichtung des Gastgebers).
 
 `status` liefert zusätzlich `invites` (offene Einladungen an mich), `notices` (`accepted:<id>:<nick>`, `declined:…`,
 `joined:…`, `rideend:…`), `rideWith` (mein Fahrer), `passenger` und je Spieler `rideWith`/`passenger`/`island`/`mood`/`photoVer`.
+
+News (TDU Media, News-Kanal): im Web-Panel unter **News** anlegen/bearbeiten/löschen (ab Rolle `mod`), gespeichert in
+`data/news.json` (`header`, `message`, `icon`, `island` 0 = alle, `author`, `created`). Jede `status`-Antwort enthält
+`newsLatest` (höchste Id); ist sie größer als die beim Client bekannte, holt er mit `news` (`since` = bekannte Id) nach.
+Bearbeiten vergibt eine neue Id (Clients holen die Meldung neu), `newsIds` meldet gelöschte. Bilder (optional, im Panel
+auf max. 640×360 verkleinert, max. 400 KB) liegen in `data/news/<id>.jpg|png`; `hasImage` zeigt an, dass eins da ist.
+Feld `kind`: leer = News-Kanal, `update` = Updates-Kanal (Patch-Notes) mit `version` (wird in der Liste statt des Datums gezeigt);
+im Panel über „Kanal“ wählbar. Updates haben zusätzlich `category` = Reiter des Updates-Kanals im Spiel (`gmodes` = Packs,
+`vehicles`, `avatar`, `furnitures`, `stickers`).
+
+Umfragen (TDU Media, Umfrage-Kanal): im Web-Panel unter **Umfragen** anlegen (Frage, Beschreibung, 2–8 Antworten, Insel,
+optional Enddatum), schließen/wieder öffnen, Stimmen zurücksetzen, löschen (ab Rolle `mod`). Gespeichert in
+`data/surveys.json`; jedes Konto hat eine Stimme und kann sie ändern, solange die Umfrage offen ist. Die Stimmen selbst
+(Nick → Antwort) verlassen den Server nicht, Clients bekommen nur die Summen.
 
 Radio: `hello`/`login`/`register`/`status` liefern `radioEpoch` (Serverstart, Unix-ms), `radioSeed` (gemeinsamer Startwert)
 und `serverTime`. Jeder Client berechnet daraus dieselbe Playlist und denselben Wiedergabezeitpunkt (Hariba/RoadRock).

@@ -10,6 +10,14 @@ namespace TDU2Server.Sessions;
 public sealed class SessionManager
 {
     readonly ConcurrentDictionary<string, Session> _byId = new();
+    readonly LobbyManager _lobbies;
+    readonly RecentStore _recent;
+
+    public SessionManager(LobbyManager lobbies, RecentStore recent)
+    {
+        _lobbies = lobbies;
+        _recent = recent;
+    }
     readonly ConcurrentDictionary<int, Session> _byPlayerId = new();
     int _nextPlayerId = 1;
 
@@ -40,6 +48,7 @@ public sealed class SessionManager
             _byId.TryRemove(old.Id, out _);
             _byPlayerId.TryRemove(old.PlayerId, out _);
             EndRide(old);
+            _lobbies?.Leave(old);
             if (old.Conn != conn) { try { old.Conn?.Client?.Close(); } catch { } }
             Log.Info($"{old.Nick}: alte Sitzung beendet");
         }
@@ -47,6 +56,7 @@ public sealed class SessionManager
         {
             _byId.TryRemove(conn.Session.Id, out _);
             _byPlayerId.TryRemove(conn.Session.PlayerId, out _);
+            _lobbies?.Leave(conn.Session);
         }
 
         var sv = a.save;
@@ -61,6 +71,8 @@ public sealed class SessionManager
         conn.Session = s;
         _byId[s.Id] = s;
         _byPlayerId[s.PlayerId] = s;
+        _lobbies?.Assign(s);
+        _recent?.Touch(s.Nick, s.CarId, s.Color, s.NbCars, s.Money, s.Nationality, false);
         return s;
     }
 
@@ -70,6 +82,8 @@ public sealed class SessionManager
         if (s == null || !_byId.TryRemove(s.Id, out _)) return false;
         _byPlayerId.TryRemove(s.PlayerId, out _);
         EndRide(s);
+        _lobbies?.Leave(s);
+        _recent?.Touch(s.Nick, s.CarId, s.Color, s.NbCars, s.Money, s.Nationality, true);
         return true;
     }
 

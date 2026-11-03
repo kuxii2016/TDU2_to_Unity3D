@@ -16,6 +16,7 @@ public sealed class Session
     public uint UdpKey;
     public IPEndPoint UdpEndPoint;
     public DateTime LastUdp = DateTime.MinValue;
+    public DateTime LastStatus = DateTime.MinValue;   // letzte "status"-Abfrage (TCP) – für das Web-Panel
 
     // Zustand (aus UDP bzw. Spielstand) für die Spielerliste
     public int CarId, Color;
@@ -28,6 +29,16 @@ public sealed class Session
     public string Avatar = "";
     public string Mood = "", MoodTxt = "";   // MyTDULife
     public int PhotoVer;
+
+    // Lobby (LobbyManager) und Weiterleitung
+    public int Lobby;                        // 0 = noch keine
+    public uint RelayCount;                  // gezählte Zustandspakete (Weiterleitung an entfernte Spieler nur jedes n-te)
+
+    // P2P (Hole-Punching): Client kann P2P, sein lokaler Endpunkt (gleiches LAN) und das Token, mit dem Mitspieler
+    // seine Punch-Pakete prüfen
+    public bool P2P;
+    public string LocalEp = "";
+    public uint P2PToken = BitConverter.ToUInt32(System.Security.Cryptography.RandomNumberGenerator.GetBytes(4));
 
     // Einladungen / Mitfahrt (Beifahrer)
     public readonly object Lock = new();

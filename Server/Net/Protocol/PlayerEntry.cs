@@ -19,4 +19,8 @@ public sealed class PlayerEntry
     public int photoVer;
     public int rideWith;        // fährt als Beifahrer bei Spieler … mit (0 = nein)
     public int passenger;       // hat Spieler … als Beifahrer (0 = nein)
+    // P2P (nur für Mitspieler derselben Lobby, wenn beide P2P können): öffentlicher und lokaler UDP-Endpunkt, Token
+    public string ep = "";
+    public string lep = "";
+    public long p2p;
 }

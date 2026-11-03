@@ -18,6 +18,7 @@ public sealed class GameServer
         _ctx = new ServerContext(configFile);
         _tcp = new TcpServer(_ctx);
         _udp = new UdpServer(_ctx);
+        _ctx.Udp = _udp;
         _web = new WebPanel(_ctx);
         _console = new ConsoleCommands(_ctx, Stop);
     }

@@ -19,6 +19,6 @@ public sealed class ProfileHandler : RequestHandler
         if (r.target != 0 && Ctx.Sessions.TryGetPlayer(r.target, out var ts)) ta = Ctx.Accounts.Load(ts.Nick);
         else if (!string.IsNullOrEmpty(r.nick)) ta = Ctx.Accounts.Load(r.nick.Trim());
         if (ta == null) return Fail("unknown_player");
-        return new NetResponse { ok = true, nick = ta.nick, life = ta.save?.myLife ?? new MyLifeData(), lifeOf = r.target, online = Online };
+        return new NetResponse { ok = true, nick = ta.nick, life = ta.save?.myLife ?? new MyLifeData(), lifeOf = r.target, avatar = ta.save?.avatar ?? "", online = Online };
     }
 }
