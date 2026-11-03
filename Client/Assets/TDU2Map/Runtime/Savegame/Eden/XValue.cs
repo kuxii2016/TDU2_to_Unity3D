@@ -1,11 +1,7 @@
 // Portiert aus EdenSavegame (TDU2 Savegame editor) für Unity (C# 9 / .NET Standard 2.1, ohne unsafe).
 #nullable enable
 using System;
-using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
 
 namespace EdenSavegame
 {

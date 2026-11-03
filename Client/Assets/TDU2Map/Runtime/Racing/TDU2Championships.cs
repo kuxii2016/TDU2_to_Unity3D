@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using TDU2.Flash;
 using TDU2.Formats;
+using TDU2.Interior;
+using TDU2.UI;
 using TDU2.Vehicles;
 using UnityEngine;
 
@@ -194,12 +196,6 @@ namespace TDU2.Racing
                 _repo = RaceRepository.Load(_bnk);
                 var other = _repo.BuildUnlicensedRaces();
 
-                foreach (var r in other)
-                {
-                    if (r == null) continue;
-                    Debug.Log($"{r.Name} - {r.Island} {r.Mode}");
-                }
-
                 RaceTexts.Ensure(_bnk, TDU2PauseMenu.SavedLanguage());
                 _cups.Clear();
                 foreach (var l in _repo.Database.Championships(isl))
@@ -312,7 +308,7 @@ namespace TDU2.Racing
                         _hubs[code] = h;
                         TDU2Minimap.ExtraSpotLabels[code] = HubLabel(c);
                         TDU2Minimap.ExtraSpotNames[code] = c.Name;
-                        //TDU2Minimap.ExtraSpotNumbers[code] = ClassNumber(c);
+                        TDU2Minimap.ExtraSpotNumbers[code] = ClassNumber(c);
                         TDU2Minimap.ExtraSpotPictures[code] = ContestPicture(c);
                     }
                     if (!spots.Spots.Contains(h.spot)) spots.Spots.Add(h.spot);
@@ -325,7 +321,7 @@ namespace TDU2.Racing
                 TDU2Minimap.ExtraSpotLabels.Remove(code);
                 TDU2Minimap.ExtraSpotNames.Remove(code);
                 TDU2Minimap.ExtraSpotPictures.Remove(code);
-                //TDU2Minimap.ExtraSpotNumbers.Remove(code);
+                TDU2Minimap.ExtraSpotNumbers.Remove(code);
             }
             if (want.Count != _lastSpotCount)
             {
@@ -363,7 +359,7 @@ namespace TDU2.Racing
                 TDU2Minimap.ExtraSpotLabels.Remove(kv.Key);
                 TDU2Minimap.ExtraSpotNames.Remove(kv.Key);
                 TDU2Minimap.ExtraSpotPictures.Remove(kv.Key);
-                //TDU2Minimap.ExtraSpotNumbers.Remove(kv.Key);
+                TDU2Minimap.ExtraSpotNumbers.Remove(kv.Key);
             }
             _hubs.Clear();
             _spots.Clear();
@@ -496,7 +492,7 @@ namespace TDU2.Racing
         {
             _near = default;
             if (_phoneUntil > 0f && Time.unscaledTime >= _phoneUntil) { _phoneUntil = -1f; HidePhone(); }
-            if (veh == null || Time.timeScale <= 0f || RacingSchoolMenu.BlocksPauseMenu) { _nearHub = null; HubPrompt(null); return; }
+            if (veh == null || Time.timeScale <= 0f || RacingSchoolMenu.BlocksPauseMenu || TDU2.Cinematics.TDU2Cutscenes.IsPlaying) { _nearHub = null; HubPrompt(null); return; }
             var inter = Man.GetComponent<TDU2Interiors>();
             if (inter != null && inter.Inside) { _nearHub = null; HubPrompt(null); return; }
             float best = TriggerRadius * TriggerRadius;
@@ -506,24 +502,72 @@ namespace TDU2.Racing
                 var d = kv.Value.spot.Position - carIsland; d.y *= 0.3f;
                 if (d.sqrMagnitude < best * 1.6f) { best = d.sqrMagnitude; _nearHub = kv.Value.cup; }
             }
+            // Startpunkte der offenen Rennen: direkt am Start anhalten + Bestätigen startet das Rennen (wie im Spiel)
+            if (_nearHub == null)
+            {
+                float bestR = TriggerRadius * TriggerRadius;
+                foreach (var kv in _spots)
+                {
+                    var d = kv.Value.spot.Position - carIsland; d.y *= 0.3f;
+                    if (d.sqrMagnitude < bestR) { bestR = d.sqrMagnitude; _near = (kv.Value.cup, kv.Value.race); }
+                }
+            }
             HubPrompt(veh);
-            if (_nearHub == null) return;
+            if (_nearHub == null)
+            {
+                if (_near.cup != null && _near.race != null && Mathf.Abs(veh.SpeedKmh) <= TriggerMaxKmh && TDU2Controls.ConfirmPressed())
+                {
+                    TDU2DebugLog.Event("Meisterschaft: Bestätigen am Start " + _near.race.Name + " (" + _near.cup.Name + ")");
+                    var n = _near; _near = default;
+                    BeginRace(n.cup, n.race);
+                }
+                return;
+            }
 #if ENABLE_LEGACY_INPUT_MANAGER
-            if (Mathf.Abs(veh.SpeedKmh) <= TriggerMaxKmh && (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)))
+            if (Mathf.Abs(veh.SpeedKmh) <= TriggerMaxKmh && TDU2Controls.ConfirmPressed())
             {
                 TDU2DebugLog.Event("Meisterschaft: Enter am Treffpunkt " + _nearHub.Name + (TDU2Minimap.ExtraEnterLocked ? " – falsche Fahrzeugklasse (" + RaceDatabase.CategoryName(CarCategory(veh.Car)) + ")" : " – öffne Wettbewerb"));
                 if (!TDU2Minimap.ExtraEnterLocked)   // falsche Klasse: Einfahrt zeigt "Gesperrt"
                 {
                     var cup = _nearHub;
                     _nearHub = null; HubPrompt(null);
-                    // wie im Spiel: Treffpunkt -> große Karte im Wettbewerbsmodus mit den Rennen der Meisterschaft
-                    var map = Man.GetComponent<TDU2BigMap>();
-                    if (map != null && map.OpenContest(_cups.IndexOf(cup), true)) return;
-                    var first = cup.Races.Find(r => !RaceProgress.IsCupRaceDone(cup.Lic.Hash, r.Name)) ?? cup.Races[0];
-                    BeginRace(cup, first);
+                    // wie im Spiel: beim ersten Mal das Vorstellungs-Kino (vorher einmal je Schulart das Einführungskino),
+                    // danach Treffpunkt -> große Karte im Wettbewerbsmodus mit den Rennen der Meisterschaft
+                    PlayHubIntro(cup, () => OpenHub(cup));
                 }
             }
 #endif
+        }
+
+        void OpenHub(Cup cup)
+        {
+            if (cup == null || _phase != Phase.None || Man == null) return;
+            var map = Man.GetComponent<TDU2BigMap>();
+            if (map != null && map.OpenContest(_cups.IndexOf(cup), true)) return;
+            var first = cup.Races.Find(r => !RaceProgress.IsCupRaceDone(cup.Lic.Hash, r.Name)) ?? cup.Races[0];
+            BeginRace(cup, first);
+        }
+
+        /// <summary>Kinos am Treffpunkt (je Spieler einmal): Einführung der Schulart, dann Vorstellung der Meisterschaft.</summary>
+        void PlayHubIntro(Cup cup, Action then)
+        {
+            if (!RaceCinematics.Enabled || Man == null) { then?.Invoke(); return; }
+            string cupKey = CupIntroKey(cup);
+            var intro = RaceCinematics.Seen(cupKey) ? null : RaceCinematics.ChampionshipIntro(_bnk, cup.Lic, _island);
+            string schoolKey = SchoolIntroKey(cup);
+            // *_firstintro (sta_rsa_first_intro u.a.) gehört nicht vor die Meisterschaften – nur das Vorstellungs-Kino der Meisterschaft
+            RaceCinematics.Cin first = null;
+            // ohne Kino (Bank fehlt / schon gesehen) beide Schlüssel setzen, sonst fragt BeginRace endlos erneut
+            if (first == null) RaceCinematics.MarkSeen(schoolKey);
+            if (intro == null && first == null) { RaceCinematics.MarkSeen(cupKey); then?.Invoke(); return; }
+            void PlayIntro()
+            {
+                RaceCinematics.MarkSeen(cupKey);
+                if (intro == null) { then?.Invoke(); return; }
+                RaceCinematics.Play(Man, intro, () => then?.Invoke());
+            }
+            if (first != null) { RaceCinematics.MarkSeen(schoolKey); RaceCinematics.Play(Man, first, PlayIntro); }
+            else PlayIntro();
         }
 
         // ------------------------------------------------------------------ Daten für die große Karte (Wettbewerbsmodus)
@@ -690,7 +734,7 @@ namespace TDU2.Racing
         void HubPrompt(TDU2Vehicle veh)
         {
             var mm = Man != null ? Man.Minimap : null;
-            var c = _nearHub;
+            var c = _nearHub ?? _near.cup;   // Treffpunkt oder Startpunkt eines offenen Rennens: Original-Einfahrt /HUD/enter
             if (c == null)
             {
                 if (_promptCup != null)
@@ -778,14 +822,42 @@ namespace TDU2.Racing
             BeginRace(c, c.Races[raceIndex]);
         }
 
+        static string CupIntroKey(Cup cup) => "cup." + cup.Lic.Hash.ToString("X");
+        static string SchoolIntroKey(Cup cup)
+        {
+            string n = RaceDatabase.CategoryName(cup.Lic.VehicleCategory1) ?? "";
+            return "first." + (n.Length > 0 ? n.Substring(0, 1) : "?");
+        }
+
+        bool _introPending;
+
+        /// <summary>Nach dem Kino: warten, bis das Spielerauto wieder steht (das Kino parkt es), dann das Rennen starten.</summary>
+        System.Collections.IEnumerator BeginAfterIntro(Cup cup, RaceDefinition def)
+        {
+            float t = 0f;
+            while ((Man == null || Man.Current == null || Man.IsLoadingCar) && t < 15f) { t += Time.unscaledDeltaTime; yield return null; }
+            yield return null;
+            _introPending = false;
+            BeginRace(cup, def);
+        }
+
         void BeginRace(Cup cup, RaceDefinition def)
         {
+            if (_introPending) return;
             var veh = Man.Current;
             if (veh == null) return;
             int cat = CarCategory(veh.Car);
             if (RequireCarCategory && cup.Lic.VehicleCategory1 > 0 && cat != cup.Lic.VehicleCategory1 && cat != cup.Lic.VehicleCategory2)
             {
                 Toast(cup.Name + ": nur mit einem Auto der Klasse " + cup.ClassName + " (dein Auto: " + RaceDatabase.CategoryName(cat) + ")", 5f);
+                return;
+            }
+            // Vorstellungs-Kino der Meisterschaft (und einmal je Schulart das Einführungskino) vor dem ersten Rennen – egal ob über
+            // Treffpunkt, Startpunkt oder Wettbewerbskarte gestartet (vorher nur über den Treffpunkt -> meist nie zu sehen)
+            if (RaceCinematics.Enabled && (!RaceCinematics.Seen(CupIntroKey(cup)) || !RaceCinematics.Seen(SchoolIntroKey(cup))))
+            {
+                _introPending = true;
+                PlayHubIntro(cup, () => StartCoroutine(BeginAfterIntro(cup, def)));
                 return;
             }
             _cup = cup; _def = def;
@@ -1196,11 +1268,11 @@ namespace TDU2.Racing
             if (_speedCountdown > 0f)
             {
                 _speedCountdown -= Time.unscaledDeltaTime;
-                veh.BrakePedal = 1f; veh.HandBrake = 1f;
+                veh.BrakePedal = 1f; veh.HandBrake = 1f; veh.StartLock = true;
                 if (_speedCountdown <= 0f)
                 {
                     Man.ExternalControl = false;
-                    veh.BrakePedal = 0f; veh.HandBrake = 0f;
+                    veh.BrakePedal = 0f; veh.HandBrake = 0f; veh.StartLock = false;
                     if (h != null)
                     {
                         h.SetVisible("/HUD/time_cd", true); h.GotoLabel("/HUD/time_cd", "open", true);
@@ -1406,8 +1478,8 @@ namespace TDU2.Racing
             if (_filmShown) return;   // Eingaben gehören dem Film (RaceResults)
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (_resultAt > 0f) return;
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Escape)) CloseResults(false);
-            else if (Input.GetKeyDown(KeyCode.R)) CloseResults(true);
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed() || Input.GetKeyDown(KeyCode.Escape) || TDU2.Vehicles.TDU2Nav.PadBack()) CloseResults(false);
+            else if (Input.GetKeyDown(KeyCode.R) || TDU2.Vehicles.TDU2Nav.PadY()) CloseResults(true);
 #endif
         }
 
@@ -1425,7 +1497,19 @@ namespace TDU2.Racing
             _filmShown = false;
             EndRace();
             if (mode == 1 && cup != null && def != null) BeginRace(cup, def);
-            else if (mode == 2 && cup != null) StartCoroutine(BackToHub(cup));
+            else if (mode == 2 && cup != null)
+            {
+                // Meisterschaft gerade abgeschlossen: Sieg-/Niederlage-Kino (Podium), dann zurück zum Treffpunkt
+                string endKey = "end." + cup.Lic.Hash.ToString("X");
+                if (RaceProgress.IsCupDone(cup.Lic.Hash) && !RaceCinematics.Seen(endKey))
+                {
+                    var tot = CupTotals(cup, out _);
+                    bool won = true; for (int k = 1; k < tot.Length; k++) if (tot[k] > tot[0]) won = false;
+                    var end = RaceCinematics.ChampionshipEnd(_bnk, cup.Lic, won);
+                    if (end != null) { RaceCinematics.MarkSeen(endKey); RaceCinematics.Play(Man, end, () => StartCoroutine(BackToHub(cup))); return; }
+                }
+                StartCoroutine(BackToHub(cup));
+            }
         }
 
         /// <summary>
@@ -1436,28 +1520,42 @@ namespace TDU2.Racing
         {
             var veh = Man != null ? Man.Current : null;
             var root = Root;
+            Vector3 hubIsland = HubPosition(cup, out var f);   // Inselkoordinaten (Gleitkomma-Ursprung kann sich verschieben)
             if (veh != null && root != null)
             {
-                var hub = HubPosition(cup, out var f);
-                var w = root.TransformPoint(hub);
-                w.y = Man.GroundHeight(w) + 0.5f;
+                var hubWorld = root.TransformPoint(hubIsland);
                 var wf = root.TransformVector(f); wf.y = 0f;
-                veh.ResetVehicle(w, Quaternion.LookRotation(wf.sqrMagnitude > 1e-4f ? wf.normalized : Vector3.forward, Vector3.up));
+                // TeleportSafe hält das Auto kinematisch fest, bis der Boden am Treffpunkt geladen ist (sonst fiel es durch
+                // noch fehlende Sektoren bzw. wurde nach dem Schließen der Karte weggeschleudert)
+                Man.TeleportSafe(hubWorld, Quaternion.LookRotation(wf.sqrMagnitude > 1e-4f ? wf.normalized : Vector3.forward, Vector3.up));
                 TDU2DebugLog.Event("Meisterschaft: zurück zum Treffpunkt " + cup.Name);
             }
-            // Umgebung nachladen lassen (Streamer folgt dem Auto), danach noch einmal sauber auf den Boden setzen
-            float until = Time.unscaledTime + 2f;
+            // Umgebung nachladen lassen (Streamer folgt dem Auto) und warten, bis das Auto sicher steht
+            float until = Time.unscaledTime + 15f;
+            yield return null;
+            var st = Man != null ? Man.Streamer : null;
+            while (Time.unscaledTime < until)
+            {
+                bool ready = st == null || root == null || st.ReadyAround(root.TransformPoint(hubIsland), 300f);
+                if (ready && (Man == null || !Man.Settling)) break;
+                yield return null;
+            }
+            // kurz ausrollen lassen (Federung), dann Karte öffnen – solange die Karte offen ist, steht das Spiel (timeScale 0)
+            until = Time.unscaledTime + 0.4f;
             while (Time.unscaledTime < until) yield return null;
             veh = Man != null ? Man.Current : null;
-            if (veh != null && root != null)
+            if (veh != null)
             {
-                var p = veh.transform.position; p.y = Man.GroundHeight(p) + 0.5f;
-                veh.ResetVehicle(p, veh.transform.rotation);
+#if UNITY_6000_0_OR_NEWER
+                var rb = veh.GetComponent<Rigidbody>(); if (rb != null && !rb.isKinematic) { rb.linearVelocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
+#else
+                var rb = veh.GetComponent<Rigidbody>(); if (rb != null && !rb.isKinematic) { rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
+#endif
             }
-            until = Time.unscaledTime + 0.3f;
-            while (Time.unscaledTime < until) yield return null;
             var map = Man != null ? Man.GetComponent<TDU2BigMap>() : null;
-            if (map != null && _phase == Phase.None) map.OpenContest(_cups.IndexOf(cup), true);
+            int idx = _cups.IndexOf(cup);
+            if (idx < 0) idx = _cups.FindIndex(c => c.Lic.Hash == cup.Lic.Hash);   // Daten neu aufgebaut
+            if (map != null && _phase == Phase.None && idx >= 0) map.OpenContest(idx, true);
         }
 
         /// <summary>Ergebnis im Original-Film (results.vmf): Ergebniskarte, Rennliste, Meisterschaftswertung, Menü.</summary>
@@ -1489,6 +1587,7 @@ namespace TDU2.Racing
             if (hh != null) { hh.GotoLabel("/HUD/speed_gauge", "default", false); hh.GotoLabel("/HUD/time_cd", "default", false); }
             if (_autopilot != null) _autopilot.End();
             if (Man != null) Man.ExternalControl = false;
+            if (Man != null && Man.Current != null) Man.Current.StartLock = false;
             if (_race != null) { if (_race.Running || _race.State == RaceState.Countdown || _race.State == RaceState.Preparing) _race.Abort(); _race.Cleanup(); }
             RaceRoute.RoadPath = null; RaceRoute.RoadPathSeg = null;
             SetPrivate(false);

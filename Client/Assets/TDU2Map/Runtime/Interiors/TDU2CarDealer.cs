@@ -6,9 +6,11 @@ using TDU2.Flash;
 using TDU2.Formats;
 using TDU2.Online;
 using TDU2.Racing;
+using TDU2.UI;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Autohändler wie im Spiel (shopscar.vmf, WhatPage "car_dealer"):
@@ -673,9 +675,9 @@ namespace TDU2.Vehicles
             UpdateLure(phase == DPhase.Window ? Mathf.Clamp(IntVar("/:num_option"), 1, 3) : 0);
 #if ENABLE_LEGACY_INPUT_MANAGER
             // ESC/Rücktaste: zentraler Menüablauf (TDU2MenuFlow.cs -> DealerBack); hier nur Auswahl/Bestätigen
-            bool ok = Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Space);
-            bool up = Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W), down = Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S);
-            bool left = Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A), right = Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D);
+            bool ok = TDU2.Vehicles.TDU2Controls.ConfirmPressed();
+            bool up = TDU2.Vehicles.TDU2Nav.Up() || Input.GetKeyDown(KeyCode.W), down = TDU2.Vehicles.TDU2Nav.Down() || Input.GetKeyDown(KeyCode.S);
+            bool left = TDU2.Vehicles.TDU2Nav.Left() || Input.GetKeyDown(KeyCode.A), right = TDU2.Vehicles.TDU2Nav.Right() || Input.GetKeyDown(KeyCode.D);
             if (ok || up || down || left || right)
                 DebugManager.Debug("Menü-Taste " + (ok ? "OK" : up ? "hoch" : down ? "runter" : left ? "links" : "rechts") + " in " + phase + " (Mini " + (_ui.Label("/cursor/mini_menu") ?? "-") + ", Kauf " + (_ui.Label("/buy") ?? "-") + ", Input " + _ui.GetVariable("/:Input") + ")");
             if (phase == DPhase.Window)
@@ -987,7 +989,7 @@ namespace TDU2.Vehicles
                 if (TDU2Controls.Pressed("doors") && _inAcc != null) _inAcc.ToggleDoors();
                 if (TDU2Controls.Pressed("windows") && _inAcc != null) _inAcc.ToggleWindows();
                 CarPad(_inAcc);
-                if (TDU2Controls.Pressed("starter") || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)) ToggleDealerEngine();
+                if (TDU2Controls.Pressed("starter") || TDU2.Vehicles.TDU2Controls.ConfirmPressed()) ToggleDealerEngine();
                 if (TDU2Controls.Pressed("accessories") && _inAcc != null)
                 {
                     TDU2Minimap.HudOverlay = true;
@@ -995,7 +997,7 @@ namespace TDU2.Vehicles
                 }
             }
             if (_inAudio != null) _inAudio.SetHorn(TDU2Controls.Held("horn") || _inHornClick || _inHornAim);
-            bool gas = _inEngine && _inStartT < 0f && !menu && (TDU2Controls.Held("accel") || Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow));
+            bool gas = _inEngine && _inStartT < 0f && !menu && (TDU2Controls.Held("accel") || Input.GetKey(KeyCode.W) || TDU2.Vehicles.TDU2Nav.UpHeld() || TDU2InputDevices.Throttle > 0.3f);
 #else
             bool gas = false;
 #endif

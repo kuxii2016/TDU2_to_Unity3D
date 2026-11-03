@@ -4,6 +4,8 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using TDU2.Interior;
+using TDU2.UI;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -542,25 +544,25 @@ namespace TDU2.World
         }
 
         /// <summary>Radio: passende Wettermeldung (Regen / Gewitter / Sonne) oder null bei Wolken/vor dem Regen.</summary>
-        public static TDU2.Vehicles.RadioMessageType? RadioWeather()
+        public static RadioMessageType? RadioWeather()
         {
             switch (Kind)
             {
-                case WeatherKind.Rainy: return TDU2.Vehicles.RadioMessageType.WeatherRain;
-                case WeatherKind.Tempest: return TDU2.Vehicles.RadioMessageType.WeatherStorm;
+                case WeatherKind.Rainy: return RadioMessageType.WeatherRain;
+                case WeatherKind.Tempest: return RadioMessageType.WeatherStorm;
                 case WeatherKind.Sunny:
-                case WeatherKind.AfterRain: return Night < 0.5f ? TDU2.Vehicles.RadioMessageType.WeatherSun : (TDU2.Vehicles.RadioMessageType?)null;
+                case WeatherKind.AfterRain: return Night < 0.5f ? RadioMessageType.WeatherSun : (RadioMessageType?)null;
                 default: return null;
             }
         }
 
         /// <summary>Radio: Tageszeit-Moderation (Sonnenaufgang 5-9, Mittag 11-14:30, Abend 18:30-22) oder null.</summary>
-        public static TDU2.Vehicles.RadioMessageType? RadioTime()
+        public static RadioMessageType? RadioTime()
         {
             float h = Hour;
-            if (h >= 5f && h < 9f) return TDU2.Vehicles.RadioMessageType.TimeSunrise;
-            if (h >= 11f && h < 14.5f) return TDU2.Vehicles.RadioMessageType.TimeMidday;
-            if (h >= 18.5f && h < 22f) return TDU2.Vehicles.RadioMessageType.TimeNightfall;
+            if (h >= 5f && h < 9f) return RadioMessageType.TimeSunrise;
+            if (h >= 11f && h < 14.5f) return RadioMessageType.TimeMidday;
+            if (h >= 18.5f && h < 22f) return RadioMessageType.TimeNightfall;
             return null;
         }
 
@@ -738,14 +740,14 @@ namespace TDU2.World
             UpdateLamps(street, inside);
         }
 
-        TDU2.Vehicles.TDU2Interiors[] _interiors;
+        TDU2Interiors[] _interiors;
         float _nextInteriorScan;
 
         bool InsideInterior()
         {
             if (_interiors == null || Time.unscaledTime >= _nextInteriorScan)
             {
-                _interiors = FindObjectsByType<TDU2.Vehicles.TDU2Interiors>(FindObjectsSortMode.None);
+                _interiors = FindObjectsByType<TDU2Interiors>(FindObjectsSortMode.None);
                 _nextInteriorScan = Time.unscaledTime + 2f;
             }
             foreach (var i in _interiors) if (i != null && i.Inside) return true;

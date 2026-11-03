@@ -2,13 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
+using TDU2.Interior;
 using TDU2.Online;
+using TDU2.Racing;
 using TDU2.Traffic;
+using TDU2.Vehicles;
 using TDU2.World;
 using UnityEngine;
 using UProfiler = UnityEngine.Profiling.Profiler;
 
-namespace TDU2.Vehicles
+namespace TDU2.UI
 {
     /// <summary>
     /// Developer menu modeled after the debug menu of the original EXE (edDebug “DEBUG MENU LIBRARIES”: text menu with
@@ -130,7 +133,7 @@ namespace TDU2.Vehicles
             if (Time.unscaledTime >= _autoFlashLogNext)
             {
                 _autoFlashLogNext = Time.unscaledTime + 0.5f;
-                try { Flash.VmfPlayer.AppendFlashLog(); } catch {}
+                try { Flash.VmfPlayer.AppendFlashLog(); } catch { }
             }
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (Input.GetKeyDown(ToggleKey) && !TDU2GameData.ChatTyping)
@@ -256,30 +259,266 @@ namespace TDU2.Vehicles
         static Item Action_(string label, Action a) => new Item { Label = label, Activate = a, Value = () => "[Enter]" };
         static Item Menu(string label, Func<List<Item>> sub) => new Item { Label = label, Sub = sub, Value = () => ">>" };
 
-        // ------------------------------------------------------------------ Hauptmenü
+        // ------------------------------------------------------------------ Main menu
         List<Item> MainMenu() => new List<Item>
         {
-            Head("LIBRARIES"),
-            Menu("Network", NetworkMenu),
-            Menu("Cars", CarsMenu),
-            Menu("Weather & Time of Day", WeatherMenu),
-            Menu("World Loading", WorldMenu),
-            Menu("Streaming", StreamingMenu),
-            Menu("Jobs & Threads", JobsMenu),
-            Menu("Traffic", TrafficMenu),
-            Menu("Rendering", RenderingMenu),
-            Menu("Performance", UsageMenu),
-            Menu("Avatar", AvatarMenu),
-            Menu("Flash Debug", FlashMenu),
-            Menu("Flash Profiler", FlashProfilerMenu),
-            Menu("GPS / Bookmarks", GpsMenu),
-            Head("TOOLS"),
+            Head("RACING & TESTS"),
+            Menu("Race Debug / Start Race (.ig2)", RaceMenu),
             Menu("Cutscene Tester", CutsceneMenu),
             Menu("Animation Viewer", AnimViewerMenu),
+
+            Head("VEHICLES & TRAFFIC"),
+            Menu("Cars", CarsMenu),
+            Menu("Traffic", TrafficMenu),
+
+            Head("WORLD"),
+            Menu("World Loading", WorldMenu),
+            Menu("Streaming", StreamingMenu),
+            Menu("Weather & Time of Day", WeatherMenu),
+            Menu("GPS / Bookmarks", GpsMenu),
+
+            Head("INPUT"),
+            Menu("Controls / Input Devices", ControlsMenu),
+            Bool("Input overlay (axes, pedals, buttons)", () => TDU2InputOverlay.Visible, v => TDU2InputOverlay.Visible = v, false),
+
+            Head("PLAYER & ONLINE"),
+            Menu("Avatar", AvatarMenu),
+            Menu("Network", NetworkMenu),
             Menu("Savegame / Profile / Story", SavegameMenu),
+
+            Head("VISUALS & PERFORMANCE"),
+            Menu("Rendering", RenderingMenu),
+            Menu("Performance", UsageMenu),
+            Menu("Jobs & Threads", JobsMenu),
+
+            Head("DEBUG VIEW"),
+            Menu("Debug View Toggles (race / traffic / camera)", DebugViewMenu),
+            Bool("Free-fly camera (F4)", () => FlyCamActive, SetFlyCam, false),
+            Bool("Race debug in the 3D world", () => RaceView.ShowInWorld, v => RaceView.ShowInWorld = v, true),
+            Bool("Traffic debug overlay (routes / speed / target)", () => Traffic != null && Traffic.ShowDebug, v => { if (Traffic != null) Traffic.ShowDebug = v; }, false),
+
+            Head("FLASH"),
+            Menu("Flash Debug", FlashMenu),
+            Menu("Flash Profiler", FlashProfilerMenu),
+
             Head(""),
             Info("Close F1 · ↑↓ Entry · ←→ Value (Shift x10) · Enter to open · Backspace to go back · Delete (default)"),
         };
+
+        // ------------------------------------------------------------------ Input devices
+        List<Item> ControlsMenu()
+        {
+            var l = new List<Item>();
+            l.Add(Info("Main device", () => TDU2InputDevices.HasDevice ? TDU2InputDevices.DeviceName + "  (Joystick " + TDU2InputDevices.DeviceJoy + ")" : "none"));
+            l.Add(Info("Detected as", () => TDU2InputDevices.HasDevice ? (TDU2InputDevices.IsWheel ? "Wheel" : "Gamepad") : "-"));
+            l.Add(Info("Profile", () => string.IsNullOrEmpty(TDU2InputDevices.ProfileName) ? "-" : TDU2InputDevices.ProfileName));
+            l.Add(Info("Option 'Device'", () => TDU2InputDevices.Mode.ToString()));
+            l.Add(Info("Separate shifter", () => TDU2InputDevices.ShifterJoy > 0 ? TDU2InputDevices.ShifterName + "  (Joystick " + TDU2InputDevices.ShifterJoy + ")" : "none"));
+            l.Add(Head("ALL DEVICES (Unity joystick number)"));
+            string[] names = new string[0];
+#if ENABLE_LEGACY_INPUT_MANAGER
+            try { names = Input.GetJoystickNames() ?? new string[0]; } catch (Exception) { }
+#endif
+            int n = 0;
+            for (int i = 0; i < names.Length; i++)
+            {
+                if (string.IsNullOrEmpty(names[i])) continue;
+                int j = i + 1; string nm = names[i];
+                l.Add(Info("Joystick " + j, () => nm + (j == TDU2InputDevices.DeviceJoy ? "   <- main" : j == TDU2InputDevices.ShifterJoy ? "   <- shifter" : "")));
+                n++;
+            }
+            if (n == 0) l.Add(Info("no joystick connected"));
+            l.Add(Head("RESULT (after dead zone / curve / gain)"));
+            l.Add(Info("Steer", () => TDU2InputDevices.Steer.ToString("+0.00;-0.00", CultureInfo.InvariantCulture) + (TDU2InputDevices.IsWheel ? "   gain " + TDU2InputDevices.WheelSteerGain.ToString("0.00", CultureInfo.InvariantCulture) : "")));
+            l.Add(Info("Throttle / Brake / Clutch", () => TDU2InputDevices.Throttle.ToString("0.00", CultureInfo.InvariantCulture) + " / " + TDU2InputDevices.Brake.ToString("0.00", CultureInfo.InvariantCulture) + " / " + TDU2InputDevices.Clutch.ToString("0.00", CultureInfo.InvariantCulture)));
+            l.Add(Info("H-shifter gear", () => { int g = TDU2InputDevices.HGear; return g < 0 ? "R" : g == 0 ? "N / none" : g.ToString(); }));
+            l.Add(Head("BINDINGS"));
+            foreach (var id in new[] { "accel", "brake", "left", "right", "clutch" })
+            {
+                string a = id;
+                l.Add(Info(a, () => TDU2InputDevices.BindingText(a)));
+            }
+            l.Add(Head("SETTINGS (Options → Controls)"));
+            l.Add(Info("Steering sensitivity / dead zone", () => TDU2InputDevices.SteerLinearity.ToString("0.00", CultureInfo.InvariantCulture) + " / " + TDU2InputDevices.DeadZone.ToString("0.00", CultureInfo.InvariantCulture)));
+            l.Add(Info("Throttle / brake / clutch linearity", () => TDU2InputDevices.ThrottleLinearity.ToString("0.00", CultureInfo.InvariantCulture) + " / " + TDU2InputDevices.BrakeLinearity.ToString("0.00", CultureInfo.InvariantCulture) + " / " + TDU2InputDevices.ClutchLinearity.ToString("0.00", CultureInfo.InvariantCulture)));
+            l.Add(Head(""));
+            l.Add(Bool("Input overlay (axes, pedals, buttons)", () => TDU2InputOverlay.Visible, v => TDU2InputOverlay.Visible = v, false));
+            l.Add(Info("The overlay shows while this menu is closed."));
+            return l;
+        }
+
+        // ------------------------------------------------------------------ Race debug / start
+
+        TDU2RaceDebugView RaceView => TDU2RaceDebugView.Ensure();
+        float _raceCatalogRefreshAt;
+        static bool FlyCamActive => TDU2FlyCameraTool.Instance != null && TDU2FlyCameraTool.Instance.Active;
+
+        static void SetFlyCam(bool on)
+        {
+            var tool = TDU2FlyCameraTool.Ensure();
+            if (on) tool.Begin(); else tool.Stop();
+        }
+
+        /// <summary>Get the catalog ready (cheap: names + licence only; the .ig2 itself is parsed on selection).</summary>
+        TDU2RaceDebugView ReadyRaceView()
+        {
+            var v = RaceView;
+            var m = Mgr;
+            if (!v.Loaded && m != null && !string.IsNullOrEmpty(m.BnkDir) && Time.unscaledTime >= _raceCatalogRefreshAt)
+            {
+                _raceCatalogRefreshAt = Time.unscaledTime + 2f;
+                v.Refresh();
+            }
+            return v;
+        }
+
+        List<Item> RaceMenu()
+        {
+            var v = ReadyRaceView();
+            var l = new List<Item>
+            {
+                Head("RACE CATALOG"),
+                Info("Status", () => v.Status),
+                Info("Selected", () => v.Selected != null ? v.Selected.Title : "none"),
+                Info("Group", () => v.Selected != null ? v.SelectedGroupName : "-"),
+                Info("Details", () =>
+                {
+                    var d = v.Selected;
+                    if (d == null) return "-";
+                    return d.Checkpoints.Count + " CP · " + d.Decors.Count + " decor · " + d.Opponents.Count + " cars · " +
+                           d.Length.ToString("0") + " m · " + (d.IsCircuit ? "circuit" : "point-to-point") + " · " + d.Laps + " lap(s)";
+                }),
+                Info("Times", () =>
+                {
+                    var d = v.Selected;
+                    if (d == null) return "-";
+                    return "target " + (d.TargetTimeMs > 0 ? RaceHud.FormatRaceTimeMs(d.TargetTimeMs) : "-") +
+                           (d.HasTimeLimit ? " · limit " + RaceHud.FormatRaceTimeMs(d.TimeLimitMs) : "") +
+                           " · car #" + d.CarId;
+                }),
+                Info("Start (world)", () => v.StartWorldText()),
+                Info("Road route", () => v.Selected != null && v.Selected.RoadPath != null ? v.Selected.RoadPath.Count + " points" : "checkpoint line"),
+
+                Head("ACTIONS"),
+                Action_("Start selected race", () =>
+                {
+                    string msg = v.StartRace();
+                    Toast(msg);
+                    if (msg.StartsWith("starting", StringComparison.OrdinalIgnoreCase)) Close();
+                }),
+                Action_("Teleport player car to race start", () => Toast(v.TeleportCarToStart())),
+                Action_("Move camera to race start (free camera)", () => Toast(v.MoveCameraToStart(true))),
+                Action_("Compute route along the roads", () => Toast(v.ComputeRoute())),
+                Action_("Select next race in this group", () => { if (!v.CycleGroup(1)) Toast("No race selected / group empty"); }),
+                Action_("Select previous race in this group", () => { if (!v.CycleGroup(-1)) Toast("No race selected / group empty"); }),
+                Action_("Refresh race catalog", () => { v.Refresh(); Toast("Race catalog refreshed"); }),
+
+                Head("DISPLAY"),
+                Bool("Show race debug in the 3D world", () => v.ShowInWorld, x => v.ShowInWorld = x, true),
+                Bool("Runtime overlay + labels", () => v.ShowOverlay, x => v.ShowOverlay = x, true),
+                Bool("Route", () => v.ShowRoute, x => v.ShowRoute = x, true),
+                Bool("Follow roads (RaceRoadPath)", () => v.ShowRoadRoute, x => v.ShowRoadRoute = x, true),
+                Bool("Gates / checkpoints", () => v.ShowGates, x => v.ShowGates = x, true),
+                Bool("Cones / barriers", () => v.ShowDecor, x => v.ShowDecor = x, true),
+                Bool("Opponent cars", () => v.ShowOpponents, x => v.ShowOpponents = x, true),
+                Bool("World labels", () => v.ShowLabels, x => v.ShowLabels = x, true),
+                Float("View distance", () => v.ViewDistance, x => v.ViewDistance = x, 25f, 100f, 5000f, 900f, "0", " m"),
+                Float("Label distance", () => v.LabelDistance, x => v.LabelDistance = x, 10f, 30f, 1500f, 250f, "0", " m"),
+            };
+
+            if (!v.Loaded)
+            {
+                l.Add(Head(""));
+                l.Add(Info("No catalog yet – waiting for the vehicle manager / bnk folder."));
+                return l;
+            }
+
+            l.Add(Head("RACES BY GROUP"));
+            foreach (RaceGroup g in Enum.GetValues(typeof(RaceGroup)))
+            {
+                var group = g;
+                int count = v.FilesInGroup(group).Count;
+                if (count == 0) continue;
+                l.Add(Menu(TDU2RaceDebugView.GroupName(group) + " (" + count + ")", () => RaceList(group)));
+            }
+            l.Add(Menu("ALL .ig2 FILES (A-Z)", AllRaceList));
+            return l;
+        }
+
+        List<Item> RaceList(RaceGroup group)
+        {
+            var v = ReadyRaceView();
+            var l = new List<Item> { Head(TDU2RaceDebugView.GroupName(group)) };
+            var names = v.FilesInGroup(group);
+            if (names.Count == 0) { l.Add(Info("no races in this group")); return l; }
+            foreach (var name in names)
+            {
+                string n = name;
+                string hint = v.HintFor(n);
+                bool sel = string.Equals(n, v.SelectedName, StringComparison.OrdinalIgnoreCase);
+                l.Add(Action_((sel ? "● " : "  ") + n.ToUpperInvariant() + (hint.Length > 0 ? "   [" + hint + "]" : ""),
+                    () => { if (v.Select(n)) Toast("Selected " + n); else Toast(v.Status); }));
+            }
+            return l;
+        }
+
+        List<Item> AllRaceList()
+        {
+            var v = ReadyRaceView();
+            var l = new List<Item> { Head("ALL .ig2 FILES") };
+            if (v.Files.Count == 0) { l.Add(Info("no files")); return l; }
+            foreach (var name in v.Files)
+            {
+                string n = name;
+                string hint = v.HintFor(n);
+                bool sel = string.Equals(n, v.SelectedName, StringComparison.OrdinalIgnoreCase);
+                l.Add(Action_((sel ? "● " : "  ") + n.ToUpperInvariant() + (hint.Length > 0 ? "   [" + hint + "]" : ""),
+                    () => { if (v.Select(n)) Toast("Selected " + n); else Toast(v.Status); }));
+            }
+            return l;
+        }
+
+        List<Item> DebugViewMenu()
+        {
+            var v = TDU2RaceDebugView.Ensure();
+            var tr = Traffic;
+            var l = new List<Item>
+            {
+                Head("RACE DEBUG VIEW"),
+                Bool("Show in the 3D world", () => v.ShowInWorld, x => v.ShowInWorld = x, true),
+                Bool("Runtime overlay + labels", () => v.ShowOverlay, x => v.ShowOverlay = x, true),
+                Bool("Route", () => v.ShowRoute, x => v.ShowRoute = x, true),
+                Bool("Follow roads", () => v.ShowRoadRoute, x => v.ShowRoadRoute = x, true),
+                Bool("Gates / checkpoints", () => v.ShowGates, x => v.ShowGates = x, true),
+                Bool("Cones / barriers", () => v.ShowDecor, x => v.ShowDecor = x, true),
+                Bool("Opponent cars", () => v.ShowOpponents, x => v.ShowOpponents = x, true),
+                Bool("World labels", () => v.ShowLabels, x => v.ShowLabels = x, true),
+                Float("View distance", () => v.ViewDistance, x => v.ViewDistance = x, 25f, 100f, 5000f, 900f, "0", " m"),
+                Action_("Move free camera to selected race", () => Toast(v.MoveCameraToStart(true))),
+
+                Head("TRAFFIC DEBUG VIEW"),
+            };
+            if (tr == null)
+            {
+                l.Add(Info("no traffic (TDU2Traffic) in the scene"));
+            }
+            else
+            {
+                l.Add(Bool("Traffic debug (3D + overlay)", () => tr.ShowDebug, x => tr.ShowDebug = x, false));
+                l.Add(Bool("Planned routes", () => tr.DebugRoutes, x => tr.DebugRoutes = x, true));
+                l.Add(Bool("Forward arrows", () => tr.DebugArrows, x => tr.DebugArrows = x, true));
+                l.Add(Bool("Speed / heading / target labels", () => tr.DebugLabels, x => tr.DebugLabels = x, true));
+                l.Add(Float("Debug range", () => tr.DebugRange, x => tr.DebugRange = x, 10f, 20f, 600f, 140f, "0", " m"));
+            }
+
+            l.Add(Head("CAMERA"));
+            l.Add(Bool("Free-fly camera (F4)", () => FlyCamActive, SetFlyCam, false));
+            l.Add(Head(""));
+            l.Add(Info("Scene view: Gizmos and labels. Game view / builds: GL overlay and screen labels."));
+            l.Add(Info("Free camera: RMB look · WASD move · Q/E down/up · Shift fast · wheel speed · F4 exit."));
+            return l;
+        }
+
 
         // ------------------------------------------------------------------ Cutscene tester
         static readonly string[] StageNames3 = { "Sky stage (1500 m up)", "Here (in front of the camera)", "At the bank's spot" };
@@ -550,7 +789,7 @@ namespace TDU2.Vehicles
             l.Add(Info("Raster queue / done", () => Flash.VmfPlayer.LastRasterQueueCount + " / " + Flash.VmfPlayer.LastRasterDoneCount));
             l.Add(Bool("Auto-log to CSV (every 0.5s)", () => _flashLogAuto, v => { _flashLogAuto = v; _flashLogNext = Time.unscaledTime; }, false));
             l.Add(Action_("Log now to CSV", () => { Flash.VmfPlayer.AppendFlashLog(); Toast("Logged to " + System.IO.Path.GetFileName(Flash.VmfPlayer.GetFlashLogPath())); }));
-            l.Add(Action_("Open log path", () => { try { System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + Flash.VmfPlayer.GetFlashLogPath() + "\""); } catch {} }));
+            l.Add(Action_("Open log path", () => { try { System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + Flash.VmfPlayer.GetFlashLogPath() + "\""); } catch { } }));
             l.Add(Action_("Clear graph history", () => { Flash.VmfPlayer.ClearFlashMetrics(); Toast("Cleared"); }));
             l.Add(Head("GRAPH (Frame ms)"));
             var hist = Flash.VmfPlayer.GetFrameHistory();
@@ -1029,7 +1268,7 @@ namespace TDU2.Vehicles
                 foreach (var p in gd.Players.Values)
                 {
                     var pi = p;
-                    l.Add(Info(pi.Nick + (pi.InCar ? " [CAR]" : ""), () => (pi.Island == 1 ? "IBZ" : pi.Island == 2 ? "HAW" : "-") + "  " + (pi.HasPos ? (pi.GamePos.magnitude/1000f).ToString("0.1")+"km" : "-")));
+                    l.Add(Info(pi.Nick + (pi.InCar ? " [CAR]" : ""), () => (pi.Island == 1 ? "IBZ" : pi.Island == 2 ? "HAW" : "-") + "  " + (pi.HasPos ? (pi.GamePos.magnitude / 1000f).ToString("0.1") + "km" : "-")));
                 }
             }
             if (l.Count < 15) l.Add(Info("No other players"));
@@ -1168,7 +1407,11 @@ namespace TDU2.Vehicles
             l.Add(Float("Send rate", () => tr.SendRate, v => tr.SendRate = v, 1f, 1f, 30f, 8f, "0", " /s"));
             l.Add(Float("Relevance distance", () => tr.RelevantDistance, v => tr.RelevantDistance = v, 50f, 200f, 3000f, 900f, "0", " m"));
             l.Add(Head("DEBUG"));
-            l.Add(Bool("Traffic debug overlay (routes/speed/target)", () => tr.ShowDebug, v => tr.ShowDebug = v, false));
+            l.Add(Bool("Traffic debug (3D + overlay)", () => tr.ShowDebug, v => tr.ShowDebug = v, false));
+            l.Add(Bool("Debug: planned routes", () => tr.DebugRoutes, v => tr.DebugRoutes = v, true));
+            l.Add(Bool("Debug: forward arrows", () => tr.DebugArrows, v => tr.DebugArrows = v, true));
+            l.Add(Bool("Debug: speed/heading/target labels", () => tr.DebugLabels, v => tr.DebugLabels = v, true));
+            l.Add(Float("Debug range", () => tr.DebugRange, v => tr.DebugRange = v, 10f, 20f, 600f, 140f, "0", " m"));
             l.Add(Menu("Traffic Debug Details", TrafficDebugMenu));
             l.Add(Menu("Car list", () =>
             {
@@ -1186,7 +1429,11 @@ namespace TDU2.Vehicles
             var tr = Traffic;
             var l = new List<Item> { Head("TRAFFIC DEBUG DETAILS") };
             if (tr == null) { l.Add(Info("no traffic")); return l; }
-            l.Add(Bool("Show in 3D (paths/speed/labels)", () => tr.ShowDebug, v => tr.ShowDebug = v, false));
+            l.Add(Bool("Show in 3D (paths / arrows / labels)", () => tr.ShowDebug, v => tr.ShowDebug = v, false));
+            l.Add(Bool("Planned routes", () => tr.DebugRoutes, v => tr.DebugRoutes = v, true));
+            l.Add(Bool("Forward arrows", () => tr.DebugArrows, v => tr.DebugArrows = v, true));
+            l.Add(Bool("Car labels", () => tr.DebugLabels, v => tr.DebugLabels = v, true));
+            l.Add(Float("Debug range", () => tr.DebugRange, v => tr.DebugRange = v, 10f, 20f, 600f, 140f, "0", " m"));
             l.Add(Info("Total / Own / Remote", () => tr.CarCount + " / " + tr.OwnedCount + " / " + (tr.CarCount - tr.OwnedCount)));
             l.Add(Info("Physics / Sound", () => "p:" + tr.PhysicsMax + "@" + tr.PhysicsRadius + "m  s:" + tr.SoundMax + "@" + tr.SoundRadius + "m"));
             l.Add(Head("NEARBY CARS (live)"));
@@ -1197,8 +1444,8 @@ namespace TDU2.Vehicles
             {
                 if (shown++ > 25) break;
                 float d = c.dist;
-                string distStr = d < 1000 ? d.ToString("0") + "m" : (d/1000f).ToString("0.0") + "km";
-                l.Add(Info($"{(c.mine ? "●" : "○")} {c.model} [{c.mode}]", () => $"{c.kmh:0} km/h  {distStr}  Lane:{GetTrafficLane(tr,c.id)}"));
+                string distStr = d < 1000 ? d.ToString("0") + "m" : (d / 1000f).ToString("0.0") + "km";
+                l.Add(Info($"{(c.mine ? "●" : "○")} {c.model} [{c.mode}]", () => $"{c.kmh:0} km/h  {distStr}  Lane:{GetTrafficLane(tr, c.id)}"));
             }
             if (shown == 0) l.Add(Info("No traffic cars"));
             return l;
@@ -1620,7 +1867,8 @@ namespace TDU2.Vehicles
 
             if (!_open)
             {
-                var tr = new Rect(20f * k, Screen.height - 60f * k, 900f * k, lh + 8f);
+                float tw = Mathf.Min(Screen.width - 40f * k, _style.CalcSize(new GUIContent(_toast)).x + 20f);
+                var tr = new Rect(20f * k, Screen.height - lh - 28f * k, tw, lh + 8f);
                 GUI.Box(tr, GUIContent.none, _boxStyle);
                 _style.normal.textColor = CYellow;
                 GUI.Label(new Rect(tr.x + 8f, tr.y + 4f, tr.width - 16f, lh), _toast, _style);
@@ -1670,7 +1918,8 @@ namespace TDU2.Vehicles
 
             if (_toast != null && Time.unscaledTime <= _toastUntil)
             {
-                var tr = new Rect(r.x, r.yMax + 6f, w, lh + 8f);
+                float tw = Mathf.Min(w, _style.CalcSize(new GUIContent(_toast)).x + 20f);
+                var tr = new Rect(r.x, r.yMax + 6f, tw, lh + 8f);
                 GUI.Box(tr, GUIContent.none, _boxStyle);
                 _style.normal.textColor = CYellow;
                 GUI.Label(new Rect(tr.x + 8f, tr.y + 4f, tr.width - 16f, lh), _toast, _style);

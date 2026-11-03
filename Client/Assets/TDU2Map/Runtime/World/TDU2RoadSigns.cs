@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using TDU2.Formats;
 using TDU2.IO;
 using UnityEngine;
 
@@ -73,7 +72,10 @@ namespace TDU2.World
                     {
                         TopLeft = new Vector3(Bin.F32(d, p), Bin.F32(d, p + 4), Bin.F32(d, p + 8)),
                         BottomRight = new Vector3(Bin.F32(d, p + 12), Bin.F32(d, p + 16), Bin.F32(d, p + 20)),
-                        Width = Bin.U16(d, p + 24), Height = Bin.U16(d, p + 26), MaxChars = d[p + 28], Flag = d[p + 29],
+                        Width = Bin.U16(d, p + 24),
+                        Height = Bin.U16(d, p + 26),
+                        MaxChars = d[p + 28],
+                        Flag = d[p + 29],
                     };
                 l.Layouts.Add(boxes);
                 l.Colors.Add(cols);

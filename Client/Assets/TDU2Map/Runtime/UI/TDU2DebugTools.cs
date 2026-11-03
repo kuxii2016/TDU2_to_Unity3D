@@ -4,12 +4,14 @@ using System.IO;
 using System.Threading.Tasks;
 using TDU2.Avatars;
 using TDU2.Formats;
+using TDU2.Interior;
 using TDU2.IO;
 using TDU2.Online;
 using TDU2.Story;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.UI
 {
     /// <summary>
     /// Shared helper for the developer tools (cutscene tester, animation viewer): parks the player's car (removed, controls
@@ -51,7 +53,9 @@ namespace TDU2.Vehicles
                 var p = _pos; p.y = m.GroundHeight(p) + 0.6f;
                 var cam = Camera.main;
                 if (cam != null) cam.transform.SetPositionAndRotation(p - _rot * Vector3.forward * 7f + Vector3.up * 2.5f, _rot);
-                m.SpawnCar(_car, p, _rot);
+                // Sondermodelle (Rennschul-Autos) stehen nicht in Available: genau dieses Auto laden, nicht das Serienmodell
+                if (m.Available.Contains(_car)) m.SpawnCar(_car, p, _rot);
+                else m.SpawnCarExact(_car, p, _rot);
             }
             _car = null;
         }

@@ -3,9 +3,10 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
 using System.Threading;
+using TDU2.Interior;
 using TDU2.Racing;
+using TDU2.UI;
 using TDU2.Vehicles;
-using TDU2.World;
 using UnityEngine;
 
 namespace TDU2

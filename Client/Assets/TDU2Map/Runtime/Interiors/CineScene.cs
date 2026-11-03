@@ -4,7 +4,7 @@ using System.Text;
 using TDU2.IO;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Cinematic-Szene (.sce, "SCE!", Spezifikation §10.5): Objekte (Kameras, Darsteller) mit dem ersten Schlüssel ihrer Kanäle

@@ -5,9 +5,10 @@ using System.IO;
 using TDU2.Avatars;
 using TDU2.Flash;
 using TDU2.Online;
+using TDU2.UI;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Friseur (Spots EHD_*, Interieur ihd_b bzw. ihair_ca, FpSelectable "Hairdresser_area" Typ 29) mit dem Original-Film
@@ -367,12 +368,12 @@ namespace TDU2.Vehicles
             if (_startAt > 0f && Time.unscaledTime >= _startAt) { _startAt = -1f; StartMenu(); }
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (TDU2GameData.ChatTyping) return;
-            if (Input.GetKeyDown(KeyCode.UpArrow)) _ui.Input("Move", "up");
-            if (Input.GetKeyDown(KeyCode.DownArrow)) _ui.Input("Move", "down");
-            if (Input.GetKeyDown(KeyCode.LeftArrow)) _ui.Input("Move", "left");
-            if (Input.GetKeyDown(KeyCode.RightArrow)) _ui.Input("Move", "right");
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space)) _ui.Input("A");
-            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace))
+            if (TDU2.Vehicles.TDU2Nav.Up()) _ui.Input("Move", "up");
+            if (TDU2.Vehicles.TDU2Nav.Down()) _ui.Input("Move", "down");
+            if (TDU2.Vehicles.TDU2Nav.Left()) _ui.Input("Move", "left");
+            if (TDU2.Vehicles.TDU2Nav.Right()) _ui.Input("Move", "right");
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed()) _ui.Input("A");
+            if (TDU2.Vehicles.TDU2Nav.Back())
             {
                 if (Time.unscaledTime - _lastEsc < 1.2f) { _edit = _orig.Clone(); Close(); return; }
                 _lastEsc = Time.unscaledTime;

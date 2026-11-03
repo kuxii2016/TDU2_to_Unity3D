@@ -2,10 +2,9 @@ using System;
 using System.Collections.Generic;
 using TDU2.Avatars;
 using TDU2.IO;
-using TDU2.World;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Figuren eines Interieurs (Entity__PNJ: Verkäuferin, Friseur …) mit ihrem DBPNJ-Aussehen (ConfigName = DBPNJ._configid).

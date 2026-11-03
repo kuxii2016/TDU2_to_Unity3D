@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using TDU2.Formats;
 using TDU2.IO;
 using TDU2.Story;
+using TDU2.UI;
 using TDU2.Vehicles;
 using UnityEngine;
 

@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace TDU2.World
+namespace TDU2.Interior
 {
     /// <summary>
     /// Laufen in Interieurs wie im Spiel (Ich-Perspektive, "FirstPerson"-Entity der Szene):
@@ -63,15 +63,29 @@ namespace TDU2.World
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (LookEnabled)
             {
-                _yaw += Input.GetAxis("Mouse X") * MouseSensitivity;
-                _pitch = Mathf.Clamp(_pitch - Input.GetAxis("Mouse Y") * MouseSensitivity, -75f, 75f);
+                float ms = MouseSensitivity * TDU2.Vehicles.TDU2InputDevices.MouseSensitivity;
+                float my = Input.GetAxis("Mouse Y") * (TDU2.Vehicles.TDU2InputDevices.MouseInvert ? -1f : 1f);
+                _yaw += Input.GetAxis("Mouse X") * ms;
+                _pitch = Mathf.Clamp(_pitch - my * ms, -75f, 75f);
+                // Drehen per Taste (Laufen-Belegung) und Gamepad: rechter Stick über die Laufen-Aktionen bleibt der Maus vorbehalten
+                var stick = TDU2.Vehicles.TDU2InputDevices.Look;   // Gamepad: rechter Stick
+                _yaw += stick.x * 150f * Time.deltaTime;
+                _pitch = Mathf.Clamp(_pitch - stick.y * 100f * (TDU2.Vehicles.TDU2InputDevices.MouseInvert ? -1f : 1f) * Time.deltaTime, -75f, 75f);
+                if (TDU2.Vehicles.TDU2Controls.Held("walk_turnl")) _yaw -= 120f * Time.deltaTime;
+                if (TDU2.Vehicles.TDU2Controls.Held("walk_turnr")) _yaw += 120f * Time.deltaTime;
             }
+            // Laufen: belegbare Tasten (Optionen → Steuerung → Laufen), dazu Gamepad-Stick
             float f = 0f, s = 0f;
-            if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow)) f += 1f;
-            if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) f -= 1f;
-            if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) s += 1f;
-            if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) s -= 1f;
-            float speed = Input.GetKey(KeyCode.LeftShift) ? RunSpeed : WalkSpeed;
+            if (TDU2.Vehicles.TDU2Controls.Held("walk_forward")) f += 1f;
+            if (TDU2.Vehicles.TDU2Controls.Held("walk_back")) f -= 1f;
+            if (TDU2.Vehicles.TDU2Controls.Held("walk_right")) s += 1f;
+            if (TDU2.Vehicles.TDU2Controls.Held("walk_left")) s -= 1f;
+            if (Mathf.Abs(f) < 0.01f && Mathf.Abs(s) < 0.01f && TDU2.Vehicles.TDU2InputDevices.HasDevice)
+            {
+                var mv = TDU2.Vehicles.TDU2InputDevices.Move;
+                s = mv.x; f = mv.y;
+            }
+            float speed = TDU2.Vehicles.TDU2Controls.Held("walk_run") ? RunSpeed : WalkSpeed;
 #else
             float f = 0f, s = 0f, speed = WalkSpeed;
 #endif

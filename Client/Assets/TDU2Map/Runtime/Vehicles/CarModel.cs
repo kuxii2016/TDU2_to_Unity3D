@@ -43,6 +43,79 @@ namespace TDU2.Vehicles
         }
     }
 
+    /// <summary>
+    /// Gemeinsame Fahrzeug-Ressourcen aus vehicules/common_car.bnk, einmal geladen und von allen Autos geteilt:
+    /// Material-Bibliothek common_mesh.2dm (z.B. Kennzeichen PLATE_LR/PLATE_LR_01, Federn SPRG_xx) und die Texturen
+    /// (plate, plate_lr, ws_plate, ws_sprg_alpha …). Materialien, die nicht in der Fahrzeugbank stehen, kommen von hier –
+    /// bisher fielen sie auf ein weißes Standardmaterial zurück (fehlende Kennzeichen beim Verkehr, Federn beim Spielerauto).
+    /// </summary>
+    public static class CommonCarAssets
+    {
+        static readonly object _lock = new object();
+        static string _dir;
+        static Material2DM _lib;
+        static LocalTextureSet _tex;
+
+        public static Material2DM Materials => _lib;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        static void ResetStatics() { _dir = null; _lib = null; _tex = null; }
+
+        /// <summary>Laden (thread-sicher, auch im Hintergrund). bnkDir = Euro/Bnk.</summary>
+        public static void Ensure(string bnkDir)
+        {
+            if (string.IsNullOrEmpty(bnkDir)) return;
+            lock (_lock)
+            {
+                if (_dir == bnkDir) return;
+                _dir = bnkDir;
+                _lib = null; _tex = null;
+                try
+                {
+                    var path = CarDatabase.CommonCarBank(bnkDir);
+                    if (path == null) return;
+                    var b = BnkArchive.Open(path);
+                    var lib = new Material2DM();
+                    foreach (var e in b.All(".2dm"))
+                    {
+                        try { foreach (var kv in Material2DM.Parse(b.Read(e)).Materials) if (!lib.Materials.ContainsKey(kv.Key)) lib.Materials[kv.Key] = kv.Value; }
+                        catch (Exception) { }
+                    }
+                    var set = new LocalTextureSet();
+                    foreach (var e in b.All(".2db"))
+                    {
+                        try { var def = TextureDef.Parse(b.Read(e), System.IO.Path.GetFileNameWithoutExtension(e.Name)); if (def != null) set.Add(def); }
+                        catch (Exception) { }
+                    }
+                    _lib = lib; _tex = set;
+                }
+                catch (Exception ex) { Debug.LogWarning("[TDU2] common_car.bnk: " + ex.Message); }
+            }
+        }
+
+        /// <summary>Euro/Bnk aus einem Pfad darunter (z.B. Verkehrsbank islands/…/traffic/…).</summary>
+        public static string BnkDirFrom(string anyPath)
+        {
+            try
+            {
+                var d = System.IO.Path.GetDirectoryName(anyPath);
+                while (!string.IsNullOrEmpty(d))
+                {
+                    if (System.IO.Directory.Exists(System.IO.Path.Combine(d, "vehicules"))) return d;
+                    d = System.IO.Path.GetDirectoryName(d);
+                }
+            }
+            catch (Exception) { }
+            return null;
+        }
+
+        public static MaterialDef Material(ulong key) => key != 0 && _lib != null && _lib.Materials.TryGetValue(key, out var m) ? m : null;
+
+        /// <summary>Hauptthread.</summary>
+        public static Texture2D GetTexture(ulong key, TextureWrapMode u, TextureWrapMode v)
+            => key != 0 && _tex != null && _tex.TryGet(key, u, v, out var t) ? t : null;
+    }
+
     /// <summary>All vehicle data (loaded in the background): model, interior, rims, tires, textures, torque, sound.</summary>
     public sealed class CarAssets
     {
@@ -76,6 +149,7 @@ namespace TDU2.Vehicles
         public static CarAssets LoadTraffic(string bankPath, string soundBank, CarPhysics car)
         {
             var a = new CarAssets { Car = car, Traffic = true };
+            CommonCarAssets.Ensure(CommonCarAssets.BnkDirFrom(bankPath));   // Kennzeichen (PLATE_LR …) und andere gemeinsame Materialien
             var bank = BnkArchive.Open(bankPath);
             string stem = System.IO.Path.GetFileNameWithoutExtension(bankPath);
             a.Body = CarScene.Load(bank, stem);
@@ -108,6 +182,7 @@ namespace TDU2.Vehicles
         public static CarAssets Load(string bnkDir, CarDatabase db, CarPhysics car, int colorIndex, bool loadSound, int rimId = 0, int interiorId = 0)
         {
             var a = new CarAssets { Car = car };
+            CommonCarAssets.Ensure(bnkDir);
             // Rims: selected rim (car dealer) or the car's standard rim (DBRims)
             if (rimId != 0) db.Rims.TryGetValue(rimId, out a.Rim);
             if (a.Rim == null && !db.Rims.TryGetValue(car.DefaultRims, out a.Rim) && db.CarRims.TryGetValue(car.Id, out var rl) && rl.Count > 0)
@@ -243,7 +318,7 @@ namespace TDU2.Vehicles
         {
             if (key == 0) return null;
             foreach (var s in TextureSets) if (s.TryGet(key, u, v, out var t)) return t;
-            return null;
+            return CommonCarAssets.GetTexture(key, u, v);   // gemeinsame Texturen (Kennzeichen, Federn …), nicht pro Auto zerstört
         }
 
         public void DestroyTextures()
@@ -536,7 +611,7 @@ namespace TDU2.Vehicles
             if (u.StartsWith("D_WHEEL")) return true;                            // Hilfs-Zylinder (Radvolumen, verzerrt skaliert)
             if (u.StartsWith("EXO_FX")) return true;                             // Auspuff-Effekte
             if (u == "BIKE_STAND") return true;                                  // Motorrad-Ständer: im Spiel eingeklappt
-            if(u == "D_SPLANE") return true;
+            if (u == "D_SPLANE") return true;
             return false;
         }
 
@@ -996,6 +1071,7 @@ namespace TDU2.Vehicles
                     ulong mk = mi >= 0 && mi < bankKeys.Length ? bankKeys[mi] : 0;
                     MaterialDef def = null;
                     if (mk != 0 && cs.Materials != null) cs.Materials.Materials.TryGetValue(mk, out def);
+                    if (def == null && mk != 0) def = CommonCarAssets.Material(mk);   // z.B. PLATE_LR / SPRG_xx aus common_mesh.2dm
                     var key = ((object)cs, mk);
                     Material mat;
                     if (isLampNode)

@@ -112,7 +112,7 @@ namespace TDU2.Flash
                     sw.WriteLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + "," + LastFrameTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastDrawTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastTickTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastMouseTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastApplyTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastRasterIntegrateTimeMs.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture) + "," + LastDrawCalls + "," + LastShapeDraws + "," + LastTextDraws + "," + LastQuadBatches + "," + LastRasterPendingBytes + "," + LastRasterQueueCount + "," + LastRasterDoneCount);
                 }
             }
-            catch {}
+            catch { }
         }
 
         /// <summary>Begrenzung eines Clips im Koordinatensystem seines Eltern-Clips (für _width/_height); null = leer.</summary>
@@ -641,10 +641,12 @@ namespace TDU2.Flash
             _wasVisible = Visible;
             var swR = Stopwatch.StartNew();
             IntegrateRasters();   // fertige Hintergrund-Rasterungen -> Texturen (VmfPlayerAsync.cs)
-            try { UploadTick(); } catch {}
+            try { UploadTick(); } catch { }
             LastRasterIntegrateTimeMs = (float)swR.Elapsed.TotalMilliseconds;
             var swM = Stopwatch.StartNew();
             UpdateMouse();
+            ListScrollTick();   // Scrollbalken der nativen Listen (VmfScript.cs)
+            TextInputTick();    // Tastatur in das Feld von setInputFocus (VmfHelpers.cs)
             LastMouseTimeMs = (float)swM.Elapsed.TotalMilliseconds;
             _accum += Time.unscaledDeltaTime;   // Menüs laufen auch bei angehaltenem Spiel (Pause)
             float step = 1f / Mathf.Max(1f, Movie.FrameRate);
@@ -727,7 +729,14 @@ namespace TDU2.Flash
                     }
                     if (old != null && op.Move) { nd.Matrix = old.Matrix; nd.Cx = old.Cx; nd.Name = old.Name; nd.ClipDepth = old.ClipDepth; }
                     else if (!reused) { nd.Matrix = Matrix2D.Identity; nd.Cx = ColorTransform.Identity; nd.ClipDepth = 0; }
-                    // wiederverwendet (Zeitleiste zurückgesprungen): per Skript gesetzte Lage/Farbe bleibt wie in Flash erhalten
+                    else
+                    {
+                        // wiederverwendet (Zeitleiste zurückgesprungen): nur per Skript gesetzte Lage/Farbe bleibt wie in Flash erhalten,
+                        // sonst gilt wieder der Stand der Zeitleiste (sonst bleibt z.B. die Spielerliste auf 21 % einer Einblendung stehen)
+                        if (!nd.ScriptMatrix) nd.Matrix = Matrix2D.Identity;
+                        if (!nd.ScriptCx) nd.Cx = ColorTransform.Identity;
+                        nd.ClipDepth = 0;
+                    }
                     d = nd;
                     inst.List[op.Depth] = d;
                 }
@@ -856,7 +865,7 @@ namespace TDU2.Flash
                     LastRasterDoneCount = _rasterDone.Count;
                 }
             }
-            catch {}
+            catch { }
             PushFlashMetric(LastFrameTimeMs, LastDrawTimeMs, LastTickTimeMs, LastDrawCalls);
         }
 
@@ -951,7 +960,7 @@ namespace TDU2.Flash
                         else DrawShape(s, mw, cw);
                         break;
                     case VmfMovie.EditText t:
-                        DrawText(t, mw, cw, inst, d.TextOverride);
+                        DrawText(t, mw, cw, inst, d.TextOverride ?? CaretText(t));
                         break;
                     case VmfMovie.Button btn:
                         {

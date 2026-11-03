@@ -4,6 +4,8 @@ using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 using TDU2.Flash;
+using TDU2.Interior;
+using TDU2.UI;
 using TDU2.Vehicles;
 using UnityEngine;
 
@@ -72,6 +74,9 @@ namespace TDU2.Online
         public float AutosaveSeconds = 30f;
 
         [Header("Mitspieler-Synchronisation (UDP)")]
+        [Tooltip("P2P: Mitspieler-Daten direkt austauschen (Hole-Punching), der Server leitet nur noch weiter, wenn kein direkter " +
+                 "Weg möglich ist. Aus = alles über den Server (kostet dort Traffic). Mitspieler sehen dann die eigene IP.")]
+        public bool UseP2P = true;
         [Tooltip("Zustandspakete pro Sekunde")]
         public float SendRate = 20f;
         [Tooltip("Darstellungsverzögerung für die Interpolation (Sekunden) – höher = ruhiger bei schlechter Verbindung")]
@@ -107,6 +112,10 @@ namespace TDU2.Online
         // ---- Zustand (lesbar für alle)
         public bool Online { get; private set; }
         public int PlayerCount { get; private set; }
+        /// <summary>Lobby vom Server (op "status"): Nummer, Spieler darin, Höchstzahl (0 = unbegrenzt).</summary>
+        public int Lobby { get; private set; }
+        public int LobbyCount { get; private set; }
+        public int LobbyMax { get; private set; }
         public string PlayerName => TDU2Session.LoggedIn ? TDU2Session.Nick : "";
         public long Money => TDU2Session.Save?.money ?? 0;
         public int NbCars => TDU2Session.Save?.ownedCars?.Count ?? 0;
@@ -119,6 +128,8 @@ namespace TDU2.Online
         public readonly List<PlayerInfo> Friends = new List<PlayerInfo>();
         public readonly List<PlayerInfo> Club = new List<PlayerInfo>();
         public event Action Changed;
+        /// <summary>Listen haben sich geändert (z.B. Freundesliste vom Server) – offene Menüs neu füllen.</summary>
+        public void NotifyChanged() => Changed?.Invoke();
 
         TDU2VehicleManager _manager;
         Task<NetResponse> _status;
@@ -245,6 +256,7 @@ namespace TDU2.Online
                 var r = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
                 if (r == null || !r.ok || r.life == null) { Debug.Log("[TDU2] MyTDULife von " + p.Nick + ": " + (r?.error ?? "keine Antwort")); continue; }
                 p.Life = r.life;
+                if (!string.IsNullOrEmpty(r.avatar)) p.Avatar = r.avatar;
                 p.Mood = r.life.mood ?? ""; p.MoodTxt = r.life.moodText ?? ""; p.PhotoVer = r.life.photoVer;
                 if (p.Photo != null) { Destroy(p.Photo); p.Photo = null; }
                 p.Photo = DecodePhoto(r.life.photo);
@@ -270,6 +282,7 @@ namespace TDU2.Online
         void Update()
         {
             PollLife();
+            PollRecent();
             if (_manager == null)
             {
 #if UNITY_2023_1_OR_NEWER
@@ -293,8 +306,13 @@ namespace TDU2.Online
             }
             if (_status == null && Time.unscaledTime >= _nextStatus)
             {
-                _nextStatus = Time.unscaledTime + Mathf.Max(1f, StatusSeconds);
-                _status = TDU2Session.Client.Send(new NetRequest { op = "status", session = TDU2Session.SessionId });
+                _nextStatus = Time.unscaledTime + Mathf.Max(1f, _serverStatusSeconds > 0f ? _serverStatusSeconds : StatusSeconds);
+                var mp = TDU2Multiplayer.Instance;
+                _status = TDU2Session.Client.Send(new NetRequest
+                {
+                    op = "status", session = TDU2Session.SessionId,
+                    p2p = UseP2P && mp != null && mp.Mesh != null, localEp = mp != null ? mp.LocalEndpoint : "",
+                });
             }
             if (_status == null || !_status.IsCompleted) return;
             var r = _status.Status == TaskStatus.RanToCompletion ? _status.Result : null;
@@ -303,7 +321,15 @@ namespace TDU2.Online
             if (ok && r.playerId == 0) { TDU2Session.SaveAsync(); ok = false; }   // Sitzung verloren (Server neu gestartet?) -> mit Token neu anmelden
             if (!ok) _failCount++; else _failCount = 0;
             bool online = ok || (_failCount < 2 && Online);   // einen Aussetzer tolerieren
-            if (online && r != null && r.ok) { ApplyPlayers(r); TDU2Party.Ensure(gameObject).OnStatus(r); PlayerCount = IslandPlayerCount(r.online); TDU2Session.Online = r.online; TDU2Session.ApplyRadio(r); TDU2News.OnStatus(r.newsLatest); }
+            if (online && r != null && r.ok)
+            {
+                // Server gibt Lobby und Abfrageabstand vor (config.json maxPlayersPerLobby / statusIntervalMs)
+                Lobby = r.lobby; LobbyCount = r.lobbyCount; LobbyMax = r.lobbyMax;
+                // P2P: Endpunkte/Tokens der Lobby-Mitspieler an die Peer-Verwaltung (Hole-Punching, Relay-Rückfall)
+                TDU2Multiplayer.Instance?.Mesh?.Update(UseP2P && r.p2pEnabled, r.playerId, r.p2pToken, r.players);
+                if (r.statusIntervalMs > 0) _serverStatusSeconds = Mathf.Clamp(r.statusIntervalMs / 1000f, 0.5f, 30f);
+            }
+            if (online && r != null && r.ok) { ApplyPlayers(r); TDU2Party.Ensure(gameObject).OnStatus(r); TDU2Friends.Ensure(gameObject).OnStatus(r); PlayerCount = IslandPlayerCount(r.online); TDU2Session.Online = r.online; TDU2Session.ApplyRadio(r); TDU2News.OnStatus(r.newsLatest); }
             if (online != Online)
             {
                 Online = online;
@@ -451,6 +477,46 @@ namespace TDU2.Online
         }
 
         void OnApplicationQuit() { SaveRecent(); }
+
+        // ------------------------------------------------------------------ Zuletzt gesehen vom Server (op "recent")
+        Task<NetResponse> _recentReq;
+        float _recentAt = -100f, _serverStatusSeconds;
+
+        /// <summary>Zuletzt gesehene Spieler beim Server anfragen (höchstens alle 15 s); Ergebnis landet in <see cref="Recent"/>.</summary>
+        public void RequestRecent()
+        {
+            if (!TDU2Session.LoggedIn || TDU2Session.Client == null || _recentReq != null || Time.unscaledTime - _recentAt < 15f) return;
+            _recentAt = Time.unscaledTime;
+            _recentReq = TDU2Session.Client.Send(new NetRequest { op = "recent", session = TDU2Session.SessionId });
+        }
+
+        void PollRecent()
+        {
+            if (_recentReq == null || !_recentReq.IsCompleted) return;
+            var r = _recentReq.Status == TaskStatus.RanToCompletion ? _recentReq.Result : null;
+            _recentReq = null;
+            if (r == null || !r.ok || r.recent == null) return;
+            EnsureRecentLoaded();
+            var db = _manager?.Database;
+            foreach (var e in r.recent)
+            {
+                if (string.IsNullOrEmpty(e.nick) || string.Equals(e.nick, TDU2Session.Nick, StringComparison.OrdinalIgnoreCase)) continue;
+                DateTime.TryParse(e.lastSeen, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var seen);
+                if (seen.Kind == DateTimeKind.Utc) seen = seen.ToLocalTime();
+                var p = Recent.Find(x => string.Equals(x.Nick, e.nick, StringComparison.OrdinalIgnoreCase));
+                if (p == null) { p = new PlayerInfo { Nick = e.nick }; Recent.Add(p); }
+                if (seen > p.LastSeen) p.LastSeen = seen;
+                if (e.carId != 0 && p.CarId == 0) { p.CarId = e.carId; p.Color = e.color; }
+                if (p.NbCars == 0) p.NbCars = e.nbCars;
+                if (p.Money == 0) p.Money = e.money;
+                if (p.Nationality == 0) p.Nationality = e.nationality;
+                if (p.Car == null && db != null && db.ById.TryGetValue(p.CarId, out var c)) p.Car = c;
+            }
+            Recent.Sort((a, b) => b.LastSeen.CompareTo(a.LastSeen));
+            if (Recent.Count > 50) Recent.RemoveRange(50, Recent.Count - 50);
+            SaveRecent();
+            Changed?.Invoke();
+        }
 
         // ------------------------------------------------------------------ Daten in alle Flash-Filme schreiben
         readonly Dictionary<VmfPlayer, Dictionary<string, string>> _pushed = new Dictionary<VmfPlayer, Dictionary<string, string>>();
@@ -625,7 +691,7 @@ namespace TDU2.Online
 
             // Verbindung verloren: Enter bestätigt (validDeco)
 #if ENABLE_LEGACY_INPUT_MANAGER
-            if (_decoOpen && (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Escape)))
+            if (_decoOpen && (TDU2.Vehicles.TDU2Controls.ConfirmPressed() || Input.GetKeyDown(KeyCode.Escape) || TDU2.Vehicles.TDU2Nav.PadBack()))
             {
                 _decoOpen = false;
                 if (!_general.CallClip("/deco_pop", "validDeco")) _general.GotoLabel("/deco_pop", "close", true);

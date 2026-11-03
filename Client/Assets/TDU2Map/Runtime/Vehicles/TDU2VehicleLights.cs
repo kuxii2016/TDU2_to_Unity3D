@@ -290,7 +290,7 @@ namespace TDU2.Vehicles
             return null;
         }
 
-        Light CreatePoint( string name, Vector3 localPosition, Color color)
+        Light CreatePoint(string name, Vector3 localPosition, Color color)
         {
             localPosition.x += .05f;
             var go = new GameObject(name);
@@ -345,7 +345,7 @@ namespace TDU2.Vehicles
 
         private static readonly int LgtBlinkId = Shader.PropertyToID("_LgtBlink");
 
-        private void SetVehicleLightState( Material material, bool lights, bool brake, bool reverse, bool blink)
+        private void SetVehicleLightState(Material material, bool lights, bool brake, bool reverse, bool blink)
         {
             if (material == null)
                 return;
@@ -357,7 +357,7 @@ namespace TDU2.Vehicles
         }
 
 
-        Flare CreateFlare( Transform anchor, Kind kind,
+        Flare CreateFlare(Transform anchor, Kind kind,
             int side,
             Shader shader)
         {

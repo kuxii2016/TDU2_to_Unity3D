@@ -5,10 +5,11 @@ using System.Threading.Tasks;
 using TDU2.Flash;
 using TDU2.Formats;
 using TDU2.IO;
+using TDU2.Vehicles;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace TDU2.Vehicles
+namespace TDU2.UI
 {
     /// <summary>
     /// Minimap wie im Spiel (HudMap.cpp): Straßennetz aus &lt;Insel&gt;.bnk / &lt;Insel&gt;_ROAD_DETAIL.IA wird in ein
@@ -193,6 +194,18 @@ namespace TDU2.Vehicles
         string _hudBank;
         Camera _mapCam;
         Material _roadMat;
+        // Feste Zeichenreihenfolge über der Straßenkarte: der Shader zeichnet ohne Tiefentest (ZTest Always), bei gleicher Queue
+        // sortiert Unity nach Entfernung der Mesh-Mitten – dann wechselte die Reihenfolge Straße/GPS ständig (Flackern).
+        Material _raceRouteMat, _gpsMat, _dotMat;
+        Material LayerMat(ref Material m, int above)
+        {
+            if (m == null && _roadMat != null)
+            {
+                m = new Material(_roadMat) { hideFlags = HideFlags.HideAndDontSave };
+                m.renderQueue = _roadMat.shader.renderQueue + above;
+            }
+            return m ?? _roadMat;
+        }
         Mesh _routeMesh;
         Racing.RaceDefinition _route;
         int _routeNext = -1;
@@ -361,12 +374,14 @@ namespace TDU2.Vehicles
 
         // ---- Straßenpunkte (Spielkoordinaten) für die große Karte: Teleport nur auf Straßen wie im Spiel
         readonly Dictionary<long, List<Vector3>> _roadGrid = new Dictionary<long, List<Vector3>>();
+        readonly Dictionary<long, List<byte>> _roadGridType = new Dictionary<long, List<byte>>();   // Straßenart je Punkt (1 = Feldweg)
         const float RoadCell = 256f;
         static long CellKey(int x, int z) => ((long)x << 32) ^ (uint)z;
 
         void BuildRoadIndex(List<Segment> segs)
         {
             _roadGrid.Clear();
+            _roadGridType.Clear();
             foreach (var s in segs)
             {
                 int pieces = (s.Pts.Length - 1) / 3;
@@ -379,8 +394,9 @@ namespace TDU2.Vehicles
                         float t = i / (float)n, u = 1f - t;
                         var p = u * u * u * a + 3f * u * u * t * c1 + 3f * u * t * t * c2 + t * t * t * b;
                         var key = CellKey(Mathf.FloorToInt(p.x / RoadCell), Mathf.FloorToInt(p.z / RoadCell));
-                        if (!_roadGrid.TryGetValue(key, out var l)) _roadGrid[key] = l = new List<Vector3>();
+                        if (!_roadGrid.TryGetValue(key, out var l)) { _roadGrid[key] = l = new List<Vector3>(); _roadGridType[key] = new List<byte>(); }
                         l.Add(p);
+                        _roadGridType[key].Add((byte)Mathf.Clamp(s.Type, 0, 255));
                     }
                 }
             }
@@ -405,6 +421,30 @@ namespace TDU2.Vehicles
                     }
                 }
             return found;
+        }
+
+        /// <summary>
+        /// Art der nächsten Straße im Umkreis maxDist (Spielkoordinaten): 1 = Feldweg/Schotter, 3 = Stadt, sonst Landstraße/Autobahn;
+        /// -1 = keine Straße in der Nähe (Gelände). Für Vibration/Force Feedback: Asphalt liegt oft auf dem Gelände-Kollider.
+        /// </summary>
+        public int NearestRoadType(Vector3 game, float maxDist)
+        {
+            if (_roadGrid.Count == 0) return -1;
+            int r = Mathf.CeilToInt(maxDist / RoadCell);
+            int cx = Mathf.FloorToInt(game.x / RoadCell), cz = Mathf.FloorToInt(game.z / RoadCell);
+            float best = maxDist * maxDist; int type = -1;
+            for (int x = cx - r; x <= cx + r; x++)
+                for (int z = cz - r; z <= cz + r; z++)
+                {
+                    long key = CellKey(x, z);
+                    if (!_roadGrid.TryGetValue(key, out var l) || !_roadGridType.TryGetValue(key, out var tl)) continue;
+                    for (int i = 0; i < l.Count && i < tl.Count; i++)
+                    {
+                        float dx = l[i].x - game.x, dz = l[i].z - game.z, d = dx * dx + dz * dz;
+                        if (d < best) { best = d; type = tl[i]; }
+                    }
+                }
+            return type;
         }
 
         List<Segment> _segs;
@@ -1155,6 +1195,7 @@ namespace TDU2.Vehicles
             EnsureRouteMesh();
             DrawRouteMesh();
             DrawGpsRoute();
+            DrawDots(carPos, fwd.normalized);
             _mapCam.Render();
         }
 
@@ -1314,49 +1355,97 @@ namespace TDU2.Vehicles
                 d.Position = list[i].p;
                 d.Visible = true;
             }
-            UpdatePlayerIcons(carPos, right, fwd, k);
+            ClearPlayerIcons();   // Mitspieler sind runde Punkte in der Karte (DrawDots), kein Flash-Symbol
         }
 
         // ------------------------------------------------------------------ Mitspieler auf der Minimap (Spot-Symbol Label "player")
         const int PlayerDepthBase = SpotDepthBase + 200, MaxPlayerIcons = 16;
         readonly bool[] _playerSlot = new bool[MaxPlayerIcons];
-        [Tooltip("Mitspieler auÃŸerhalb des Kartenausschnitts am Rand zeigen")]
-        public bool ClampPlayersToEdge = true;
 
-        void UpdatePlayerIcons(Vector3 carPos, Vector3 right, Vector3 fwd, float k)
+        /// <summary>Frühere Flash-Symbole der Mitspieler (Label "player") entfernen.</summary>
+        void ClearPlayerIcons()
         {
+            for (int i = 0; i < MaxPlayerIcons; i++)
+                if (_playerSlot[i]) { _hud.Detach("/HUD/minimap", PlayerDepthBase + i); _playerSlot[i] = false; }
+        }
+
+        // ------------------------------------------------------------------ Punkte: Mitspieler und Rennen-Gegner
+        // Wie im Spiel (HudMap: Gouraud-Kreise in der Kartenansicht, kein Flash-Symbol): runder Punkt mit dunklem Rand.
+        // Farben zentral in Online.PlayerColors: Weiß = Spieler, Grün = Freund, Orange = Club-Mitglied; Gegner im Rennen weiß.
+        [Tooltip("Radius der Punkte (Anteil des sichtbaren Kartenradius)")]
+        public float DotSize = 0.045f;
+        [Tooltip("Dunkler Rand um die Punkte (Faktor zum Radius)")]
+        public float DotOutline = 1.4f;
+        public Color DotOutlineColor = new Color(0f, 0f, 0f, 0.75f);
+        const int DotSegments = 18;
+        Mesh _dotMesh;
+        readonly List<Vector3> _dotVerts = new List<Vector3>();
+        readonly List<Color32> _dotCols = new List<Color32>();
+        readonly List<int> _dotTris = new List<int>();
+        readonly List<(Vector3 w, Color c)> _dots = new List<(Vector3, Color)>();
+
+        void CollectDots()
+        {
+            _dots.Clear();
+            var root = Streamer != null ? Streamer.MapRoot : null;
+            if (root == null) return;
+            // Gegner im Rennen (Meisterschaft)
+            if (RaceCount > 0) foreach (var w in RaceBlips) _dots.Add((w, Online.PlayerColors.Opponent));
+            // Mitspieler (eigene Lobby, gleiche Insel, im Auto)
             var gd = Online.TDU2GameData.Instance;
-            var list = new List<(float d, Vector2 p)>();
-            if (gd != null && gd.Online)
+            if (gd != null && gd.Online && ShowPlayerDots)
                 foreach (var pl in gd.Players.Values)
                 {
                     if (!pl.Online || !pl.InCar || !pl.HasPos) continue;
-                    var w = Streamer.MapRoot.TransformPoint(pl.GamePos);
-                    var rel = w - carPos; rel.y = 0f;
-                    float x = Vector3.Dot(rel, right) * k, y = Vector3.Dot(rel, fwd) * k;
-                    float lim = LureHalf - 6f, m = Mathf.Max(Mathf.Abs(x), Mathf.Abs(y));
-                    if (m > lim)
-                    {
-                        if (!ClampPlayersToEdge) continue;
-                        x *= lim / m; y *= lim / m;   // am Rand in Richtung des Spielers
-                    }
-                    list.Add((rel.sqrMagnitude, LureCenter + new Vector2(x, -y)));
+                    _dots.Add((root.TransformPoint(pl.GamePos), Online.TDU2Friends.ColorOf(pl.Nick)));
                 }
-            list.Sort((a, b) => a.d.CompareTo(b.d));
-            for (int i = 0; i < MaxPlayerIcons; i++)
+        }
+
+        [Tooltip("Mitspieler als Punkte auf der Minimap zeigen")]
+        public bool ShowPlayerDots = true;
+
+        void DrawDots(Vector3 carPos, Vector3 fwd)
+        {
+            CollectDots();
+            if (_dots.Count == 0) return;
+            float r = Mathf.Max(0.5f, _range * DotSize);
+            float lim = _range * 0.9f - r;   // außerhalb des Kartenausschnitts: nicht zeigen
+            _dotVerts.Clear(); _dotCols.Clear(); _dotTris.Clear();
+            Color32 rim = DotOutlineColor;
+            // Gegner/Spieler weiter weg zuerst, nahe zuletzt (oben)
+            _dots.Sort((a, b) => ((b.w - carPos).sqrMagnitude).CompareTo((a.w - carPos).sqrMagnitude));
+            foreach (var (w, c) in _dots)
             {
-                if (i >= list.Count)
-                {
-                    if (_playerSlot[i]) { _hud.Detach("/HUD/minimap", PlayerDepthBase + i); _playerSlot[i] = false; }
-                    continue;
-                }
-                string name = "player_" + i;
-                var d = _hud.AttachSprite("/HUD/minimap", _spotChar, name, PlayerDepthBase + i);
-                if (d == null) continue;
-                if (!_playerSlot[i] || d.Sprite == null || d.Sprite.Frame < 0) { _hud.GotoLabel("/HUD/minimap/" + name, "player", false); _playerSlot[i] = true; }
-                d.Matrix = new Matrix2D { A = SpotIconScale, D = SpotIconScale };
-                d.Position = list[i].p;
-                d.Visible = true;
+                var rel = w - carPos; rel.y = 0f;
+                float m = rel.magnitude;
+                if (m > lim) continue;
+                var p = new Vector3(carPos.x + rel.x, MapPlaneY, carPos.z + rel.z);
+                AddDisc(p + Vector3.up * 2f, r * DotOutline, rim);
+                AddDisc(p + Vector3.up * 3f, r, c);
+            }
+            if (_dotMesh == null) _dotMesh = new Mesh { name = "TDU2_MinimapDots", indexFormat = IndexFormat.UInt32, hideFlags = HideFlags.DontSave };
+            _dotMesh.Clear();
+            _dotMesh.SetVertices(_dotVerts);
+            _dotMesh.SetColors(_dotCols);
+            _dotMesh.SetTriangles(_dotTris, 0);
+            _dotMesh.bounds = new Bounds(carPos, Vector3.one * 1e6f);
+            Graphics.DrawMesh(_dotMesh, Matrix4x4.identity, LayerMat(ref _dotMat, 3), MapLayer, _mapCam, 0, null, false, false);
+        }
+
+        void AddDisc(Vector3 center, float radius, Color32 col)
+        {
+            int c0 = _dotVerts.Count;
+            _dotVerts.Add(center); _dotCols.Add(col);
+            for (int i = 0; i < DotSegments; i++)
+            {
+                float a = i * Mathf.PI * 2f / DotSegments;
+                _dotVerts.Add(center + new Vector3(Mathf.Cos(a) * radius, 0f, Mathf.Sin(a) * radius));
+                _dotCols.Add(col);
+            }
+            for (int i = 0; i < DotSegments; i++)
+            {
+                // Kamera schaut von oben: Dreiecke so herum, dass sie zur Kamera zeigen (Rückseiten werden evtl. verworfen)
+                _dotTris.Add(c0); _dotTris.Add(c0 + 1 + (i + 1) % DotSegments); _dotTris.Add(c0 + 1 + i);
             }
         }
 
@@ -1435,7 +1524,7 @@ namespace TDU2.Vehicles
             if (_route == null || _routeMesh == null || _routeMesh.vertexCount == 0) return;
             if (Streamer == null || Streamer.MapRoot == null) return;
             var m = Streamer.MapRoot.localToWorldMatrix * Matrix4x4.Translate(new Vector3(0f, MapPlaneY, 0f));
-            Graphics.DrawMesh(_routeMesh, m, _roadMat, MapLayer, _mapCam, 0, null, false, false);
+            Graphics.DrawMesh(_routeMesh, m, LayerMat(ref _raceRouteMat, 1), MapLayer, _mapCam, 0, null, false, false);
         }
 
         void DrawGpsRoute()
@@ -1445,7 +1534,7 @@ namespace TDU2.Vehicles
             var mesh = gps.RouteMesh(_range);
             if (mesh == null || mesh.vertexCount == 0) return;
             var m = Streamer.MapRoot.localToWorldMatrix * Matrix4x4.Translate(new Vector3(0f, MapPlaneY, 0f));
-            Graphics.DrawMesh(mesh, m, _roadMat, MapLayer, _mapCam, 0, null, false, false);
+            Graphics.DrawMesh(mesh, m, LayerMat(ref _gpsMat, 2), MapLayer, _mapCam, 0, null, false, false);
         }
 
         void UpdateStreetName(Vector3 world)
@@ -1578,6 +1667,9 @@ namespace TDU2.Vehicles
             if (_routeMesh != null) Destroy(_routeMesh);
             if (_mat != null) Destroy(_mat);
             if (_roadMat != null) Destroy(_roadMat);
+            if (_raceRouteMat != null) Destroy(_raceRouteMat);
+            if (_gpsMat != null) Destroy(_gpsMat);
+            if (_dotMat != null) Destroy(_dotMat);
             if (_mapCam != null) Destroy(_mapCam.gameObject);
         }
     }

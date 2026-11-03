@@ -5,9 +5,10 @@ using System.Threading.Tasks;
 using TDU2.Flash;
 using TDU2.Formats;
 using TDU2.IO;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.UI
 {
     /// <summary>
     /// GPS wie im Spiel: Ziel auf der großen Karte setzen (Mini-Menü "Ziel GPS" bzw. Rechtsklick), kürzester Weg über das

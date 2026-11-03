@@ -1,13 +1,10 @@
 using System;
 using System.Collections;
 using TDU2.Flash;
-using TDU2.Formats;
+using TDU2.Interior;
 using TDU2.Online;
-using TDU2.Vehicles;
+using TDU2.UI;
 using UnityEngine;
-using static TDU2.Cinematics.CinData;
-using static TDU2.Vehicles.TDU2InteriorNpcs;
-using static UnityEngine.UIElements.UxmlAttributeDescription;
 
 namespace TDU2
 {
@@ -68,19 +65,12 @@ namespace TDU2
             if (m == _current) return;
             var old = _current;
             _current = m; _since = Time.unscaledTime; ModeStartedUtc = DateTime.UtcNow;
-            DebugManager.switchGamemode(m);   // Banner "GAME MODE : …" wie im Original-Log
+            DebugManager.switchGamemode(m, _inst);   // Banner "GAME MODE : …" wie im Original-Log
             try { Changed?.Invoke(old, m); }
-            catch (Exception ex) { DebugManager.Error("[TDU2] GameMode.Changed: " + ex.Message); }
+            catch (Exception ex) { DebugManager.Error("GameMode.Changed: " + ex.Message); }
 
-            _inst.StartCoroutine("UpdatePresence");
         }
 
-        IEnumerator UpdatePresence()
-        {
-            yield return new WaitForSeconds(1.5f);
-            var rpc = BuildRPC();
-            DiscordController.UpdatePresence(rpc.Line1, rpc.Line2, rpc.Line3);
-        }
 
         static void EnsureInstance()
         {
@@ -90,6 +80,17 @@ namespace TDU2
             _inst = go.AddComponent<TDU2GameMode>();
         }
 
+        public IEnumerator UpdatePresence()
+        {
+            yield return new WaitForSeconds(1.5f);
+            var rpc = BuildRPC();
+            try
+            {
+                DiscordController.UpdatePresence(rpc.Line1, rpc.Line2, rpc.Line3);
+            }
+            catch (Exception) { }
+        }
+
         static TDU2GameMode _inst;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -97,7 +98,7 @@ namespace TDU2
 
         void Update()
         {
-            //CurrentMode = CurrentName;
+            CurrentMode = CurrentName;
             //Mission = MissionName;
             //Goal = MissionObjective;
 
@@ -127,30 +128,57 @@ namespace TDU2
         public static string GetIslandName()
         {
             var island = _interiors.Manager?.Streamer?.Index?.IslandName ?? "";
-            if (string.IsNullOrEmpty(island)) 
+            if (string.IsNullOrEmpty(island))
                 return "Unknown";
 
-            if (island.Contains("hawa")) 
+            if (island.Contains("hawa"))
                 return "Hawaii";
 
-            if (island.Contains("ibiz")) 
+            if (island.Contains("ibiz"))
                 return "Ibiza";
 
-            if (island.Contains("casi")) 
+            if (island.Contains("casi"))
                 return "Casino Island";
 
             return island;
         }
 
-        public static (string Line1, string Line2, string Line3) BuildRPC()
+        public static string GetInteriourInfos()
         {
             try
             {
-                DebugManager.Info("Update RPC Prepare: " + Current + " Gamemode");
+                var bank = _interiors.CurrentBankStem;
+                var code = _interiors.CurrentSpot.Code;
+                var house = _interiors.Manager.Database.HouseForSpot(_interiors.CurrentSpot, _interiors.Manager?.Streamer?.Index?.IslandName ?? "").NameHash;
+                return FlashLocalization.Text(bank, TDU2PauseMenu.SavedLanguage(), house);
+            }
+            catch (Exception)
+            {
+                return "";
+            }
+        }
 
+        public static string GetDealerInfos()
+        {
+            try
+            {
+                var bank = _interiors.CurrentBankStem;
+                var code = _interiors.CurrentSpot.Code;
+                var house = _interiors.Manager.Database.ShopForSpot(_interiors.CurrentSpot, _interiors.Manager?.Streamer?.Index?.IslandName ?? "").NameHash;
+                return FlashLocalization.Text(bank, TDU2PauseMenu.SavedLanguage(), house);
+            }
+            catch (Exception)
+            {
+                return "";
+            }
+        }
+        public static (string Line1, string Line2, string Line3) BuildRPC()
+        {
+            (string Line1out, string Line2out, string Line3out) info = ("", "", "");
+            try
+            {
                 var OnlineService = TDU2GameData.Instance;
                 var house = GetInteriourInfos();
-                (string Line1out, string Line2out, string Line3out) info = ("", "", "");
                 switch (Current)
                 {
                     case Gamemode.GAME_MODE_BOOTMENU:
@@ -169,6 +197,9 @@ namespace TDU2
                         info.Line3out = "Driving: " + OnlineService.CarName;
                         break;
                     case Gamemode.GAME_MODE_SHOP:
+                        info.Line1out = "Browsing the Car Dealership";
+                        info.Line2out = "Looking for a new car";
+                        info.Line3out = "At: " + GetDealerInfos() + " in " + GetIslandName();
                         break;
                     case Gamemode.GAME_MODE_MISSION:
                         break;
@@ -177,6 +208,9 @@ namespace TDU2
                     case Gamemode.GAME_MODE_CARSHOWCASE:
                         break;
                     case Gamemode.GAME_MODE_TESTCAR:
+                        info.Line1out = "Test Driving";
+                        info.Line2out = "Trying out a new car";
+                        info.Line3out = "Driving: " + OnlineService.CarName;
                         break;
                     case Gamemode.GAME_MODE_GARAGE:
                         info.Line1out = "Players Online: " + OnlineService.PlayerCount;
@@ -189,8 +223,11 @@ namespace TDU2
                         info.Line3out = "Location: " + GetIslandName();
                         break;
                     case Gamemode.GAME_MODE_GOODIES:
+                        info.Line1out = "Shopping for Clothes";
+                        info.Line2out = "Browsing the Clothing Store";
+                        info.Line3out = "At: " + GetDealerInfos() + " — " + GetIslandName();
                         break;
-                    case Gamemode.GAME_MODE_GAMBLING_HALL:
+                    case Gamemode.GAME_MODE_GAMBLING_HALL: //Comunity Center
                         break;
                     case Gamemode.GAME_MODE_DRESSING:
                         break;
@@ -215,7 +252,7 @@ namespace TDU2
                         break;
                     case Gamemode.GAME_MODE_JAIL:
                         break;
-                    case Gamemode.GAME_MODE_SCHOOL:
+                    case Gamemode.GAME_MODE_SCHOOL: //Fahrschule
                         break;
                     case Gamemode.GAME_MODE_SCREEN_SHOTS:
                         break;
@@ -250,29 +287,12 @@ namespace TDU2
                     case Gamemode.GAME_MODE_CASINOAVATARCHOICE:
                         break;
                 }
-                DebugManager.Debug("Set RPC: " + info.Line1out + "\n" + info.Line2out + "\n" + info.Line3out);
             }
             catch (Exception e)
             {
-                DebugManager.Error("Failed on RPC: " + e
-                    .ToString());
+                DebugManager.Error("Failed on RPC: " + e.ToString());
             }
-            return ("", "", "");
-        }
-
-        static string GetInteriourInfos()
-        {
-            try
-            {
-                var bank = _interiors.CurrentBankStem;
-                var code = _interiors.CurrentSpot.Code;
-                var house = _interiors.Manager.Database.HouseForSpot(_interiors.CurrentSpot, _interiors.Manager?.Streamer?.Index?.IslandName ?? "").NameHash;
-                return FlashLocalization.Text(bank, TDU2PauseMenu.SavedLanguage(), house);
-            }
-            catch (Exception)
-            {
-                return "";
-            }
+            return info;
         }
 
 
@@ -295,7 +315,7 @@ namespace TDU2
             }
             return Gamemode.GAME_MODE_FREERIDE;
         }
-        
+
         /// <summary>Spielmodus eines Spot-Interieurs (Code wie "ECD_AUDI", "EPH_L2E").</summary>
         public static Gamemode FromSpotCode(string code)
         {

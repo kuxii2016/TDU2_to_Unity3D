@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using TDU2.Flash;
 using TDU2.Online;
+using TDU2.UI;
 using TDU2.Vehicles;
 using TDU2.World;
 using UnityEngine;
@@ -16,7 +17,7 @@ using UnityEngine;
 ///    für jetzt, in 2 h und in 4 h Spielzeit (Texte m_Currently_/m_In2Hours_/m_In4Hours_) aus TDU2Weather.Forecast.
 ///  - News-Kanal ("tdmd:news:open"): native Liste (ASFlashList) mit news_title/news_date, Details _root.NewsTitle /
 ///    NewsDescription / CurrentNewsIndex / NbNews. Zuerst die Server-News (TDU2News: im Web-Panel angelegt, Überschrift/Text/
-///    Symbol), danach Meldungen aus dem Spiel (Wetter, Spieler online, Profil, Geschichte).
+///    Symbol) und Freundes-Meldungen, danach Meldungen aus dem Spiel (Profil, Geschichte).
 ///  - Umfrage-Kanal: der Film hat dafür nur Symbol/Titel ('survey'), keinen eigenen Clip. Die Kachel des Hilfe-DLC-Kanals
 ///    (IsDLCHsys) wird zur Umfrage-Kachel umgeschrieben (setSquare[i] = ['survey', Titel, false]); bei Auswahl öffnet sich die
 ///    Listen-Ansicht des News-Kanals (CurrentChannel = "news", cmdPrefix "tdmd:surv:") mit den Umfragen vom Server
@@ -27,7 +28,7 @@ using UnityEngine;
 ///    den Server-Meldungen der Art "update" und dieser Kategorie (Version statt Datum, Bild). Kaufen (A -> "dlci") ist aus;
 ///    Reiter mit ungelesenen Einträgen bekommen die "Neu"-Markierung (_root.IsNewsGM/IsNewsVehicles/…).
 ///  - News-Kanal nur für Meldungen aus dem Spiel/Server, getrennt nach den Original-Reitern: Spielfortschritt (Profil,
-///    Geschichte), Community (Server-News aus dem Web-Panel), Club (Wetter, Spieler online); der vierte Reiter "DLC" ist
+///    Geschichte), Community (Server-News aus dem Web-Panel + Freundes-Meldungen), Club (nur Club-Meldungen – gibt es noch keine); der vierte Reiter "DLC" ist
 ///    ausgeblendet (setTab gekürzt, lastTab = 2). Kopfzeile der Listen-Ansicht ("NEWS & DLC") je Kanal: NEWS / UPDATES / UMFRAGEN.
 ///  - B/ESC: Kanal zurück bzw. Film schließen (Ende der Schließ-Animation: FSCommand "tdmd:clos").
 /// </summary>
@@ -54,8 +55,6 @@ public class TDU2TDUMedia : MonoBehaviour
     string _detailLabel = "pictured";
     Texture2D _detailTex;
     readonly List<News> _news = new List<News>();
-    static readonly List<News> _log = new List<News>();   // Meldungen der Sitzung (Wetterwechsel …)
-    static WeatherKind _lastKind = (WeatherKind)(-1);
 
     // Umfrage-Kanal
     bool _surveyMode;          // Listen-Ansicht zeigt Umfragen statt News
@@ -76,8 +75,17 @@ public class TDU2TDUMedia : MonoBehaviour
     static readonly string[] UpdateCats = { "gmodes", "vehicles", "avatar", "furnitures", "stickers" };
     static readonly string[] UpdateCatVars = { "IsNewsGM", "IsNewsVehicles", "IsNewsAvatar", "IsNewsFurnitures", "IsNewsStickers" };
 
-    void OnEnable() { TDU2News.Changed += OnServerNews; TDU2Surveys.Changed += OnSurveys; }
-    void OnDisable() { TDU2News.Changed -= OnServerNews; TDU2Surveys.Changed -= OnSurveys; }
+    void OnEnable() { TDU2News.Changed += OnServerNews; TDU2Surveys.Changed += OnSurveys; TDU2Friends.NewsChanged += OnFriendNews; }
+    void OnDisable() { TDU2News.Changed -= OnServerNews; TDU2Surveys.Changed -= OnSurveys; TDU2Friends.NewsChanged -= OnFriendNews; }
+
+    /// <summary>Neue Freundes-Meldung, während der Fernseher läuft und der Reiter Community offen ist: neu aufbauen.</summary>
+    void OnFriendNews()
+    {
+        if (!IsOpen || _film == null || _surveyMode || _updatesMode || _newsTab != "community") return;
+        BuildNews();
+        if (_newsList != null) ShowNews(_newsList.Selected);
+        TDU2Friends.Instance?.MarkNewsRead();
+    }
 
     /// <summary>Neue Server-News, während der Fernseher läuft: Liste neu aufbauen.</summary>
     void OnServerNews()
@@ -120,7 +128,6 @@ public class TDU2TDUMedia : MonoBehaviour
 
     void Update()
     {
-        PollWeatherNews();
         if (!IsOpen || _film == null) return;
         if (Time.unscaledTime >= _nextWeather) { _nextWeather = Time.unscaledTime + 5f; SetWeather(); }
         TDU2Surveys.Tick();
@@ -139,14 +146,14 @@ public class TDU2TDUMedia : MonoBehaviour
         }
         if (Time.unscaledTime - _openedAt < 0.2f) return;   // Taste, mit der geöffnet wurde
 #if ENABLE_LEGACY_INPUT_MANAGER
-        if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) _film.Input("Move", "up");
-        if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) _film.Input("Move", "down");
-        if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) _film.Input("Move", "left");
-        if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) _film.Input("Move", "right");
-        if ((Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.E))
+        if (TDU2.Vehicles.TDU2Nav.Up() || Input.GetKeyDown(KeyCode.W)) _film.Input("Move", "up");
+        if (TDU2.Vehicles.TDU2Nav.Down() || Input.GetKeyDown(KeyCode.S)) _film.Input("Move", "down");
+        if (TDU2.Vehicles.TDU2Nav.Left() || Input.GetKeyDown(KeyCode.A)) _film.Input("Move", "left");
+        if (TDU2.Vehicles.TDU2Nav.Right() || Input.GetKeyDown(KeyCode.D)) _film.Input("Move", "right");
+        if ((TDU2.Vehicles.TDU2Controls.ConfirmPressed())
             && !(_updatesMode && string.Equals(_film.GetVariable("/:CurrentChannel"), "dlc", StringComparison.OrdinalIgnoreCase)))
             _film.Input("A");   // im Updates-Kanal (DLC-Liste) hätte A nur den Kauf ausgelöst
-        if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace))
+        if (TDU2.Vehicles.TDU2Nav.Back())
         {
             if (_surveyMode && _surveyOpen >= 0) { SurveyBack(); return; }   // Antworten -> Umfrageliste
             if (!_film.Input("B")) Close();          // B des Films: Kanal zurück bzw. Fernseher aus
@@ -157,13 +164,6 @@ public class TDU2TDUMedia : MonoBehaviour
     }
 
     int _clockShown = -1;
-
-    static string LocalTime(string island)
-    {
-        float h = TDU2Weather.HourOn(island);
-        int hh = Mathf.FloorToInt(h) % 24, mm = Mathf.FloorToInt((h - Mathf.Floor(h)) * 60f) % 60;
-        return hh.ToString("00", CultureInfo.InvariantCulture) + ":" + mm.ToString("00", CultureInfo.InvariantCulture);
-    }
 
     /// <summary>
     /// Uhr oben im Film (/clock = tdmd_cmon_hour): Ortszeit der Insel aus TDU2Weather (Spielzeit, für alle gleich).
@@ -309,35 +309,6 @@ public class TDU2TDUMedia : MonoBehaviour
         }
     }
 
-    string KindText(WeatherKind k)
-    {
-        switch (k)
-        {
-            case WeatherKind.Rainy: return _german ? "Regen" : "rain";
-            case WeatherKind.Tempest: return _german ? "Gewitter" : "thunderstorm";
-            case WeatherKind.Cloudy: return _german ? "bewölkt" : "cloudy";
-            case WeatherKind.BeforeRain: return _german ? "zunehmend bewölkt" : "clouds building up";
-            case WeatherKind.AfterRain: return _german ? "abtrocknend, Sonne" : "drying up, sunny";
-            default: return _german ? "sonnig" : "sunny";
-        }
-    }
-
-    /// <summary>Wetterwechsel als Meldung merken (läuft, sobald der Fernseher einmal da war).</summary>
-    void PollWeatherNews()
-    {
-        var k = TDU2Weather.Kind;
-        if ((int)_lastKind < 0) { _lastKind = k; return; }
-        if (k == _lastKind || TDU2Weather.StoryLock) return;
-        _lastKind = k;
-        _log.Insert(0, new News
-        {
-            Date = DateTime.Now,
-            Title = _german ? "Wetterumschwung" : "Weather change",
-            Text = (_german ? "Das Wetter ändert sich: " : "The weather is changing: ") + KindText(k) + ".",
-        });
-        if (_log.Count > 20) _log.RemoveAt(_log.Count - 1);
-    }
-
     // ------------------------------------------------------------------ News
     void BuildNews()
     {
@@ -357,59 +328,36 @@ public class TDU2TDUMedia : MonoBehaviour
         }
         if (_updatesMode)
         {
-            if (_news.Count == 0)
-                _news.Add(new News
-                {
-                    Date = now, Title = _german ? "Keine Einträge" : "No entries",
-                    Text = !TDU2Session.LoggedIn ? (_german ? "Die Update-Liste kommt vom Server – bitte anmelden." : "The update list comes from the server – please log in.")
-                         : (_german ? "Noch keine Patch-Notes veröffentlicht." : "No patch notes published yet."),
-                });
             FinishNews();
             return;
         }
-        if (_newsTab == "club") AddWorldNews(now);
+        // Community: Server-News + Freundes-Meldungen, zusammen nach Datum (neueste zuerst). Club: nur Club-Meldungen (noch keine).
+        if (_newsTab == "community")
+        {
+            AddFriendNews();
+            var sorted = new List<News>(_news);
+            sorted.Sort((a, b) => b.Date.CompareTo(a.Date));
+            _news.Clear(); _news.AddRange(sorted);
+        }
         if (_newsTab == "game_progress") AddPlayerNews(now);
-        if (_news.Count == 0)
-            _news.Add(new News
-            {
-                Date = now, Title = _german ? "Keine Meldungen" : "No news",
-                Text = _newsTab == "community" && !TDU2Session.LoggedIn
-                    ? (_german ? "Server-News gibt es nur online – bitte anmelden." : "Server news are only available online – please log in.")
-                    : (_german ? "In dieser Kategorie gibt es gerade nichts Neues." : "Nothing new in this category right now."),
-            });
+        // keine Meldungen: leere Liste (kein Platzhalter-Eintrag)
         FinishNews();
     }
 
-    /// <summary>Reiter Club: Wetter (beide Inseln), Wetterwechsel der Sitzung, Spieler online.</summary>
-    void AddWorldNews(DateTime now)
+    /// <summary>
+    /// Reiter Community: Meldungen der Freundesliste (TDU2Friends – Anfrage erhalten/gesendet, neuer Freund) mit den
+    /// Original-Texten der Spieldatenbank, neueste zuerst. Beim Ansehen gelten sie als gelesen ("Neu"-Markierung des Reiters).
+    /// </summary>
+    void AddFriendNews()
     {
-        TDU2Weather.Forecast(0f, out var k0, out _);
-        TDU2Weather.Forecast(2f, out var k2, out _);
-        TDU2Weather.Forecast(4f, out var k4, out _);
-        string other = TDU2Weather.IslandKey(Manager?.Streamer?.Island) == "hawai" ? "ibiza" : "hawai";
-        TDU2Weather.Forecast(0f, other, out var ko, out _);
-        _news.Add(new News
+        var f = TDU2Friends.Instance;
+        if (f == null) return;
+        foreach (var n in f.News)
         {
-            Date = now,
-            Title = _german ? "Wetterbericht" : "Weather report",
-            Text = _german
-                ? $"Aktuell {KindText(k0)}, in 2 Stunden {KindText(k2)}, in 4 Stunden {KindText(k4)} (Spielzeit). Details im Wetter-Kanal."
-                : $"Currently {KindText(k0)}, in 2 hours {KindText(k2)}, in 4 hours {KindText(k4)} (game time). See the weather channel.",
-        });
-        _news.Add(new News
-        {
-            Date = now,
-            Title = _german ? (other == "hawai" ? "Wetter auf Hawaii" : "Wetter auf Ibiza") : (other == "hawai" ? "Weather on Hawaii" : "Weather on Ibiza"),
-            Text = (_german ? "Gerade " : "Currently ") + KindText(ko) + (_german ? $" – Ortszeit {LocalTime(other)}." : $" – local time {LocalTime(other)}."),
-        });
-        _news.AddRange(_log);
-        if (TDU2Session.LoggedIn)
-            _news.Add(new News
-            {
-                Date = now,
-                Title = "Online",
-                Text = _german ? $"Gerade sind {TDU2Session.Online} Spieler auf dem Server unterwegs." : $"{TDU2Session.Online} players are currently on the server.",
-            });
+            TDU2Friends.NewsText(n, out var title, out var text);
+            _news.Add(new News { Date = TDU2Friends.NewsDate(n), Title = title, Text = text });
+        }
+        f.MarkNewsRead();
     }
 
     /// <summary>Reiter Spielfortschritt: Profil und nächster Schritt der Geschichte.</summary>
@@ -526,7 +474,7 @@ public class TDU2TDUMedia : MonoBehaviour
         if (_newsList != null) ApplyDetailLayout();
         _film.SetVariable("/:NewsTitle", n?.Title ?? "");
         _film.SetVariable("/:NewsDescription", n?.Text ?? "");
-        _film.SetVariable("/:CurrentNewsIndex", (Math.Max(0, i) + 1).ToString(CultureInfo.InvariantCulture));
+        _film.SetVariable("/:CurrentNewsIndex", (_news.Count == 0 ? 0 : Math.Max(0, i) + 1).ToString(CultureInfo.InvariantCulture));
         _film.SetVariable("/:NbNews", _news.Count.ToString(CultureInfo.InvariantCulture));
     }
 
@@ -617,13 +565,13 @@ public class TDU2TDUMedia : MonoBehaviour
         for (int i = 0; i < 5; i++) _film.ForceVisible("/lists/tabs/tab" + i, i < count ? (bool?)null : false);
     }
 
-    /// <summary>"Neu"-Markierung der News-Reiter (Community = ungelesene Server-News), vor dem Aufbau der Reiter.</summary>
+    /// <summary>"Neu"-Markierung der News-Reiter (Community = ungelesene Server-News oder Freundes-Meldungen), vor dem Aufbau der Reiter.</summary>
     void SetNewsTabFlags()
     {
         bool unread = false;
         foreach (var e in TDU2News.Items) if (e != null && !TDU2News.IsUpdate(e) && TDU2News.IsUnread(e)) { unread = true; break; }
         _film.SetValue("/:IsNewsGameProgress", false);
-        _film.SetValue("/:IsNewsCommunity", unread);
+        _film.SetValue("/:IsNewsCommunity", unread || (TDU2Friends.Instance != null && TDU2Friends.Instance.HasUnreadNews));
         _film.SetValue("/:IsNewsClub", false);
         _film.SetValue("/:IsNewsDLC", false);
     }
@@ -819,7 +767,7 @@ public class TDU2TDUMedia : MonoBehaviour
         if (_surveyNote.Length > 0) text = _surveyNote + "\n\n" + text;
         _film.SetVariable("/:NewsTitle", title ?? "");
         _film.SetVariable("/:NewsDescription", text ?? "");
-        _film.SetVariable("/:CurrentNewsIndex", (Math.Max(0, i) + 1).ToString(CultureInfo.InvariantCulture));
+        _film.SetVariable("/:CurrentNewsIndex", (_news.Count == 0 ? 0 : Math.Max(0, i) + 1).ToString(CultureInfo.InvariantCulture));
         _film.SetVariable("/:NbNews", (_newsList != null ? _newsList.Rows.Count : 0).ToString(CultureInfo.InvariantCulture));
     }
 

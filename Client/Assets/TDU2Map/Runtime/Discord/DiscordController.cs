@@ -1,136 +1,456 @@
+
 using System;
+using System.Text;
 using UnityEngine;
-using UnityEngine.SocialPlatforms;
 
-[System.Serializable]
-public class DiscordJoinEvent : UnityEngine.Events.UnityEvent<string> { }
-
-[System.Serializable]
-public class DiscordSpectateEvent : UnityEngine.Events.UnityEvent<string> { }
-
-[System.Serializable]
-public class DiscordJoinRequestEvent : UnityEngine.Events.UnityEvent<DiscordRpc.DiscordUser> { }
-
+/// <summary>
+/// Discord Rich Presence for Test Drive Unlimited 2.
+/// Handles initialization, queued updates, rate limiting and reconnection.
+/// </summary>
 public class DiscordController : MonoBehaviour
 {
+    public const string DefaultApplicationId = "1564941401722986496";
+
     public static DiscordController Instance;
-    public long Starttime;
-    public DiscordRpc.RichPresence presence = new DiscordRpc.RichPresence();
-    public string applicationId;
+
+    [Tooltip("Discord application id used for Rich Presence.")]
+    public string applicationId = DefaultApplicationId;
+
     public string optionalSteamId;
-    public DiscordRpc.DiscordUser joinRequest;
-    public UnityEngine.Events.UnityEvent onConnect;
-    public UnityEngine.Events.UnityEvent onDisconnect;
-    public UnityEngine.Events.UnityEvent hasResponded;
-    public DiscordJoinEvent onJoin;
-    public DiscordJoinEvent onSpectate;
-    public DiscordJoinRequestEvent onJoinRequest;
+
+    [Tooltip("Key of the large image uploaded to the Discord application.")]
+    public string LargeImageKey = "images";
+
+    [Tooltip("Optional key of a small image.")]
+    public string SmallImageKey = "";
+
+    public string SmallImageText = "";
+
+    public long Starttime;
+
+    public DiscordRpc.RichPresence presence = new DiscordRpc.RichPresence();
+
     DiscordRpc.EventHandlers handlers;
 
-    void Start()
+    bool _initialized;
+    bool _failed;
+    volatile bool _ready;
+
+    float _nextCallback;
+    float _nextSend;
+    float _nextReconnect;
+
+    string _lastKey;
+    string _details;
+    string _state;
+    string _largeText;
+
+    long _startTimestamp;
+    bool _hasPending;
+
+    const float MinSendInterval = 5f;
+    const float CallbackInterval = 1f;
+    const float ReconnectInterval = 5f;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+    static void AutoCreate()
+    {
+        if (Instance == null)
+            Ensure();
+    }
+
+    public static DiscordController Ensure()
+    {
+        if (Instance != null)
+            return Instance;
+
+        GameObject go = new GameObject("Discord RPC");
+        DontDestroyOnLoad(go);
+
+        return go.AddComponent<DiscordController>();
+    }
+
+    void Awake()
     {
         if (Instance != null && Instance != this)
         {
-            Destroy(this.gameObject);
+            Destroy(gameObject);
             return;
         }
+
         Instance = this;
-        DontDestroyOnLoad(this.gameObject);
 
-        handlers = new DiscordRpc.EventHandlers();
-        handlers.readyCallback += ReadyCallback;
-        handlers.disconnectedCallback += DisconnectedCallback;
-        handlers.errorCallback += ErrorCallback;
-        handlers.joinCallback += JoinCallback;
-        handlers.spectateCallback += SpectateCallback;
-        handlers.requestCallback += RequestCallback;
-        DiscordRpc.Initialize(applicationId, ref handlers, true, optionalSteamId);
+        DontDestroyOnLoad(gameObject);
 
-        initPrecence();
+        if (string.IsNullOrWhiteSpace(applicationId))
+            applicationId = DefaultApplicationId;
     }
 
-    void OnEnable()
+    void Start()
     {
+        Starttime = NowUnix();
+
+        if (!_hasPending)
+        {
+            Queue(
+                "Test Drive Unlimited 2",
+                "Main Menu",
+                "Starting the game",
+                Starttime
+            );
+        }
+
+        EnsureInitialized();
     }
 
-    private void initPrecence()
+    void OnDestroy()
     {
-        Starttime = (long)(DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
-        //Icon Paar
-        presence.largeImageKey = "images";
-        presence.largeImageText = "Main Menue";
-        presence.startTimestamp = Starttime;
-        presence.details = "Game Launched";
-        presence.state = "Main-Menue";
-        DiscordRpc.UpdatePresence(presence);
-    }
+        if (Instance != this)
+            return;
 
-    public static void UpdatePresence(string Line1, string Line2, string Line3)
-    {
-        Instance.presence.largeImageKey = "images";
-        Instance.presence.startTimestamp = Instance.Starttime;
+        Shutdown();
 
-        //Tooltip
-        Instance.presence.largeImageText = Line1;
-
-        //main RPC Firstline, SecondLine
-        Instance.presence.details = Line2;
-        Instance.presence.state = Line3;
-
-        DiscordRpc.UpdatePresence(Instance.presence);
+        Instance = null;
     }
 
     void OnDisable()
     {
-        DiscordRpc.Shutdown();
+        if (Instance == this)
+            Shutdown();
+    }
+
+    void Shutdown()
+    {
+        if (_initialized)
+        {
+            try
+            {
+                DiscordRpc.Shutdown();
+            }
+            catch (Exception ex)
+            {
+                DebugManager.Warning("[Discord] Shutdown: " + ex.Message);
+            }
+        }
+
+        _initialized = false;
+        _ready = false;
     }
 
     void Update()
     {
-        DiscordRpc.RunCallbacks();
+        // Retry initialization after a connection failure.
+        if (!_initialized)
+        {
+            if (!_failed && Time.unscaledTime >= _nextReconnect)
+            {
+                _nextReconnect = Time.unscaledTime + ReconnectInterval;
+                EnsureInitialized();
+            }
+
+            return;
+        }
+
+        // Process Discord callbacks.
+        if (Time.unscaledTime >= _nextCallback)
+        {
+            _nextCallback = Time.unscaledTime + CallbackInterval;
+
+            try
+            {
+                DiscordRpc.RunCallbacks();
+            }
+            catch (Exception ex)
+            {
+                DebugManager.Error("Callback error: " + ex.Message);
+                Shutdown();
+                _nextReconnect = Time.unscaledTime + ReconnectInterval;
+                return;
+            }
+        }
+
+        // Send queued presence only after Discord is ready.
+        if (_ready && _hasPending && Time.unscaledTime >= _nextSend)
+        {
+            Flush(false);
+        }
     }
 
-    public void RequestRespondYes()
+    void EnsureInitialized()
     {
-        DiscordRpc.Respond(joinRequest.userId, DiscordRpc.Reply.Yes);
-        hasResponded.Invoke();
+        if (_initialized || _failed)
+            return;
+
+        if (string.IsNullOrWhiteSpace(applicationId))
+            applicationId = DefaultApplicationId;
+
+        try
+        {
+            handlers = new DiscordRpc.EventHandlers
+            {
+                readyCallback = OnReady,
+                disconnectedCallback = OnDisconnected,
+                errorCallback = OnError,
+                joinCallback = OnJoin,
+                spectateCallback = OnSpectate,
+                requestCallback = OnRequest
+            };
+
+
+            DiscordRpc.Initialize(
+                applicationId,
+                ref handlers,
+                true,
+                optionalSteamId ?? ""
+            );
+
+            _initialized = true;
+            _ready = false;
+
+            _nextCallback = 0f;
+        }
+        catch (Exception ex)
+        {
+            Fail(ex);
+        }
     }
 
-    public void RequestRespondNo()
+    void Fail(Exception ex)
     {
-        DiscordRpc.Respond(joinRequest.userId, DiscordRpc.Reply.No);
-        hasResponded.Invoke();
+        _failed = false;
+        _initialized = false;
+        _ready = false;
+
+        _nextReconnect = Time.unscaledTime + ReconnectInterval;
+
+        DebugManager.Error(
+            "Rich Presence initialization failed: " +
+            ex.GetType().Name + " - " + ex.Message
+        );
     }
 
-    public void ReadyCallback(ref DiscordRpc.DiscordUser connectedUser)
+    // Native Discord callbacks.
+    // Do not call Unity APIs from these callbacks.
+
+    void OnReady(ref DiscordRpc.DiscordUser user)
     {
-        onConnect.Invoke();
+        _ready = true;
     }
 
-    public void DisconnectedCallback(int errorCode, string message)
+    void OnDisconnected(int code, string message)
     {
-        onDisconnect.Invoke();
+        _ready = false;
+
+        Debug.LogWarning(
+            "[Discord] Disconnected: " + code + " - " + message
+        );
     }
 
-    public void ErrorCallback(int errorCode, string message)
+    void OnError(int code, string message)
     {
-        UnityEngine.Debug.Log(string.Format("Discord: error {0}: {1}", errorCode, message));
+        Debug.LogError(
+            "[Discord] Error: " + code + " - " + message
+        );
     }
 
-    public void JoinCallback(string secret)
+    void OnJoin(string secret)
     {
-        onJoin.Invoke(secret);
+        Debug.Log("[Discord] Join request: " + secret);
     }
 
-    public void SpectateCallback(string secret)
+    void OnSpectate(string secret)
     {
-        onSpectate.Invoke(secret);
+        Debug.Log("[Discord] Spectate request: " + secret);
     }
 
-    public void RequestCallback(ref DiscordRpc.DiscordUser request)
+    void OnRequest(ref DiscordRpc.DiscordUser user)
     {
-        joinRequest = request;
-        onJoinRequest.Invoke(request);
+        Debug.Log("[Discord] Activity request from: " + user.username);
     }
 
+    /// <summary>
+    /// Queue a presence update.
+    /// line1 = large image tooltip
+    /// line2 = details
+    /// line3 = state
+    /// </summary>
+    public static void UpdatePresence(
+        string line1,
+        string line2,
+        string line3)
+    {
+        UpdatePresence(line1, line2, line3, 0);
+    }
+
+    /// <summary>
+    /// Queue a presence update.
+    /// startTimestamp = 0 keeps the original game start timestamp.
+    /// </summary>
+    public static void UpdatePresence(
+        string line1,
+        string line2,
+        string line3,
+        long startTimestamp)
+    {
+        DiscordController c = Instance != null
+            ? Instance
+            : Ensure();
+
+        if (c == null)
+            return;
+
+        c.Queue(line1, line2, line3, startTimestamp);
+    }
+
+    void Queue(
+        string line1,
+        string line2,
+        string line3,
+        long startTimestamp)
+    {
+        string newLargeText = Fit(line1);
+        string newDetails = Fit(line2);
+        string newState = Fit(line3);
+
+        long newTimestamp = startTimestamp > 0
+            ? startTimestamp
+            : (Starttime > 0 ? Starttime : NowUnix());
+
+        string newKey =
+            newLargeText + "|" +
+            newDetails + "|" +
+            newState + "|" +
+            newTimestamp;
+
+        string currentKey =
+            _largeText + "|" +
+            _details + "|" +
+            _state + "|" +
+            _startTimestamp;
+
+        if (newKey == currentKey)
+            return;
+
+        _largeText = newLargeText;
+        _details = newDetails;
+        _state = newState;
+        _startTimestamp = newTimestamp;
+
+        _hasPending = true;
+
+        if (_ready && Time.unscaledTime >= _nextSend)
+            Flush(false);
+    }
+
+    void Flush(bool force)
+    {
+        if (!_hasPending)
+            return;
+
+        EnsureInitialized();
+
+        if (!_initialized || !_ready || _failed)
+            return;
+
+        string key =
+            _largeText + "|" +
+            _details + "|" +
+            _state + "|" +
+            _startTimestamp;
+
+        if (!force)
+        {
+            if (key == _lastKey)
+            {
+                _hasPending = false;
+                return;
+            }
+
+            if (Time.unscaledTime < _nextSend)
+                return;
+        }
+
+        presence.largeImageKey =
+            string.IsNullOrEmpty(LargeImageKey)
+                ? null
+                : LargeImageKey;
+
+        presence.largeImageText = _largeText;
+        presence.details = _details;
+        presence.state = _state;
+        presence.startTimestamp = _startTimestamp;
+
+        presence.smallImageKey =
+            string.IsNullOrEmpty(SmallImageKey)
+                ? null
+                : SmallImageKey;
+
+        presence.smallImageText =
+            string.IsNullOrEmpty(SmallImageText)
+                ? null
+                : SmallImageText;
+
+        try
+        {
+            DiscordRpc.UpdatePresence(presence);
+
+            _lastKey = key;
+            _hasPending = false;
+
+            _nextSend = Time.unscaledTime + MinSendInterval;
+
+        }
+        catch (Exception ex)
+        {
+            DebugManager.Error("UpdatePresence failed: " + ex.Message);
+
+            _hasPending = true;
+
+            Shutdown();
+
+            _nextReconnect = Time.unscaledTime + ReconnectInterval;
+        }
+    }
+
+    /// <summary>
+    /// Trim text to Discord's byte limit without splitting UTF-8 characters.
+    /// </summary>
+    static string Fit(string s, int maxBytes = 120)
+    {
+        if (string.IsNullOrEmpty(s))
+            return "";
+
+        s = s.Replace('\r', ' ')
+             .Replace('\n', ' ')
+             .Trim();
+
+        if (Encoding.UTF8.GetByteCount(s) <= maxBytes)
+            return s;
+
+        int n = s.Length;
+
+        while (n > 0 &&
+               Encoding.UTF8.GetByteCount(s.Substring(0, n)) > maxBytes - 3)
+        {
+            n--;
+        }
+
+        // Avoid cutting a UTF-16 surrogate pair.
+        if (n > 0 && n < s.Length &&
+            char.IsHighSurrogate(s[n - 1]) &&
+            char.IsLowSurrogate(s[n]))
+        {
+            n--;
+        }
+
+        return s.Substring(0, n).TrimEnd() + "…";
+    }
+
+    static long NowUnix()
+    {
+        return (long)(
+            DateTime.UtcNow -
+            new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+        ).TotalSeconds;
+    }
 }

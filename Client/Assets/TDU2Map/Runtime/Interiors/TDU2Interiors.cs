@@ -5,14 +5,14 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using TDU2.Flash;
 using TDU2.Formats;
-using TDU2.Interior;
 using TDU2.Online;
 using TDU2.Racing;
+using TDU2.UI;
+using TDU2.Vehicles;
 using TDU2.World;
 using UnityEngine;
-using UnityEngine.Rendering;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Spots betreten wie im Spiel: an der Einfahrt eines Autohändlers / Hauses / Shops [Enter] → Interieur
@@ -169,7 +169,7 @@ namespace TDU2.Vehicles
             var mm = Manager.Minimap;
             if (mm != null && mm.HasOriginalHud) mm.ShowEnter(_nearSpot != null && Manager.Current != null ? _nearSpot.Code : null);
 #if ENABLE_LEGACY_INPUT_MANAGER
-            if (_nearSpot != null && !TDU2GameData.ChatTyping && (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter)))
+            if (_nearSpot != null && !TDU2GameData.ChatTyping && (TDU2.Vehicles.TDU2Controls.ConfirmPressed()))
             {
                 if (mm != null) mm.ShowEnter(null);
                 if (_nearBanks.CarWash) StartCarWash(_nearSpot);
@@ -1223,6 +1223,7 @@ namespace TDU2.Vehicles
             UpdateClipBox();
             if (Time.unscaledTime >= _nextColliderScan) { _nextColliderScan = Time.unscaledTime + 0.5f; DisableWorldColliders(); }
             if (Time.unscaledTime >= _nextWorldScan) { _nextWorldScan = Time.unscaledTime + 1.5f; HideWorld(); }   // nachgeladene Sektoren
+            UpdateSpotExterior();                  // nachgeladene Exterior-Platzhalter (Interieur-Attrappe im Gebäude)
             if (TDU2GameData.ChatTyping) return;   // Chat hat die Tastatur
             UpdateMenuFlow();                      // ESC/Rücktaste aller Film-Menüs an einer Stelle (TDU2MenuFlow.cs)
             if (_casinoMenu) { UpdateCasinoMenu(); return; }
@@ -1265,7 +1266,7 @@ namespace TDU2.Vehicles
             if (Time.timeScale <= 0f) { if (_fp != null) _fp.LookEnabled = false; return; }   // Pausemenü offen
 #if ENABLE_LEGACY_INPUT_MANAGER
             // ESC: eigenes Auswahlmenü schließen, sonst öffnet das Pausemenü (TDU2PauseMenu) wie draußen
-            if (Input.GetKeyDown(KeyCode.Escape) && _menuOpen) { CloseMenu(); _menuClosedFrame = Time.frameCount; }
+            if ((Input.GetKeyDown(KeyCode.Escape) || TDU2.Vehicles.TDU2Nav.PadBack()) && _menuOpen) { CloseMenu(); _menuClosedFrame = Time.frameCount; }
             // Maus nach dem Pausemenü wieder fangen (Klick ins Bild)
             if (!_menuOpen && Cursor.lockState != CursorLockMode.Locked && Input.GetMouseButtonDown(0) && Time.timeScale > 0f) { LockCursor(true); _relockFrame = Time.frameCount; }
 #endif
@@ -1339,7 +1340,7 @@ namespace TDU2.Vehicles
                 // Fahrzeugmenü des Films (Steuerkreuz unten links): Num4/Num6 Tür links/rechts, Num8/Num2 Fenster hoch/runter
                 if (CarPad(acc)) _netCar = ac;
             }
-            bool use = Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || (Cursor.lockState == CursorLockMode.Locked && Input.GetMouseButtonDown(0) && Time.frameCount != _relockFrame);
+            bool use = TDU2.Vehicles.TDU2Controls.Pressed("walk_use") || TDU2.Vehicles.TDU2Controls.ConfirmPressed() || (Cursor.lockState == CursorLockMode.Locked && Input.GetMouseButtonDown(0) && Time.frameCount != _relockFrame);
             //if (use) Debug.Log("[TDU2] Auswahl-Taste: Ziel " + AimName(_aimTarget));
             // Rücktaste im Laufmodus: Fahrzeugdaten/Vergleich ausblenden, bis ein anderes Ziel anvisiert wird
             if (Input.GetKeyDown(KeyCode.Backspace) && _uiAim is DisplayCar && _ui != null)
@@ -1883,7 +1884,7 @@ namespace TDU2.Vehicles
                         break; //Flat 4 cylinder
                     case 17: break; //L-twin
                 }
-                
+
 
                 if (asCompare)
                 {
@@ -2029,19 +2030,19 @@ namespace TDU2.Vehicles
 
         void Activate(object target)
         {
-            if (target is DisplayCar && _kind == Kind.StickerShop) 
-            { 
-                OpenStickerShop(); 
-                return; 
+            if (target is DisplayCar && _kind == Kind.StickerShop)
+            {
+                OpenStickerShop();
+                return;
             }
             if (target is DisplayCar lobby && lobby.Lobby) return;   // Ausstellungsauto (Casino) – need recreate the UI
             if (target is DisplayCar dc)
             {
                 // Autohändler: Original-Menü (Kaufen mit Felgen/Lack/Innenraum, Testfahrt) – Startauto bleibt Direktwahl
-                if (_kind == Kind.Dealer && _starterCars == null && OpenDealerMenu(dc)) 
+                if (_kind == Kind.Dealer && _starterCars == null && OpenDealerMenu(dc))
                     return;
                 // Garage: Original-Menü des Films (Losfahren, Einsteigen, Daten, Vergleichen – Gäste ohne Losfahren)
-                if (_kind == Kind.Garage && _starterCars == null && OpenDealerMenu(dc)) 
+                if (_kind == Kind.Garage && _starterCars == null && OpenDealerMenu(dc))
                     return;
                 if (_starterCars != null)
                 {
@@ -2049,12 +2050,12 @@ namespace TDU2.Vehicles
                     _starterCars = null; _starterChosen = null;
                     cb?.Invoke(dc.Car);
                 }
-                if (_kind == Kind.Dealer) 
+                if (_kind == Kind.Dealer)
                     RememberOwned(dc.Car);
-                if (GuestGarageCars != null && _kind == Kind.Garage) 
-                { 
-                    ShowInfo("Das Auto gehört deinem Gastgeber."); 
-                    return; 
+                if (GuestGarageCars != null && _kind == Kind.Garage)
+                {
+                    ShowInfo("Das Auto gehört deinem Gastgeber.");
+                    return;
                 }
                 ExitInterior(dc.Car);
                 return;
@@ -2065,10 +2066,10 @@ namespace TDU2.Vehicles
             if (_spotBanks != null && _spotBanks.IsCasino && !string.IsNullOrEmpty(s.Str)) { CasinoSelect(s); return; }
             if (n.StartsWith("Exit", StringComparison.OrdinalIgnoreCase))
             {
-                if (_starterCars != null) 
-                { 
-                    ShowInfo("Wähle zuerst eines der Autos."); 
-                    return; 
+                if (_starterCars != null)
+                {
+                    ShowInfo("Wähle zuerst eines der Autos.");
+                    return;
                 }   // Start: erst ein Auto aussuchen
                 if (_spotBanks != null && _spotBanks.IsCasino && OpenCasinoExit()) return;   // Casino: Ziel wählen (Ibiza/Hawaii)
                 ExitInterior(_lastCar);
@@ -2104,14 +2105,14 @@ namespace TDU2.Vehicles
                 case 14:
                     {
                         var list = new List<CarPhysics>();
-                        if (_lastCar != null) 
+                        if (_lastCar != null)
                             list.Add(_lastCar);
 
                         _ui.ForceVisible("/garage", true);
                         _ui.ForceVisible("/garage/money_cost", false);
                         _ui.ForceVisible("/garage/vehicule_list", true);
 
-                        foreach (var c in OwnedCars()) 
+                        foreach (var c in OwnedCars())
                             if (!list.Contains(c)) list.Add(c);
 
                         for (int i = 1; i < list.Count; i++)
@@ -2121,7 +2122,7 @@ namespace TDU2.Vehicles
 
                             string name = (string.IsNullOrEmpty(list[i].Brand) ? "" : list[i].Brand + " ") + list[i].ModelName;
                             _ui.SetText("/garage/vehicule_list/line1:name", name);
-                            int cat = list[i] != null ? list[i].Raw.I ("_vehiclecategory") : 0;
+                            int cat = list[i] != null ? list[i].Raw.I("_vehiclecategory") : 0;
                             _ui.SetLabel("/garage/vehicule_list/line1/content/ic", GroupLabel(cat));
                             _ui.SetText("/garage/vehicule_list/line1:power", list[i].PowerBhp + " Bhp");
                         }
@@ -2133,11 +2134,11 @@ namespace TDU2.Vehicles
                 case 9: ShowInfo($"GUI {s.Type} - {_kind} not Implemented"); break;
                 case 57:
                     {
-                        #if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_1_OR_NEWER
                         var menu = FindFirstObjectByType<TDU2TDUMedia>();
-                        #else
+#else
                         var menu = FindObjectOfType<TDU2TDUMedia>();
-                        #endif
+#endif
                         if (menu == null)
                         {
                             var go = new GameObject("TDUMedia");
@@ -2148,7 +2149,7 @@ namespace TDU2.Vehicles
                         DebugManager.Debug("Try open TDUMedia");
                         UpdateUiAim(null);
                         menu.Open();
-                    } 
+                    }
                     break;
                 case 22: if (!OpenClothesShop()) goto default; break;
                 case 29: OpenHairdresser(); break;  // Friseur (Hairdresser_area) -> shopsavatar.vmf "hairdresser"
@@ -2301,9 +2302,9 @@ namespace TDU2.Vehicles
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (_ui == null) { CloseCasinoMenu(); return; }
             if (Time.unscaledTime - _casinoOpenedAt < 0.15f) return;   // Taste, mit der geöffnet wurde
-            if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) _ui.Input("Move", "up");
-            if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) _ui.Input("Move", "down");
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.E))
+            if (TDU2.Vehicles.TDU2Nav.Up() || Input.GetKeyDown(KeyCode.W)) _ui.Input("Move", "up");
+            if (TDU2.Vehicles.TDU2Nav.Down() || Input.GetKeyDown(KeyCode.S)) _ui.Input("Move", "down");
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed())
             {
                 if (_ui.Input("A") && _casinoFlyAt < 0f) _casinoFlyAt = Time.unscaledTime + 1.5f;
             }
@@ -2415,13 +2416,13 @@ namespace TDU2.Vehicles
             DiaryWatchdog();
             if (Time.unscaledTime - _diaryOpenedAt < 0.2f) return;   // Taste, mit der geöffnet wurde
             if (UpdateMyLife()) return;   // MyTDULife: Foto-Sucher bzw. Texteingabe haben die Tastatur
-            if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) _ui.Input("Move", "up");
-            if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) _ui.Input("Move", "down");
-            if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) _ui.Input("Move", "left");
-            if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) _ui.Input("Move", "right");
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space)) _ui.Input("A");
-            if (Input.GetKeyDown(KeyCode.Y)) _ui.Input("Y");
-            if (Input.GetKeyDown(KeyCode.X)) _ui.Input("X");
+            if (TDU2.Vehicles.TDU2Nav.Up() || Input.GetKeyDown(KeyCode.W)) _ui.Input("Move", "up");
+            if (TDU2.Vehicles.TDU2Nav.Down() || Input.GetKeyDown(KeyCode.S)) _ui.Input("Move", "down");
+            if (TDU2.Vehicles.TDU2Nav.Left() || Input.GetKeyDown(KeyCode.A)) _ui.Input("Move", "left");
+            if (TDU2.Vehicles.TDU2Nav.Right() || Input.GetKeyDown(KeyCode.D)) _ui.Input("Move", "right");
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed()) _ui.Input("A");
+            if (TDU2.Vehicles.TDU2Nav.Y()) _ui.Input("Y");
+            if (TDU2.Vehicles.TDU2Nav.X()) _ui.Input("X");
             // ESC/Rücktaste: zentraler Menüablauf (TDU2MenuFlow.cs)
 #endif
         }
@@ -2635,9 +2636,11 @@ namespace TDU2.Vehicles
         {
             if (visible)
             {
+                _extActive = false; _extNames = null;
                 foreach (var go in _hiddenExteriors) if (go != null) go.SetActive(true);
                 _hiddenExteriors.Clear();
                 RestoreIntruders();
+                Manager?.Streamer?.BlockLod1(null);   // grobe LOD1-Gebäude wieder nach Entfernung steuern
                 return;
             }
             if (_spot == null || Manager.Streamer.MapRoot == null) return;
@@ -2657,7 +2660,36 @@ namespace TDU2.Vehicles
                     if (!haveBounds) { ib = r.bounds; haveBounds = true; } else ib.Encapsulate(r.bounds);
                 }
             if (haveBounds) { _interiorBounds = ib; _haveInteriorBounds = true; ib.Expand(1.0f); }
+            // grobe LOD1-Gebäude (Area-Blöcke, Spot-Exterior "_low"), die in den Raum ragen, aus – auch wenn der LOD0-Sektor noch lädt
+            if (haveBounds) Manager.Streamer.BlockLod1(ib);
+            else if (_holder != null) { var hb = new Bounds(_holder.position, new Vector3(40f, 20f, 40f)); Manager.Streamer.BlockLod1(hb); }
 
+            _extNames = names; _extHaveBounds = haveBounds; _extBounds = ib; _extActive = true;
+            _extUntil = Time.unscaledTime + 30f; _extNext = Time.unscaledTime + 1f; _extChildCount = Manager.Streamer.MapRoot.childCount;
+            HideSpotExterior();
+        }
+
+        // Exterior-Platzhalter, die erst NACH dem Betreten geladen werden (z.B. "Zurück zur Fahrschule" aus dem ESC-Menü weit weg vom
+        // Spot: die Kacheln um die Schule streamen erst nach dem Teleport ins Interieur) -> erneut ausblenden, solange man drinnen ist
+        List<string> _extNames; bool _extHaveBounds, _extActive; Bounds _extBounds; float _extUntil, _extNext; int _extChildCount;
+
+        void UpdateSpotExterior()
+        {
+            if (!_extActive || Time.unscaledTime < _extNext || Manager?.Streamer?.MapRoot == null) return;
+            int cc = Manager.Streamer.MapRoot.childCount;
+            bool early = Time.unscaledTime < _extUntil;
+            _extNext = Time.unscaledTime + (early ? 1f : 3f);
+            if (!early && cc == _extChildCount) return;   // später nur, wenn neue Kacheln dazugekommen sind
+            _extChildCount = cc;
+            HideSpotExterior();
+        }
+
+        void HideSpotExterior()
+        {
+            if (_spot == null || Manager?.Streamer?.MapRoot == null || _extNames == null) return;
+            string n1 = "Spot_" + _spot.Code, n2 = n1 + "_low";
+            var center = Manager.Streamer.MapRoot.TransformPoint(_spot.Position);
+            var names = _extNames; bool haveBounds = _extHaveBounds; var ib = _extBounds;
             foreach (var t in Manager.Streamer.MapRoot.GetComponentsInChildren<Transform>(false))
             {
                 if (t.name != n1 && t.name != n2) continue;

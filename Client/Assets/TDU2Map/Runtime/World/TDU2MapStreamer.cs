@@ -616,6 +616,7 @@ namespace TDU2
         {
             if (_index == null) return;
             if (Viewer == null && Camera.main != null) Viewer = Camera.main.transform;
+            else if (Viewer != null && Time.frameCount % 15 == 0) FollowActiveCamera();
             if (Viewer == null) return;
             _viewerGame = _root.InverseTransformPoint(Viewer.position);
             Shader.SetGlobalVector(IdOrigin, _root.position);   // Meer: Wellen in Inselkoordinaten (Floating Origin)
@@ -631,7 +632,7 @@ namespace TDU2
                 ScanAreas();
                 ScanSectors();
             }
-            if (Time.unscaledTime >= _nextLodCheck) { _nextLodCheck = Time.unscaledTime + 1f; EnforceLod1(); }
+            if (Time.unscaledTime >= _nextLodCheck) { _nextLodCheck = Time.unscaledTime + 1f; EnforceLod1(); if (_lod1Blocked) ApplyIslandLod(); }
             BuildCompleted();
             // Kartengelände im Hintergrund vorbereiten, sobald die Welt um den Spieler steht (dann ist die Karte beim ersten Öffnen scharf)
             if (PreloadMapTerrain && _mapTask == null && Time.unscaledTime > 15f) RequestMapTerrain();   // ein Hintergrund-Thread
@@ -817,6 +818,31 @@ namespace TDU2
             }
         }
 
+        /// <summary>
+        /// Betrachter nachführen: war der Betrachter eine Kamera, die inzwischen aus ist (Kino-/Menü-/Rennschul-Kamera, Kamera
+        /// nach Szenenwechsel), streamte die Welt weiter um deren alte Position – Gebäude blieben in groben LOD-Stufen, Bäume/Gras
+        /// (eigene Viewer-Referenz) falsch. Dann auf die aktive Hauptkamera wechseln und Gras/Vegetation mitziehen.
+        /// </summary>
+        void FollowActiveCamera()
+        {
+            var cur = Viewer.GetComponent<Camera>();
+            if (cur == null || cur.isActiveAndEnabled) return;
+            var main = Camera.main;
+            if (main == null || main.transform == Viewer) return;
+            SetViewer(main.transform);
+        }
+
+        /// <summary>Betrachter setzen (Streaming, Gras, Vegetation).</summary>
+        public void SetViewer(Transform viewer)
+        {
+            if (viewer == null || viewer == Viewer) return;
+            var old = Viewer;
+            Viewer = viewer;
+            if (_root == null) return;
+            foreach (var g in _root.GetComponentsInChildren<GrassRenderer>(true)) if (g != null && (g.Viewer == old || g.Viewer == null)) g.Viewer = viewer;
+            foreach (var v in _root.GetComponentsInChildren<VegetationRenderer>(true)) if (v != null && (v.Viewer == old || v.Viewer == null)) v.Viewer = viewer;
+        }
+
         /// <summary>Ein Sektor darf erst laden, wenn alle Areas, die er überlappt, gebaut sind (sonst Überlappung mit LOD2).</summary>
         bool AreasReadyFor(SectorKey k)
         {
@@ -960,7 +986,7 @@ namespace TDU2
             foreach (var st in _areas.Values)
             {
                 if (st.Built || st.Failed || st.Task == null || !st.Task.IsCompleted) continue;
-                if (st.Task.IsFaulted) { st.Failed = true; Debug.LogWarning($"[TDU2] {st.Key}: {st.Task.Exception?.GetBaseException().Message}"); continue; }
+                if (st.Task.IsFaulted) { st.Failed = true; Debug.LogWarning($"{st.Key}: {st.Task.Exception?.GetBaseException().Message}"); continue; }
                 BuildArea(st, st.Task.Result);
                 return;
             }
@@ -968,7 +994,7 @@ namespace TDU2
             foreach (var st in _sectors.Values)
             {
                 if (st.Built || st.Failed || st.Task == null || !st.Task.IsCompleted) continue;
-                if (st.Task.IsFaulted) { st.Failed = true; Debug.LogWarning($"[TDU2] {st.Key}: {st.Task.Exception?.GetBaseException().Message}"); continue; }
+                if (st.Task.IsFaulted) { st.Failed = true; Debug.LogWarning($"{st.Key}: {st.Task.Exception?.GetBaseException().Message}"); continue; }
                 float d = WorldLayout.DistanceToRect(new Vector2(_viewerGame.x, _viewerGame.z), WorldLayout.SectorRect(st.Key));
                 if (d < best) { best = d; next = st; }
             }
@@ -1059,12 +1085,83 @@ namespace TDU2
         /// <summary>LOD1-Objekt sichtbar, solange keiner seiner Sektoren als LOD0 gebaut ist.</summary>
         bool Lod1Wanted(GameObject go, SectorKey key)
         {
+            bool wanted;
             if (go != null && _lod1Keys.TryGetValue(go, out var keys))
             {
-                foreach (var k in keys) if (SectorBuilt(k)) return false;
-                return true;
+                wanted = true;
+                foreach (var k in keys) if (SectorBuilt(k)) { wanted = false; break; }
             }
-            return !SectorBuilt(key);
+            else wanted = !SectorBuilt(key);
+            if (wanted && _lod1Blocked && go != null && Lod1LocalBounds(go, out var b) && b.Intersects(_lod1Block)) return false;
+            return wanted;
+        }
+
+        // ------------------------------------------------------------------ LOD1 im Interieur sperren
+        // Nach einem Teleport direkt ins Interieur (Ende der Testfahrt, Rückkehr in die Rennschule) ist der LOD0-Sektor am Spot
+        // noch nicht gebaut -> das grobe LOD1-Gebäude (Area-Block / Spot-Exterior "_low") stand im Raum und flackerte mit dem
+        // Interieur. Solange ein Interieur offen ist, bleiben LOD1-Objekte aus, die seinen Quader schneiden.
+        bool _lod1Blocked;
+        Bounds _lod1Block;   // in MapRoot-Koordinaten (unabhängig vom Floating Origin)
+        readonly Dictionary<GameObject, Bounds> _lod1Bounds = new Dictionary<GameObject, Bounds>();
+
+        /// <summary>LOD1-Objekte im Quader (Welt) ausblenden; null = Sperre aufheben.</summary>
+        public void BlockLod1(Bounds? world)
+        {
+            if (world.HasValue && _root != null)
+            {
+                var w = world.Value; bool any = false; var lb = new Bounds();
+                for (int i = 0; i < 8; i++)
+                {
+                    var c = new Vector3((i & 1) != 0 ? w.max.x : w.min.x, (i & 2) != 0 ? w.max.y : w.min.y, (i & 4) != 0 ? w.max.z : w.min.z);
+                    var l = _root.InverseTransformPoint(c);
+                    if (!any) { lb = new Bounds(l, Vector3.zero); any = true; } else lb.Encapsulate(l);
+                }
+                _lod1Block = lb; _lod1Blocked = true;
+            }
+            else _lod1Blocked = false;
+            foreach (var kv in _lod1BySector)
+                foreach (var go in kv.Value)
+                    if (go != null) go.SetActive(Lod1Wanted(go, kv.Key));
+            ApplyIslandLod();
+        }
+
+        /// <summary>
+        /// Grobes Insel-Gelände (LOD2_Island) je Area: an, solange die Area nicht gebaut ist – außer es schneidet ein offenes
+        /// Interieur (nach einem Teleport ins Interieur lag sonst das Insel-Gelände als zweite Bodenfläche quer durch den Raum).
+        /// </summary>
+        void ApplyIslandLod()
+        {
+            foreach (var kv in _islandPieces)
+            {
+                var go = kv.Value;
+                if (go == null) continue;
+                bool want = ShowIslandLod && !(_areas.TryGetValue(kv.Key, out var st) && st.Built);
+                if (want && _lod1Blocked && Lod1LocalBounds(go, out var b) && b.Intersects(_lod1Block)) want = false;
+                if (go.activeSelf != want) go.SetActive(want);
+            }
+        }
+
+        /// <summary>Ausdehnung eines LOD1-Objekts in MapRoot-Koordinaten (aus den Meshes, auch wenn es gerade aus ist; gemerkt).</summary>
+        bool Lod1LocalBounds(GameObject go, out Bounds b)
+        {
+            if (_lod1Bounds.TryGetValue(go, out b)) return b.size != Vector3.zero;
+            bool any = false; b = new Bounds();
+            if (_root != null)
+                foreach (var mf in go.GetComponentsInChildren<MeshFilter>(true))
+                {
+                    var m = mf != null ? mf.sharedMesh : null;
+                    if (m == null) continue;
+                    var mb = m.bounds;
+                    for (int i = 0; i < 8; i++)
+                    {
+                        var c = new Vector3((i & 1) != 0 ? mb.max.x : mb.min.x, (i & 2) != 0 ? mb.max.y : mb.min.y, (i & 4) != 0 ? mb.max.z : mb.min.z);
+                        var l = _root.InverseTransformPoint(mf.transform.TransformPoint(c));
+                        if (!any) { b = new Bounds(l, Vector3.zero); any = true; } else b.Encapsulate(l);
+                    }
+                }
+            if (!any) b = new Bounds();
+            _lod1Bounds[go] = b;
+            return any;
         }
 
         float _nextLodCheck;
@@ -1187,10 +1284,12 @@ namespace TDU2
             holder.transform.SetParent(st.Root.transform, false);
             try
             {
-                int n = _actors.Build(st.Model.Actors, holder.transform, _textures, st.Res, _opt, _root);
+                // Wegweiser-Text der World Actors: je Schild als Kind des Schilds (fällt mit um, statt in der Luft zu bleiben)
+                Action<PmiInstance, GameObject> onInst = null;
+                if (ShowSignText) onInst = (inst, go) => BuildSignTextOn(st, inst, go);
+                int n = _actors.Build(st.Model.Actors, holder.transform, _textures, st.Res, _opt, _root, onInst);
                 if (n == 0) { UnityUtil.SafeDestroy(holder); return; }
                 TDU2.Interior.InteriorFx.ApplyUva(_actors.Model?.Bank?.FilePath, holder.transform, true);
-                if (ShowSignText) BuildSignTexts(st, st.Model.Actors, "SignTextActors");   // Wegweiser-Text der World Actors
                 // wie im Spiel: Poller, Schilder, Ampeln, Mülleimer fallen beim Anfahren um (Bänke bleiben fest)
                 foreach (Transform grp in holder.transform)
                     foreach (Transform inst in grp)
@@ -1286,8 +1385,8 @@ namespace TDU2
             // World Actors schon vor der Library gebaut: Schildertext jetzt nachholen (Layout/Atlas kommen aus commonworld)
             if (ShowSignText)
                 foreach (var st in _sectors.Values)
-                    if (st.Built && st.ActorsDone && st.Root != null && st.Model?.Actors != null && st.Root.transform.Find("SignTextActors") == null)
-                        BuildSignTexts(st, st.Model.Actors, "SignTextActors");
+                    if (st.Built && st.ActorsDone && st.Root != null && st.Model?.Actors != null)
+                        RebuildActorSignTexts(st);
         }
 
         void TryAddVegetation(SectorState st)
@@ -1362,6 +1461,66 @@ namespace TDU2
             mr.sharedMaterial = _signMat;
             mr.shadowCastingMode = ShadowCastingMode.Off;
             mr.receiveShadows = false;
+        }
+
+        /// <summary>Material des Schildertexts (Glyphen-Atlas rsalphab aus commonworld), null solange nicht geladen.</summary>
+        Material SignMaterial()
+        {
+            if (_signMat != null) return _signMat;
+            if (_textures == null) return null;
+            var atlas = _textures.Get(_textures.KeyByName("rsalphab.2db"), TextureWrapMode.Clamp, TextureWrapMode.Clamp);
+            var sh = Shaders.ObjectTransparent ?? Shader.Find("Sprites/Default");
+            if (atlas == null || sh == null) return null;
+            _signMat = new Material(sh) { name = "TDU2_SignText", mainTexture = atlas, renderQueue = 3001 };
+            if (_signMat.HasProperty("_VcMul")) _signMat.SetFloat("_VcMul", 1f);
+            if (_signMat.HasProperty("_Lit")) _signMat.SetFloat("_Lit", 1f);
+            if (_signMat.HasProperty("_AlphaSource")) _signMat.SetFloat("_AlphaSource", 0f);
+            if (_signMat.HasProperty("_Cull")) _signMat.SetFloat("_Cull", 0f);
+            if (_signMat.HasProperty("_SrcBlend")) { _signMat.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha); _signMat.SetFloat("_DstBlend", (float)BlendMode.OneMinusSrcAlpha); }
+            return _signMat;
+        }
+
+        /// <summary>
+        /// Text eines einzelnen Wegweisers (World Actor) als eigenes Mesh am Schild-Objekt: die Instanz steht bereits an ihrer
+        /// Platzierung (TRS * Pre), die Glyphen liegen im Raum des Schildmodells. So kippt der Text mit dem Schild um (vorher
+        /// lag aller Text eines Sektors in einem gemeinsamen Mesh und blieb nach dem Umfahren in der Luft stehen).
+        /// </summary>
+        void BuildSignTextOn(SectorState st, PmiInstance inst, GameObject sign)
+        {
+            var lay = _signLayout;
+            if (lay == null || inst.SignCodes == null || sign == null || sign.transform.Find("SignText") != null) return;
+            var mat = SignMaterial();
+            if (mat == null) return;
+            var v = new List<Vector3>(); var uv = new List<Vector2>(); var col = new List<Color32>(); var nrm = new List<Vector3>(); var tri = new List<int>();
+            if (lay.AddSign(inst.SignCodes, Matrix4x4.identity, v, uv, col, nrm, tri) == 0 || tri.Count == 0) return;
+            var mesh = new Mesh { name = "SignText " + st.Key + " " + sign.name };
+            mesh.SetVertices(v); mesh.SetUVs(0, uv); mesh.SetColors(col); mesh.SetNormals(nrm); mesh.SetTriangles(tri, 0);
+            mesh.RecalculateBounds();
+            st.Res.Owned.Add(mesh);
+            var go = new GameObject("SignText");
+            go.layer = sign.layer;
+            go.transform.SetParent(sign.transform, false);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = mat;
+            mr.shadowCastingMode = ShadowCastingMode.Off;
+            mr.receiveShadows = false;
+        }
+
+        /// <summary>Schildertext an schon gebauten World Actors nachholen (gleiche Reihenfolge wie WorldActorLib.Build).</summary>
+        void RebuildActorSignTexts(SectorState st)
+        {
+            var holder = st.Root != null ? st.Root.transform.Find("WorldActors") : null;
+            if (holder == null || _actors == null || st.Model?.Actors == null) return;
+            int gi = 0;
+            foreach (var g in st.Model.Actors.Groups)
+            {
+                if (!_actors.ByHc.TryGetValue(g.Key, out var set) || set == null || g.Instances.Count == 0) continue;
+                if (gi >= holder.childCount) break;
+                var grp = holder.GetChild(gi++);
+                for (int i = 0; i < g.Instances.Count && i < grp.childCount; i++)
+                    BuildSignTextOn(st, g.Instances[i], grp.GetChild(i).gameObject);
+            }
         }
 
         void AddPlacements(VegetationRenderer veg, PmiFile pmi, Vector3 origin, BuildResources res = null)

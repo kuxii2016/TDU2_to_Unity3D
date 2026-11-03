@@ -1,9 +1,11 @@
 using System.Text;
 using TDU2.Online;
 using TDU2.Racing;
+using TDU2.UI;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Sauberes Verlassen aller Interieur-Menüs (Casino, Händler, Tagebuch, MyTDULife, My House) über EINE Stelle:
@@ -96,7 +98,7 @@ namespace TDU2.Vehicles
             }
             else { _escDownAt = -1f; _escHoldDone = false; }
 
-            bool esc = Input.GetKeyDown(KeyCode.Escape);
+            bool esc = Input.GetKeyDown(KeyCode.Escape) || TDU2.Vehicles.TDU2Nav.PadBack();
             bool bsp = Input.GetKeyDown(KeyCode.Backspace) && top != MenuLayer.LifeText;   // Rücktaste löscht im Textfeld
             if (esc || bsp)
             {

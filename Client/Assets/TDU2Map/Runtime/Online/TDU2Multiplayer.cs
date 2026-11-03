@@ -5,6 +5,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using TDU2.Interior;
+using TDU2.Online.Net;
+using TDU2.UI;
 using TDU2.Vehicles;
 using UnityEngine;
 
@@ -127,7 +130,28 @@ namespace TDU2.Online
         }
 
         readonly Dictionary<int, Remote> _remotes = new Dictionary<int, Remote>();
-        readonly ConcurrentQueue<(byte[] data, double t)> _inbox = new ConcurrentQueue<(byte[], double)>();
+        // Empfang: je Pakettyp eine Klasse (Online/Net), der Dispatcher verteilt nach Byte 0
+        readonly PlayerStatePacketIn _stateIn = new PlayerStatePacketIn();
+        readonly ChatPacketIn _chatPk = new ChatPacketIn();
+        readonly TrafficPacketIn _trafficPk = new TrafficPacketIn();
+        PongPacketIn _pong;
+        UdpDispatcher _dispatch;
+        ConcurrentQueue<(byte[] data, double t)> _inbox => _stateIn.Queue;
+        float _nextPing;
+        /// <summary>Laufzeit zum Server (geglättet, ms); -1 = unbekannt.</summary>
+        public static double PingMs => Instance != null && Instance._pong != null ? Instance._pong.SmoothRttMs : -1;
+        /// <summary>P2P zu den Lobby-Mitspielern (Hole-Punching, Relay des Servers als Rückfall).</summary>
+        public TDU2PeerMesh Mesh { get; private set; }
+        /// <summary>Lokaler UDP-Endpunkt "ip:port" (für Mitspieler im selben LAN), leer bis zum Verbinden.</summary>
+        public string LocalEndpoint { get; private set; } = "";
+        [Tooltip("Mitspieler weiter weg als … m bekommen (P2P) nur jedes 4. Zustandspaket")]
+        public float PeerFarRange = 1500f;
+        [Tooltip("Verkehrspakete (P2P) nur an Mitspieler innerhalb … m")]
+        public float PeerTrafficRange = 1200f;
+        float _nextServerState, _nextMeshLog;
+        int _lastMeshAll = -1, _lastMeshDirect = -1;
+        /// <summary>Lobby laut Server (aus dem Ping) und Spieler darin.</summary>
+        public static int PingLobby => Instance != null && Instance._pong != null ? Instance._pong.Lobby : 0;
         UdpClient _udp;
         Thread _recv;
         volatile bool _run;
@@ -157,6 +181,24 @@ namespace TDU2.Online
             EnsureSocket();
             Receive();
             ReceiveChat();
+            Mesh?.Tick();
+            if (Mesh != null && Mesh.Active && Time.unscaledTime >= _nextMeshLog)
+            {
+                _nextMeshLog = Time.unscaledTime + 30f;
+                int all = Mesh.PeerCount, direct = Mesh.DirectCount;
+                if (all != _lastMeshAll || direct != _lastMeshDirect)
+                {
+                    _lastMeshAll = all; _lastMeshDirect = direct;
+                    Debug.Log($"[TDU2] P2P: {direct}/{all} Mitspieler direkt, {all - direct} über das Relay des Servers");
+                }
+            }
+            // Ping alle 2 s: Laufzeit messen, NAT/CGNAT-Zuordnung offen halten (auch ohne Zustandspakete, z.B. im Menü)
+            if (_udp != null && TDU2Session.LoggedIn && TDU2Session.PlayerId != 0 && Time.unscaledTime >= _nextPing)
+            {
+                _nextPing = Time.unscaledTime + 2f;
+                var ping = PingPacketOut.Build(TDU2Session.PlayerId, TDU2Session.UdpKey, (uint)(Now * 1000.0));
+                try { _udp.Send(ping, ping.Length, _server); } catch (Exception) { }
+            }
             if (_udp != null && TDU2Session.LoggedIn && TDU2Session.PlayerId != 0 && Time.unscaledTime >= _nextSend)
             {
                 _nextSend = Time.unscaledTime + 1f / Mathf.Max(2f, SendRate);
@@ -242,8 +284,18 @@ namespace TDU2.Online
                 if (ip == null && addrs.Length > 0) ip = addrs[0];
                 if (ip == null) return;
                 _server = new IPEndPoint(ip, port);
-                _udp = new UdpClient(ip.AddressFamily);
+                // fester lokaler Port (derselbe für Server und Mitspieler – sonst klappt Hole-Punching nicht)
+                _udp = new UdpClient(new IPEndPoint(ip.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
                 try { _udp.Client.IOControl(-1744830452, new byte[] { 0 }, null); } catch (Exception) { }   // Windows: ICMP "Port nicht erreichbar" ignorieren
+                try { _udp.Client.ReceiveBufferSize = 1 << 20; _udp.Client.SendBufferSize = 256 * 1024; } catch (Exception) { }
+                if (Mesh == null) Mesh = new TDU2PeerMesh(() => Now);
+                Mesh.Bind(_udp);
+                LocalEndpoint = DetectLocalEndpoint(ip, ((IPEndPoint)_udp.Client.LocalEndPoint).Port);
+                if (_dispatch == null)
+                {
+                    _pong = new PongPacketIn(() => Now * 1000.0);
+                    _dispatch = new UdpDispatcher().Register(_stateIn).Register(_chatPk).Register(_trafficPk).Register(_pong);
+                }
                 _run = true;
                 var udp = _udp;
                 _recv = new Thread(() => ReceiveLoop(udp)) { IsBackground = true, Name = "TDU2 UDP" };
@@ -260,9 +312,15 @@ namespace TDU2.Online
                 try
                 {
                     var d = udp.Receive(ref any);
-                    if (d != null && d.Length >= 3 + StateSizeOld && d[0] == 2 && _inbox.Count < 4000) _inbox.Enqueue((d, Now));
-                    else if (d != null && d.Length >= 8 && d[0] == 3 && _chatIn.Count < 200) _chatIn.Enqueue(d);
-                    else if (d != null && d.Length >= 10 && d[0] == 6 && TrafficInbox.Count < 2000) TrafficInbox.Enqueue((d, Now));
+                    if (d == null || d.Length == 0) continue;
+                    var from = any;
+                    if (from.Equals(_server)) { _dispatch?.Dispatch(d, Now); continue; }
+                    // direkt von einem Mitspieler (P2P): Punch oder Zustand/Verkehr von einem bekannten Endpunkt
+                    var mesh = Mesh;
+                    if (mesh == null) continue;
+                    if (d[0] == UdpPacketId.PeerPunch) { mesh.OnPunch(d, from); continue; }
+                    if ((d[0] == UdpPacketId.StateOut || d[0] == UdpPacketId.TrafficOut) && d.Length >= 3 && mesh.AcceptDirect(from, d[1] | (d[2] << 8)))
+                        _dispatch?.Dispatch(d, Now);
                 }
                 catch (SocketException) { if (!_run) break; }
                 catch (ObjectDisposedException) { break; }
@@ -381,7 +439,55 @@ namespace TDU2.Online
                 WriteI32(b, len + 10, Manager.InteriorId);
                 len += ExtraExt;
             }
-            try { _udp.Send(b, len, _server); } catch (Exception) { }
+            SendToLobby(UdpPacketId.StateOut, b, len, true);
+        }
+
+        /// <summary>
+        /// Client-Paket [Typ][pid][key][Daten] an die Lobby: mit P2P direkt an erreichbare Mitspieler und über den Relay-Umschlag
+        /// an den Rest; ohne P2P (Server erlaubt es nicht) wie bisher komplett über den Server.
+        /// </summary>
+        void SendToLobby(byte inner, byte[] b, int len, bool isState)
+        {
+            var mesh = Mesh;
+            if (mesh == null || !mesh.Active)
+            {
+                try { _udp.Send(b, len, _server); } catch (Exception) { }
+                return;
+            }
+            int plen = len - UdpPacketId.ClientHeader;
+            var peer = new byte[UdpPacketId.ServerHeader + plen];
+            peer[0] = inner;
+            peer[1] = b[1]; peer[2] = b[2];
+            Buffer.BlockCopy(b, UdpPacketId.ClientHeader, peer, UdpPacketId.ServerHeader, plen);
+            // eigene Position (Spielkoordinaten) aus dem Zustand bzw. dem letzten gesendeten Zustand
+            Vector3 me = _lastPos;
+            uint seq = _seq;
+            Func<int, bool> include = id =>
+            {
+                if (!_remotes.TryGetValue(id, out var r) || !r.HasVis) return true;
+                float range = isState ? PeerFarRange : PeerTrafficRange;
+                bool near = (r.Cur.P - me).sqrMagnitude < range * range;
+                return near || (isState && seq % 4 == 0);   // weit weg: Zustand nur jedes 4. Mal, Verkehr gar nicht
+            };
+            // Zustand ~2/s auch an den Server (Spielerliste, Karte, Lobby), selbst wenn alle Mitspieler direkt erreichbar sind
+            bool force = isState && Time.unscaledTime >= _nextServerState;
+            if (force) _nextServerState = Time.unscaledTime + 0.5f;
+            mesh.Send(inner, peer, peer.Length, _server, TDU2Session.PlayerId, TDU2Session.UdpKey, include, force);
+        }
+
+        /// <summary>Lokale IP, über die der Server erreicht wird (UDP "verbinden" sendet nichts), mit dem eigenen Port.</summary>
+        static string DetectLocalEndpoint(IPAddress server, int port)
+        {
+            try
+            {
+                using (var s = new Socket(server.AddressFamily, SocketType.Dgram, ProtocolType.Udp))
+                {
+                    s.Connect(server, 9);
+                    var ip = ((IPEndPoint)s.LocalEndPoint).Address;
+                    return (ip.AddressFamily == AddressFamily.InterNetworkV6 ? "[" + ip + "]" : ip.ToString()) + ":" + port;
+                }
+            }
+            catch (Exception) { return ""; }
         }
 
         /// <summary>Nächstes Stück der eigenen Lackierung anhängen (Karussell). Liefert die neue Paketlänge.</summary>
@@ -521,7 +627,7 @@ namespace TDU2.Online
         // ------------------------------------------------------------------ Chat (UDP, über den Server an alle)
         // Client -> Server: [4][u16 Spieler][u32 Schlüssel][u32 Nachricht-Nr][UTF-8 Text]   (zweimal gesendet gegen Paketverlust)
         // Server -> Client: [3][u16 Spieler][u32 Nachricht-Nr][UTF-8 Name][0][UTF-8 Text]
-        readonly ConcurrentQueue<byte[]> _chatIn = new ConcurrentQueue<byte[]>();
+        ConcurrentQueue<(byte[] data, double t)> _chatIn => _chatPk.Queue;
         readonly Queue<(int pid, uint msg)> _chatSeen = new Queue<(int, uint)>();
         uint _chatSeq, _chatBase;
         float _chatResendAt = -1f;
@@ -554,8 +660,9 @@ namespace TDU2.Online
                 try { _udp?.Send(_chatResend, _chatResend.Length, _server); } catch (Exception) { }
                 _chatResend = null; _chatResendAt = -1f;
             }
-            while (_chatIn.TryDequeue(out var d))
+            while (_chatIn.TryDequeue(out var chatPk))
             {
+                var d = chatPk.data;
                 int pid = d[1] | (d[2] << 8);
                 uint msg = BitConverter.ToUInt32(d, 3);
                 bool dup = false;
@@ -574,7 +681,7 @@ namespace TDU2.Online
         // ------------------------------------------------------------------ Verkehr (TDU2Traffic)
         // Client -> Server: [5][u16 Spieler][u32 Schlüssel][Nutzdaten], Server -> Clients: [6][u16 Absender][Nutzdaten]
         /// <summary>Empfangene Verkehrspakete ([6][u16 Absender][Nutzdaten]) mit Ankunftszeit (<see cref="Clock"/>).</summary>
-        public readonly ConcurrentQueue<(byte[] data, double t)> TrafficInbox = new ConcurrentQueue<(byte[], double)>();
+        public ConcurrentQueue<(byte[] data, double t)> TrafficInbox => _trafficPk.Queue;
         /// <summary>Uhr dieses Clients (Sekunden) – Zeitbasis der Pakete.</summary>
         public double Clock => Now;
         public bool CanSend => _udp != null && _server != null && TDU2Session.LoggedIn && TDU2Session.PlayerId != 0;
@@ -588,7 +695,8 @@ namespace TDU2.Online
             b[1] = (byte)pid; b[2] = (byte)(pid >> 8);
             WriteU32(b, 3, TDU2Session.UdpKey);
             Buffer.BlockCopy(payload, 0, b, 7, len);
-            try { _udp.Send(b, b.Length, _server); return true; } catch (Exception) { return false; }
+            SendToLobby(UdpPacketId.TrafficOut, b, b.Length, false);
+            return true;
         }
 
         /// <summary>Mitspieler-Autos (Darstellung) in Spielkoordinaten: Id, Position, Geschwindigkeit, Richtung, halbe Länge – für die Verkehrs-KI.</summary>

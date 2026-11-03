@@ -30,6 +30,7 @@ public class DebugManager : MonoBehaviour
     public string StartVehicle = "delta_integrale_evo_2";
     [UnityEngine.Tooltip("Geschichte beim nächsten Login ab diesem Schritt neu beginnen (setzt den gespeicherten Fortschritt einmalig): -1 = gespeicherter Stand, 0 = Intro (Avatar-Wahl), 1 First Garage, 2 First Freeride, 3 Meeting Tess, 4 Driving Tess, 5 Solar Crown außen, 6 innen, 7 Gebrauchtwagenhändler. Auch per Startparameter -STORYSTEP n.")]
     public int StoryStartStep = -1;
+    TDU2GameMode gameMode;
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -44,12 +45,17 @@ public class DebugManager : MonoBehaviour
         INIT("TDU2toUNITY3d Port Started: " + DateTime.Now.ToString("dd.MM.yyyy - HH:mm:ss"));
     }
 
-    public static void switchGamemode(Gamemode gamemode)
+    public static void switchGamemode(Gamemode gamemode, TDU2GameMode Manager)
     {
-        Info("--------------------------------------------------\n");
+        Info("--------------------------------------------------");
         Info("|              GAME MODE : " + (Gamemode)gamemode);
-        Info("--------------------------------------------------\n");
+        Info("--------------------------------------------------");
+        Instance.gameMode = Manager;
+        Manager.StartCoroutine("UpdatePresence");
     }
+
+
+
 
 
     public static void Debug(string Message) => Tracer.Print(NameOfCallingClass() + "()=>" + Message, "DEBUG");
@@ -81,7 +87,6 @@ public class DebugManager : MonoBehaviour
         return fullName;
     }
 }
-
 
 public class Tracer
 {

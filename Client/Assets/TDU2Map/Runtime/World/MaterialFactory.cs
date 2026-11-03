@@ -380,8 +380,15 @@ namespace TDU2.World
         {
             _pending.Add(new PendingTex
             {
-                Mat = m, Prop = prop, Key = l.TextureKey, U = TextureDef.WrapFromEden(l.AddressU), V = TextureDef.WrapFromEden(l.AddressV),
-                Detail = detail, Road = def.IsRoad, Name = def.Name ?? "?", Since = Time.unscaledTime,
+                Mat = m,
+                Prop = prop,
+                Key = l.TextureKey,
+                U = TextureDef.WrapFromEden(l.AddressU),
+                V = TextureDef.WrapFromEden(l.AddressV),
+                Detail = detail,
+                Road = def.IsRoad,
+                Name = def.Name ?? "?",
+                Since = Time.unscaledTime,
             });
         }
 

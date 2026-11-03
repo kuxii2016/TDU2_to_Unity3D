@@ -61,6 +61,7 @@ namespace TDU2.Vehicles
         [Tooltip("Innenansicht: Maus bewegt den Kopf auch ohne gedrückte Taste (wie im Spiel)")]
         public bool FreeLookInterior = false;
         float _lastLook;
+        bool _stickLook;
 
         void UpdateOrbit(float maxYaw, float minPitch, float maxPitch, bool interior)
         {
@@ -76,6 +77,23 @@ namespace TDU2.Vehicles
             }
             float kx = 0;// (Input.GetKey(KeyCode.Keypad6) ? 1f : 0f) - (Input.GetKey(KeyCode.Keypad4) ? 1f : 0f);
             float ky = 0;// (Input.GetKey(KeyCode.Keypad8) ? 1f : 0f) - (Input.GetKey(KeyCode.Keypad2) ? 1f : 0f);
+            // Gamepad: rechter Stick = Blickrichtung (Ausschlag = Winkel, wie im Spiel), loslassen -> zurück zur Mitte
+            var look = TDU2InputDevices.Look;
+            if (look != Vector2.zero)
+            {
+                float yawT = look.x * maxYaw;
+                float pitchT = look.y >= 0f ? -look.y * Mathf.Abs(minPitch) : -look.y * maxPitch;
+                _orbitYaw = Mathf.MoveTowards(_orbitYaw, yawT, 420f * Time.deltaTime);
+                _orbitPitch = Mathf.MoveTowards(_orbitPitch, Mathf.Clamp(pitchT, minPitch, maxPitch), 240f * Time.deltaTime);
+                _lastLook = Time.time - 1.3f;   // nach dem Loslassen gleich zurückfedern
+                _stickLook = true;
+                return;
+            }
+            if (_stickLook)
+            {
+                _stickLook = false;
+                if (!KeepLookDirection) { _lastLook = -10f; }
+            }
             bool held = Input.GetMouseButton(1);
             bool free = interior && FreeLookInterior && (Mathf.Abs(mx) > 0.001f || Mathf.Abs(my) > 0.001f);
             if (held || free || kx != 0f || ky != 0f)

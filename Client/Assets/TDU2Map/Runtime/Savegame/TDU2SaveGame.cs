@@ -1,10 +1,10 @@
+using EdenSavegame;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Threading.Tasks;
-using EdenSavegame;
 using TDU2.Avatars;
 using TDU2.Formats;
 using TDU2.Vehicles;
@@ -101,11 +101,11 @@ namespace TDU2.Online
         {
             if (save == null || string.IsNullOrEmpty(nick)) return Task.CompletedTask;
             db = db ?? Db();
-            if (db == null) { Debug.LogWarning("[TDU2] Savegame: Fahrzeugdatenbank fehlt – DATA nicht geschrieben"); return Task.CompletedTask; }
+            if (db == null) { Debug.LogWarning("Savegame: Vehiclebank missing – DATA not Written"); return Task.CompletedTask; }
             var copy = JsonUtility.FromJson<SaveData>(JsonUtility.ToJson(save));
             int st = Story.TDU2StoryProgress.Get(nick);
             if (st >= 0) copy.story = st;
-            if (!string.IsNullOrEmpty(reason)) Debug.Log("[TDU2] Savegame: " + reason + " -> " + PathFor(nick));
+            if (!string.IsNullOrEmpty(reason)) Debug.Log("Savegame: " + reason + " -> " + PathFor(nick));
             return Task.Run(() => Write(nick, copy, db, true));
         }
 

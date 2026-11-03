@@ -4,12 +4,13 @@ using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using TDU2.Formats;
-using TDU2.Interior;
 using TDU2.Online;
+using TDU2.UI;
+using TDU2.Vehicles;
 using TDU2.World;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// My House (Haus einrichten) wie im Spiel, mit den Original-Oberflächen aus home.vmf:
@@ -467,13 +468,13 @@ namespace TDU2.Vehicles
                 if (_fp != null) _fp.LookEnabled = _housePreview;
                 if (Cursor.lockState == CursorLockMode.Locked && !_housePreview) LockCursor(false);
                 if (Time.unscaledTime - _houseModeAt < 0.25f) return true;
-                if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) _ui.Input("Move", "left");
-                if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) _ui.Input("Move", "right");
-                if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) _ui.Input("Move", "up");
-                if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) _ui.Input("Move", "down");
-                if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space)) _ui.Input("A");
+                if (TDU2.Vehicles.TDU2Nav.Left() || Input.GetKeyDown(KeyCode.A)) _ui.Input("Move", "left");
+                if (TDU2.Vehicles.TDU2Nav.Right() || Input.GetKeyDown(KeyCode.D)) _ui.Input("Move", "right");
+                if (TDU2.Vehicles.TDU2Nav.Up() || Input.GetKeyDown(KeyCode.W)) _ui.Input("Move", "up");
+                if (TDU2.Vehicles.TDU2Nav.Down() || Input.GetKeyDown(KeyCode.S)) _ui.Input("Move", "down");
+                if (TDU2.Vehicles.TDU2Controls.ConfirmPressed()) _ui.Input("A");
                 // ESC/Rücktaste: zentraler Menüablauf (TDU2MenuFlow.cs -> B des Editors, sonst ForceHouseWalk)
-                if (Input.GetKeyDown(KeyCode.X) || Input.GetKeyDown(KeyCode.P)) _ui.Input("myhsPreview");   // Vorschau (frei umsehen)
+                if (TDU2.Vehicles.TDU2Nav.X() || Input.GetKeyDown(KeyCode.P)) _ui.Input("myhsPreview");   // Vorschau (frei umsehen)
             }
 #endif
             return true;
@@ -548,7 +549,7 @@ namespace TDU2.Vehicles
                 }
             }
             if (Time.unscaledTime - _houseModeAt < 0.3f) return;
-            bool use = Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || (Input.GetMouseButtonDown(0) && Cursor.lockState == CursorLockMode.Locked);
+            bool use = TDU2.Vehicles.TDU2Controls.Pressed("walk_use") || TDU2.Vehicles.TDU2Controls.ConfirmPressed() || (Input.GetMouseButtonDown(0) && Cursor.lockState == CursorLockMode.Locked);
             if (use && (_aimObj != null || _aimZone != null))
             {
                 if (!HouseCatalogReady) { ShowInfo("My House: Katalog wird geladen …"); return; }

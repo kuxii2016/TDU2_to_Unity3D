@@ -1,6 +1,6 @@
 using System.Globalization;
 using TDU2.Flash;
-using TDU2.Vehicles;
+using TDU2.UI;
 using UnityEngine;
 
 namespace TDU2.Racing

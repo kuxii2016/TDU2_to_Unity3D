@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
 using TDU2.Flash;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.UI
 {
     /// <summary>
     /// Spielseite der Original-Optionsmenüs (MAIN.vmf, "options"). Die Flash-Seiten legen ihre Zeilen selbst fest
@@ -89,9 +90,14 @@ namespace TDU2.Vehicles
                 var aids = (DrivingAids)i;   // Secure, Sport, HyperSport, Off
                 if (Manager != null) { Manager.Aids = aids; if (Manager.Current != null) Manager.Current.Aids = aids; }
             });
-            Choice("opts:gase:gear", "gearbox", () => new[] { T("m_Automatic", "Automatik"), T("m_Manual", "Manuell") }, 0, i =>
+            // Getriebe wie im Original: Automatik, Manuell (sequenziell), H-Schaltung, H-Schaltung + Kupplung
+            Choice("opts:gase:gear", "gearbox", () => new[] { T("m_Automatic", "Automatik"), T("m_Manual", "Manuell"),
+                                                              T("m_HShifter", "H-Schaltung"), T("m_HShifterClutch", "H-Schaltung + Kupplung") }, 0, i =>
             {
-                if (Manager != null) { Manager.AutomaticGearbox = i == 0; if (Manager.Current != null) Manager.Current.AutomaticGearbox = i == 0; }
+                if (Manager == null) return;
+                Manager.Gearbox = (TDU2VehicleManager.GearboxMode)Mathf.Clamp(i, 0, 3);
+                Manager.AutomaticGearbox = i == 0;
+                if (Manager.Current != null) Manager.Current.AutomaticGearbox = i == 0;
             });
             Choice("opts:gase:invc", "InvertCam", () => OffOn, 0, null);
             Choice("opts:gase:inax", "InvertYAxis", () => OffOn, 0, null);
@@ -111,18 +117,21 @@ namespace TDU2.Vehicles
             });
 
             // ---------------- Steuerung (opts:cont:...)
-            Choice("opts:cont:sede:whde", "WhatDevice", () => new[] { T("m_Keyboard_M", "Tastatur / Maus"), "Gamepad", T("m_Wheel", "Lenkrad") }, 0, null);
-            Slider("opts:cont:mous:mose", "mouse_sensitivity", 100, 50, null);
-            Choice("opts:cont:mous:moin", "mouse_invert", () => OffOn, 0, null);
-            Slider("opts:cont:weel:vibr", "vibration", 10, 5, null);
-            Choice("opts:cont:weel:ffbk", "force_feedback", () => OffOn, 1, null);
-            Slider("opts:cont:weel:lisl", "linearity", 10, 5, null);
-            Slider("opts:cont:weel:spfa", "speed_dfactor", 10, 5, null);
-            Slider("opts:cont:weel:damp", "damping", 10, 5, null);
-            Slider("opts:cont:weel:dezo", "dead_zone", 10, 1, null);
-            Slider("opts:cont:weel:clut", "clutch", 10, 5, null);
-            Slider("opts:cont:weel:thro", "throttle", 10, 5, null);
-            Slider("opts:cont:weel:brak", "brake", 10, 5, null);
+            // Gerät/Maus/Lenkrad: Werte gehen direkt an TDU2InputDevices (Regler sind sofort wirksam)
+            Choice("opts:cont:sede:whde", "WhatDevice", () => new[] { T("m_Keyboard_M", "Tastatur / Maus"), "Gamepad", T("m_Wheel", "Lenkrad") }, 0,
+                i => TDU2InputDevices.Mode = (TDU2InputDevices.DeviceMode)Mathf.Clamp(i, 0, 2));
+            Slider("opts:cont:mous:mose", "mouse_sensitivity", 100, 50, v => TDU2InputDevices.MouseSensitivity = Mathf.Max(0.1f, v / 50f));
+            Choice("opts:cont:mous:moin", "mouse_invert", () => OffOn, 0, i => TDU2InputDevices.MouseInvert = i == 1);
+            // Force Feedback (Logitech-SDK) bzw. Vibration (XInput) – TDU2ForceFeedback
+            Slider("opts:cont:weel:vibr", "vibration", 10, 5, v => TDU2ForceFeedback.Strength = v / 10f);
+            Choice("opts:cont:weel:ffbk", "force_feedback", () => OffOn, 1, i => TDU2ForceFeedback.Enabled = i == 1);
+            Slider("opts:cont:weel:lisl", "linearity", 10, 5, v => TDU2InputDevices.SteerLinearity = v / 10f);
+            Slider("opts:cont:weel:spfa", "speed_dfactor", 10, 5, v => TDU2InputDevices.SpeedFactor = v / 10f);
+            Slider("opts:cont:weel:damp", "damping", 10, 5, v => TDU2ForceFeedback.Damping = v / 10f);
+            Slider("opts:cont:weel:dezo", "dead_zone", 10, 1, v => TDU2InputDevices.DeadZone = v / 20f);
+            Slider("opts:cont:weel:clut", "clutch", 10, 5, v => TDU2InputDevices.ClutchLinearity = v / 10f);
+            Slider("opts:cont:weel:thro", "throttle", 10, 5, v => TDU2InputDevices.ThrottleLinearity = v / 10f);
+            Slider("opts:cont:weel:brak", "brake", 10, 5, v => TDU2InputDevices.BrakeLinearity = v / 10f);
         }
 
         string T(string key, string fallback) { var s = _t?.Invoke(key, null); return string.IsNullOrEmpty(s) ? fallback : s; }
@@ -189,6 +198,15 @@ namespace TDU2.Vehicles
         {
             if (string.IsNullOrEmpty(cmd) || !cmd.StartsWith("opts:", StringComparison.OrdinalIgnoreCase)) return false;
             if (cmd.EndsWith("open", StringComparison.OrdinalIgnoreCase)) { Publish(ui, cmd.Substring(0, cmd.Length - 4)); return true; }
+            // Grafikseite, Taste A (Film: A() in "video"): das Spiel meldet, ob Werte geändert wurden und ob sie gültig sind.
+            // Ohne Antwort spielt der Film nur "sndp:wrong" (klingt wie gesperrt). Hier gelten die Werte schon beim Umschalten,
+            // also immer "geändert + in Ordnung" -> Film fragt "Übernehmen?" (wird bestätigt), sendet opts:vide:vali und schließt die Seite.
+            if (cmd.Equals("opts:vide:test", StringComparison.OrdinalIgnoreCase))
+            {
+                ui.SetValue("/:IsVideoChanged", true);
+                ui.SetValue("/:IsVideoChangeOk", true);
+                return true;
+            }
             if (cmd.EndsWith("vali", StringComparison.OrdinalIgnoreCase) || cmd.EndsWith("canc", StringComparison.OrdinalIgnoreCase)) { PlayerPrefs.Save(); return true; }
 
             string baseCmd = cmd; int dir = 0; bool slider = false;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using TDU2.Flash;
+using TDU2.UI;
 using UnityEngine;
 
 namespace TDU2.Vehicles
@@ -528,11 +529,11 @@ namespace TDU2.Vehicles
             if (h == null || _acc == null || _acc.Model == null || _acc.Model.Visual == null) { IsOpen = false; _acc = null; return false; }
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (Time.unscaledTime - _openedAt < 0.15f) return true;
-            if (Input.GetKeyDown(KeyCode.Alpha1) || (arrows && (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)))) Choose(1);
-            else if (Input.GetKeyDown(KeyCode.Alpha2) || (arrows && (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)))) Choose(2);
-            else if (Input.GetKeyDown(KeyCode.Alpha3) || (arrows && (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)))) Choose(3);
-            else if (Input.GetKeyDown(KeyCode.Alpha4) || (arrows && (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)))) Choose(4);
-            else if (TDU2Controls.Pressed("accessories") || Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace)) Close();
+            if (Input.GetKeyDown(KeyCode.Alpha1) || (arrows && (TDU2.Vehicles.TDU2Nav.Up() || Input.GetKeyDown(KeyCode.W)))) Choose(1);
+            else if (Input.GetKeyDown(KeyCode.Alpha2) || (arrows && (TDU2.Vehicles.TDU2Nav.Right() || Input.GetKeyDown(KeyCode.D)))) Choose(2);
+            else if (Input.GetKeyDown(KeyCode.Alpha3) || (arrows && (TDU2.Vehicles.TDU2Nav.Down() || Input.GetKeyDown(KeyCode.S)))) Choose(3);
+            else if (Input.GetKeyDown(KeyCode.Alpha4) || (arrows && (TDU2.Vehicles.TDU2Nav.Left() || Input.GetKeyDown(KeyCode.A)))) Choose(4);
+            else if (TDU2Controls.Pressed("accessories") || TDU2.Vehicles.TDU2Nav.Back()) Close();
 #endif
             return true;
         }

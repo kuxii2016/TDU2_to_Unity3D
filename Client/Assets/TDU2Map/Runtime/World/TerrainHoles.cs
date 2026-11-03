@@ -327,7 +327,7 @@ namespace TDU2.World
                     }
                 }
         }
-    
+
 
         // ------------------------------------------------------------------ Gelände unter Boden-/Straßenobjekten
         /// <summary>Boden gilt als "auf dem Gelände", wenn er so weit unter (−) bzw. über (+) der Rasterhöhe liegt.</summary>

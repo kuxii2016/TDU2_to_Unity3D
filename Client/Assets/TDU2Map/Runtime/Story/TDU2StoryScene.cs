@@ -8,6 +8,7 @@ using TDU2.Flash;
 using TDU2.Formats;
 using TDU2.Interior;
 using TDU2.IO;
+using TDU2.UI;
 using TDU2.Vehicles;
 using TDU2.World;
 using UnityEngine;
@@ -1038,13 +1039,18 @@ namespace TDU2.Story
         void DiagPnj(Pnj p)
         {
             if (p.Avatar == null || !p.Avatar.Ready || !p.Avatar.Visible) return;
-            if (p.DiagN == 0 && p.DiagT <= 0f) { p.DiagT = Time.time + 1f; p.Avatar.DiagMaterials(p.Name + " (" + p.Config + ")"); }
+            if (p.DiagN == 0 && p.DiagT <= 0f) 
+            { 
+                p.DiagT = Time.time + 1f; 
+                p.Avatar.DiagMaterials(p.Name + " (" + p.Config + ")"); 
+            }
             if (p.DiagN < 3 && Time.time >= p.DiagT)
             {
                 p.DiagN++; p.DiagT = Time.time + 10f;
                 p.Avatar.DiagFace($"{p.Name} t={_main.Time:0.00} {_main.Def?.Name}");
                 // Gesichtsbild je Konfiguration einmal (Docs/Logs/face_<Konfig>.png)
-                if (p.DiagN == 1) p.Avatar.DiagSnapshot(p.Config ?? p.Name, $"{p.Name} ({p.Config}) {_main.Def?.Name}");
+                if (p.DiagN == 1) 
+                    p.Avatar.DiagSnapshot(p.Config ?? p.Name, $"{p.Name} ({p.Config}) {_main.Def?.Name}");
             }
         }
 
@@ -1110,9 +1116,11 @@ namespace TDU2.Story
             pos = Vector3.zero; rot = Quaternion.identity; fov = 60f;
             if (_main.Def == null || _main.NoCamera || Holder == null) return false;
             if (!_main.Def.Cin.Camera(_main.Def.Scenes, _main.Time, out var gp, out var gr, out fov)) return false;
+            // Fehlerhafte Kamerawerte nie an die Hauptkamera geben: eine NaN-Position verschiebt über das Floating Origin die ganze Welt
+            if (!CinIds.Finite(gp) || !CinIds.Finite(gr) || float.IsNaN(fov)) return false;
             pos = Holder.TransformPoint(gp);
             rot = CinIds.FrameRotation(Holder, gr);
-            return true;
+            return CinIds.Finite(pos) && CinIds.Finite(rot);
         }
 
         void LateUpdate()

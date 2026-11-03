@@ -6,8 +6,12 @@ using System.Threading.Tasks;
 using TDU2.Formats;
 using TDU2.IO;
 using TDU2.Online;
+using TDU2.UI;
 using TDU2.Vehicles;
 using UnityEngine;
+
+#if UNITY_EDITOR
+#endif
 
 namespace TDU2.Traffic
 {
@@ -27,40 +31,48 @@ namespace TDU2.Traffic
     /// </summary>
     public sealed class TDU2Traffic : MonoBehaviour
     {
-        [Header("Verkehr")]
+        [Header("Traffic")]
         public bool EnableTraffic = true;
-        [Tooltip("Autos im Umkreis (GamePC.cpr: TrafficMaxCount 8, VehicleMaxCount 16)")]
+        [Tooltip("Cars around the player (GamePC.cpr: TrafficMaxCount 8, VehicleMaxCount 16)")]
         [Range(0, 40)] public int MaxCars = 12;
-        [Tooltip("Dichte nach Uhrzeit (aiconfig.cpr DENSITY, Systemuhr)")]
+        [Tooltip("Density by time of day (aiconfig.cpr DENSITY, system clock)")]
         public bool DensityByTime = false;
-        [Tooltip("Spawnabstand min/max (m) – GamePC.cpr SpawnDistances 200 400")]
+        [Tooltip("Spawn distance min/max (m) – GamePC.cpr SpawnDistances 200 400")]
         public float SpawnMin = 180f, SpawnMax = 400f;
-        [Tooltip("Ab dieser Entfernung zu allen Spielern wird ein Auto entfernt (CullingConfig 500)")]
+        [Tooltip("A car is removed beyond this distance to every player (CullingConfig 500)")]
         public float DespawnDistance = 520f;
-        [Tooltip("Tempo relativ zur Tempoklasse der Straße")]
+        [Tooltip("Speed relative to the road's speed class")]
         [Range(0.5f, 1.3f)] public float SpeedFactor = 0.92f;
 
-        [Header("Physik / Darstellung")]
-        [Tooltip("Autos in diesem Umkreis sind echte Physikkörper (CullingConfig 100)")]
+        [Header("Physics / Rendering")]
+        [Tooltip("Cars within this radius are real rigid bodies (CullingConfig 100)")]
         public float PhysicsRadius = 100f;
-        [Tooltip("Höchstzahl Physik-Autos (PhysicsMaxCount 4)")]
+        [Tooltip("Maximum number of physics cars (PhysicsMaxCount 4)")]
         public int PhysicsMax = 6;
-        [Tooltip("Aufprall (m/s Relativgeschwindigkeit), ab dem ein Auto aus der KI fällt")]
+        [Tooltip("Impact (m/s relative speed) at which a car drops out of the AI")]
         public float CrashSpeed = 3.5f;
         public bool Sounds = true;
-        [Tooltip("So viele der nächsten Autos haben Motorsound")]
+        [Tooltip("How many of the nearest cars get an engine sound")]
         public int SoundMax = 3;
         public float SoundRadius = 70f;
 
-        [Header("Mehrspieler")]
+        [Header("Multiplayer")]
         public bool Sync = true;
-        [Tooltip("Pakete pro Sekunde")]
+        [Tooltip("Packets per second")]
         public float SendRate = 8f;
-        [Tooltip("Eigene Autos nur senden, wenn ein Mitspieler so nah ist (m)")]
+        [Tooltip("Only send own cars when another player is this close (m)")]
         public float RelevantDistance = 900f;
 
         [Header("Debug")]
         public bool ShowDebug;
+        [Tooltip("Draw the planned route ahead of every car (Scene view and runtime overlay)")]
+        public bool DebugRoutes = true;
+        [Tooltip("Draw a forward arrow at every car")]
+        public bool DebugArrows = true;
+        [Tooltip("Show model / speed / heading / target labels above the cars")]
+        public bool DebugLabels = true;
+        [Tooltip("Only cars within this distance are shown in the debug overlay (m)")]
+        public float DebugRange = 140f;
 
         public TDU2VehicleManager Manager;
 
@@ -125,6 +137,9 @@ namespace TDU2.Traffic
         int _myPid = -1;
         TDU2Multiplayer _mp;
         string _status = "";
+        readonly List<string> _debugPanelLines = new List<string>(16);
+        GUIStyle _debugLabel, _debugPanel;
+        Texture2D _debugBg;
         static TDU2GameData GD => TDU2GameData.Instance;
 
         sealed class LoadResult { public TrafficLanes Lanes; public List<TypeInfo> Types; public float[] Density; public List<Color> Paints; public string Log; }
@@ -143,7 +158,7 @@ namespace TDU2.Traffic
         void EnsureLoaded()
         {
             var st = Manager != null ? Manager.Streamer : null;
-            if (st == null || st.Index == null || Manager.Database == null) { _status = "warte auf Karte/Datenbank"; return; }
+            if (st == null || st.Index == null || Manager.Database == null) { _status = "waiting for map/database"; return; }
             string island = st.Index.IslandName;
             if (_loadedIsland == island && (_load != null || _lanes != null)) return;
             ClearAll();
@@ -192,7 +207,7 @@ namespace TDU2.Traffic
                         }
                     }
                     if (zones > 0) for (int i = 0; i < 13; i++) res.Density[i] /= zones;
-                    log += $", aiconfig: {zones} Zonen, {weights.Count} Autos";
+                    log += $", aiconfig: {zones} zones, {weights.Count} cars";
                 }
             }
             catch (Exception ex) { log += ", aiconfig: " + ex.Message; }
@@ -247,8 +262,8 @@ namespace TDU2.Traffic
             var t = _load; _load = null;
             if (t.IsFaulted)
             {
-                _status = "Fehler: " + t.Exception?.GetBaseException().Message;
-                Debug.LogWarning("[TDU2] Verkehr: " + t.Exception?.GetBaseException());
+                _status = "Error: " + t.Exception?.GetBaseException().Message;
+                Debug.LogWarning("[TDU2] Traffic: " + t.Exception?.GetBaseException());
                 return;
             }
             var r = t.Result;
@@ -278,7 +293,7 @@ namespace TDU2.Traffic
             {
                 if (ti.Load == null || !ti.Load.IsCompleted) continue;
                 var t = ti.Load; ti.Load = null;
-                if (t.IsFaulted) { ti.Failed = true; Debug.LogWarning("[TDU2] Verkehrsauto " + ti.Name + ": " + t.Exception?.GetBaseException().Message); continue; }
+                if (t.IsFaulted) { ti.Failed = true; Debug.LogWarning("[TDU2] Traffic car " + ti.Name + ": " + t.Exception?.GetBaseException().Message); continue; }
                 ti.Assets = t.Result;
             }
         }
@@ -292,7 +307,7 @@ namespace TDU2.Traffic
             _lanes = null;
         }
 
-        void OnDestroy() { ClearAll(); if (_container != null) UnityUtil.SafeDestroy(_container.gameObject); }
+        void OnDestroy() { ClearAll(); if (_container != null) UnityUtil.SafeDestroy(_container.gameObject); if (_debugBg != null) Destroy(_debugBg); }
 
         // ------------------------------------------------------------------ Hauptschleife
         void Update()
@@ -309,7 +324,7 @@ namespace TDU2.Traffic
             PollTypes();
             var root = Manager.Streamer != null ? Manager.Streamer.MapRoot : null;
             if (_lanes == null || root == null) return;
-            if (_container == null) _container = new GameObject("TDU2 Verkehr").transform;
+            if (_container == null) _container = new GameObject("TDU2 Traffic").transform;
             if (_mp == null) _mp = Manager.GetComponent<TDU2Multiplayer>();
 
             // Spielernummer gewechselt (An-/Abmelden): eigene Autos umschreiben
@@ -1001,14 +1016,14 @@ namespace TDU2.Traffic
                 var ti = c.Type;
                 if (ti.Assets == null) { StartTypeLoad(ti); continue; }
                 try { BuildCar(c); built++; }
-                catch (Exception ex) { Debug.LogWarning("[TDU2] Verkehrsauto aufbauen: " + ex.Message); ti.Failed = true; }
+                catch (Exception ex) { Debug.LogWarning("[TDU2] Building traffic car: " + ex.Message); ti.Failed = true; }
             }
         }
 
         void BuildCar(Car c)
         {
             var a = c.Type.Assets;
-            var go = new GameObject($"Verkehr #{c.Id & 0xFFFF} ({c.Type.Name})");
+            var go = new GameObject($"Traffic #{c.Id & 0xFFFF} ({c.Type.Name})");
             go.layer = 2;   // Ignore Raycast: Radstrahlen des Spielers treffen es nicht, Kollision bleibt
             go.transform.SetParent(_container, false);
             var model = CarModel.Build(a, go.transform);
@@ -1467,54 +1482,130 @@ namespace TDU2.Traffic
         {
             foreach (var c in _cars.Values)
             {
-                string mode = c.Removed ? "entfernt" : !c.Mine ? "fremd" : c.Mode == 1 ? "Unfall" : c.Mode == 2 ? "steht" : c.Phase == 1 ? "Kreuzung" : (c.WaitT > 0f ? "wartet" : "fährt");
                 float kmh = (c.Mine ? c.V : c.VisVel.magnitude) * 3.6f;
-                yield return (c.Id, c.Mine, c.Type?.Name ?? "-", mode, kmh, c.Owner, _hasMe ? Flat(c.Pos, _me) : 0f);
+                yield return (c.Id, c.Mine, c.Type?.Name ?? "-", ModeText(c), kmh, c.Owner, _hasMe ? Flat(c.Pos, _me) : 0f);
             }
         }
+
+        static string ModeText(Car c)
+        {
+            if (c.Removed) return "removed";
+            if (!c.Mine) return "remote";
+            if (c.Mode == 1) return "crash";
+            if (c.Mode == 2) return "stopped";
+            if (c.Phase == 1) return "junction";
+            if (c.WaitT > 0.1f) return "waiting";
+            return "driving";
+        }
+
+        /// <summary>Compass heading of a forward vector (+Z = north, +X = east).</summary>
+        static string Compass(Vector3 forward)
+        {
+            if (forward.sqrMagnitude < 1e-6f) return "-";
+            float deg = Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg;
+            if (deg < 0f) deg += 360f;
+            int i = Mathf.RoundToInt(deg / 45f) % 8;
+            string[] names = { "N", "NE", "E", "SE", "S", "SW", "W", "NW" };
+            return names[i] + " " + deg.ToString("0") + "°";
+        }
+
+        static string TargetText(Car c)
+        {
+            if (c.Phase == 1 && c.Junction != null) return "junction #" + c.Junction.Node;
+            if (c.Next != null) return "next lane L" + c.Next.Lane + " (road " + c.Next.RoadId + ")";
+            if (c.Lane != null) return "end of lane L" + c.Lane.Lane;
+            return "-";
+        }
+
+        Vector3 CarWorldPos(Car c, Transform root)
+        {
+            if (c.Go != null) return c.Go.transform.position;
+            if (c.HasVis) return root.TransformPoint(c.VisPos);
+            return root.TransformPoint(c.Pos);
+        }
+
+        Vector3 CarWorldForward(Car c)
+        {
+            if (c.Go != null)
+            {
+                var f = c.Go.transform.forward; f.y = 0f;
+                if (f.sqrMagnitude > 1e-4f) return f.normalized;
+            }
+            var wf = c.Fwd; wf.y = 0f;
+            return wf.sqrMagnitude > 1e-4f ? wf.normalized : Vector3.forward;
+        }
+
 
         void OnDrawGizmos()
         {
             if (!ShowDebug || _lanes == null || Manager == null || Manager.Streamer == null || Manager.Streamer.MapRoot == null) return;
             var root = Manager.Streamer.MapRoot;
-            var cam = Camera.main;
+            var cam = Camera.current != null ? Camera.current : Camera.main;
+            Vector3 camPos = cam != null ? cam.transform.position : Vector3.zero;
+            bool cull = cam != null;
+            int labelled = 0;
+
             foreach (var c in _cars.Values)
             {
                 if (c.Lane == null && c.Junction == null) continue;
                 if (c.Go == null && !c.HasVis) continue;
-                Vector3 wpos = c.Go != null ? c.Go.transform.position : root.TransformPoint(c.HasVis ? c.VisPos : c.Pos);
-                if (cam != null)
-                {
-                    float d = Vector3.Distance(cam.transform.position, wpos);
-                    if (d > 250f) continue;
-                }
+                Vector3 wpos = CarWorldPos(c, root);
+                float dist = cull ? Vector3.Distance(camPos, wpos) : 0f;
+                if (cull && dist > 300f) continue;
+
                 float kmh = (c.Mine ? c.V : (c.HasVis ? c.VisVel.magnitude : 0f)) * 3.6f;
-                if (c.Mode == 1) Gizmos.color = Color.magenta;
-                else if (c.Mode == 2) Gizmos.color = Color.gray;
-                else if (c.WaitT > 0.1f) Gizmos.color = Color.yellow;
-                else if (kmh > 60f) Gizmos.color = Color.red;
-                else if (kmh > 40f) Gizmos.color = Color.cyan;
-                else Gizmos.color = Color.green;
-                Gizmos.DrawWireSphere(wpos + Vector3.up * 1.2f, 0.4f);
-                if (c.Mine || (c.Go != null && cam != null && Vector3.Distance(cam.transform.position, wpos) < 120f))
+                Color col;
+                if (c.Mode == 1) col = Color.magenta;
+                else if (c.Mode == 2) col = Color.gray;
+                else if (c.WaitT > 0.1f) col = Color.yellow;
+                else if (kmh > 60f) col = Color.red;
+                else if (kmh > 40f) col = Color.cyan;
+                else col = Color.green;
+
+                Gizmos.color = col;
+                Gizmos.DrawWireSphere(wpos + Vector3.up * 1.2f, 0.45f);
+
+                var fwd = CarWorldForward(c);
+                if (DebugArrows)
+                {
+                    var from = wpos + Vector3.up * 0.4f;
+                    var tip = from + fwd * 6f;
+                    Gizmos.DrawLine(from, tip);
+                    var side = Vector3.Cross(Vector3.up, fwd).normalized;
+                    Gizmos.DrawLine(tip, tip - fwd * 1.2f + side * 0.8f);
+                    Gizmos.DrawLine(tip, tip - fwd * 1.2f - side * 0.8f);
+                }
+
+                if (DebugRoutes && (c.Mine || !cull || dist < 180f))
                 {
                     Vector3 prev = wpos;
-                    float maxS = 60f;
+                    const float maxS = 60f;
                     for (float s = 3f; s < maxS; s += 3f)
                     {
                         PointAheadCar(c, s, out Vector3 pa);
                         var p = root.TransformPoint(pa);
-                        Gizmos.color = new Color(Gizmos.color.r, Gizmos.color.g, Gizmos.color.b, 1f - s / maxS);
-                        Gizmos.DrawLine(prev, p); prev = p;
+                        Gizmos.color = new Color(col.r, col.g, col.b, 1f - s / maxS);
+                        Gizmos.DrawLine(prev, p);
+                        prev = p;
                     }
                     if (c.Next != null)
                     {
                         Gizmos.color = Color.white;
                         c.Next.Sample(Mathf.Min(10f, c.Next.Length), out Vector3 npt, out _);
-                        var np = root.TransformPoint(npt);
-                        Gizmos.DrawLine(prev, np);
+                        Gizmos.DrawLine(prev, root.TransformPoint(npt));
                     }
                 }
+
+#if UNITY_EDITOR
+                if (DebugLabels && labelled < 24 && (!cull || dist <= DebugRange))
+                {
+                    labelled++;
+                    UnityEditor.Handles.color = col;
+                    UnityEditor.Handles.Label(wpos + Vector3.up * 2.8f,
+                        (c.Type?.Name ?? "-") + "\n" + kmh.ToString("0") + " km/h · " + ModeText(c) +
+                        "\n" + Compass(fwd) + " · " + TargetText(c));
+                }
+#endif
             }
         }
 
@@ -1545,30 +1636,121 @@ namespace TDU2.Traffic
             return root.TransformPoint(c.Pos);
         }
 
+        void EnsureDebugStyles()
+        {
+            if (_debugLabel != null) return;
+            _debugBg = new Texture2D(1, 1);
+            _debugBg.SetPixel(0, 0, new Color(0f, 0f, 0f, 0.72f));
+            _debugBg.Apply();
+            _debugLabel = new GUIStyle(GUI.skin.label)
+            {
+                richText = false,
+                alignment = TextAnchor.MiddleCenter,
+                clipping = TextClipping.Overflow,
+            };
+            _debugLabel.normal.background = _debugBg;
+            _debugLabel.normal.textColor = new Color(0.95f, 0.95f, 0.95f);
+            _debugLabel.padding = new RectOffset(4, 4, 1, 1);
+            _debugPanel = new GUIStyle(_debugLabel)
+            {
+                alignment = TextAnchor.UpperLeft,
+                wordWrap = true,
+                fontSize = 12,
+            };
+            _debugPanel.padding = new RectOffset(6, 6, 4, 4);
+        }
+
         void OnGUI()
         {
             if (!ShowDebug) return;
-            GUI.Label(new Rect(10, Screen.height - 60, 900, 22), $"Verkehr: {_cars.Count} Autos ({OwnedCount} eigene) – {_status}");
+            EnsureDebugStyles();
+            float k = Screen.height / 1080f;
+            int fs = Mathf.Max(9, Mathf.RoundToInt(12f * k));
+            _debugLabel.fontSize = fs;
+            _debugPanel.fontSize = fs;
+
+            int remote = _cars.Count - OwnedCount;
+            _debugPanelLines.Clear();
+            _debugPanelLines.Add("TRAFFIC DEBUG   ·   " + _cars.Count + " cars (" + OwnedCount + " own, " + remote + " remote)" +
+                (EnableTraffic ? "" : "   ·   TRAFFIC OFF"));
+            if (string.IsNullOrEmpty(_status)) _debugPanelLines.Add("loading...");
+            else foreach (var s in _status.Split('\n')) _debugPanelLines.Add(s.TrimEnd('\r'));
+            _debugPanelLines.Add("green driving · cyan fast · red > 60 km/h · yellow waiting · magenta crash · gray stopped");
+            string panel = string.Join("\n", _debugPanelLines);
+            _debugPanel.clipping = TextClipping.Overflow;
+            _debugPanel.wordWrap = false;
+            float natW = 0f;
+            for (int i = 0; i < _debugPanelLines.Count; i++)
+                natW = Mathf.Max(natW, _debugPanel.CalcSize(new GUIContent(_debugPanelLines[i])).x);
+            float maxW = Screen.width - 16f * k;
+            float pw = Mathf.Min(maxW, natW + 16f * k);
+            // Wrap only if a single line would be wider than the screen; then the height grows instead of clipping.
+            _debugPanel.wordWrap = natW + 16f * k > maxW;
+            float lineH = _debugPanel.fontSize * 1.35f;
+            float ph = _debugPanel.wordWrap
+                ? _debugPanel.CalcHeight(new GUIContent(panel), Mathf.Max(80f, pw - 12f * k)) + 10f * k
+                : lineH * _debugPanelLines.Count + 10f * k;
+            var pr = new Rect(8f * k, Screen.height - ph - 8f * k, pw, ph);
+            GUI.Label(pr, panel, _debugPanel);
+
             if (Manager == null || Manager.Streamer == null || Manager.Streamer.MapRoot == null) return;
             var root = Manager.Streamer.MapRoot;
             var cam = Camera.main;
             if (cam == null) return;
-            GUI.skin.label.fontSize = 10;
+
+            bool repaint = Event.current.type == EventType.Repaint;
+            if (repaint) TDU2DebugLines.Clear();
+            Vector3 camPos = cam.transform.position;
+
             foreach (var c in _cars.Values)
             {
                 if (c.Go == null && !c.HasVis) continue;
-                Vector3 wpos = c.Go != null ? c.Go.transform.position : root.TransformPoint(c.HasVis ? c.VisPos : c.Pos);
-                float dcam = Vector3.Distance(cam.transform.position, wpos);
-                if (dcam > 80f) continue;
-                Vector3 sp = cam.WorldToScreenPoint(wpos + Vector3.up * 2.2f);
-                if (sp.z < 0) continue;
+                Vector3 wpos = CarWorldPos(c, root);
+                float dcam = Vector3.Distance(camPos, wpos);
+                if (dcam > DebugRange) continue;
+
                 float kmh = (c.Mine ? c.V : (c.HasVis ? c.VisVel.magnitude : 0f)) * 3.6f;
-                string mode = c.Removed ? "REM" : !c.Mine ? "NET" : c.Mode == 1 ? "CRASH" : c.Mode == 2 ? "STOP" : c.Phase == 1 ? "JUNC" : (c.WaitT > 0.1f ? "WAIT" : "DRIVE");
-                string txt = $"{(c.Type?.Name ?? "-")} | {kmh:0} km/h | {mode} | L{c.Lane?.Lane ?? -1}";
-                Rect r = new Rect(sp.x - 80, Screen.height - sp.y - 10, 160, 16);
-                GUI.Label(r, txt);
+                var fwd = CarWorldForward(c);
+                Color col;
+                if (c.Mode == 1) col = Color.magenta;
+                else if (c.Mode == 2) col = Color.gray;
+                else if (c.WaitT > 0.1f) col = Color.yellow;
+                else if (kmh > 60f) col = Color.red;
+                else if (kmh > 40f) col = new Color(0.3f, 0.95f, 1f);
+                else col = new Color(0.45f, 1f, 0.45f);
+
+                if (repaint)
+                {
+                    if (DebugArrows)
+                        TDU2DebugLines.Arrow(wpos + Vector3.up * 0.4f, fwd, 6f, col, 1.3f);
+
+                    if (DebugRoutes && (c.Mine || dcam < 160f))
+                    {
+                        Vector3 prev = wpos;
+                        const float maxS = 56f;
+                        for (float s = 4f; s < maxS; s += 4f)
+                        {
+                            PointAheadCar(c, s, out Vector3 pa);
+                            var p = root.TransformPoint(pa);
+                            float a = 1f - s / maxS;
+                            TDU2DebugLines.Line(prev, p, new Color(col.r, col.g, col.b, a));
+                            prev = p;
+                        }
+                    }
+                }
+
+                if (!DebugLabels) continue;
+                Vector3 sp = cam.WorldToScreenPoint(wpos + Vector3.up * 2.4f);
+                if (sp.z <= 0f) continue;
+                string txt = (c.Type?.Name ?? "-") + "\n" + kmh.ToString("0") + " km/h · " + ModeText(c) +
+                             "\n" + Compass(fwd) + " · " + TargetText(c);
+                var size = _debugLabel.CalcSize(new GUIContent(txt));
+                _debugLabel.normal.textColor = col;
+                var r = new Rect(sp.x - size.x * 0.5f, Screen.height - sp.y - size.y, size.x, size.y);
+                GUI.Label(r, txt, _debugLabel);
             }
-            GUI.skin.label.fontSize = 12;
+
+            if (repaint) TDU2DebugLines.Draw();
         }
     }
 

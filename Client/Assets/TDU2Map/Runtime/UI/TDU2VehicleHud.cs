@@ -3,9 +3,10 @@ using System.IO;
 using TDU2.Flash;
 using TDU2.Formats;
 using TDU2.IO;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.UI
 {
     /// <summary>
     /// Original-Instrumente aus GAUGES (Euro/Bnk/frontend/hires/gauges.bnk, VMF-Flash) wie im Spiel:

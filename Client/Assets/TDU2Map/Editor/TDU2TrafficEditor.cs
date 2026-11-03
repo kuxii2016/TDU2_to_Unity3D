@@ -4,11 +4,11 @@ using UnityEngine;
 
 namespace TDU2.Map.EditorTools
 {
-    /// <summary>Verkehr: Menü "TDU2/Traffic Manager in Szene erstellen" und Live-Anzeige im Inspector (Play-Modus).</summary>
+    /// <summary>Traffic: menu "TDU2/Create Traffic Manager In Scene" and live view in the Inspector (play mode).</summary>
     [CustomEditor(typeof(TDU2Traffic))]
     public sealed class TDU2TrafficEditor : Editor
     {
-        [MenuItem("TDU2/Traffic Manager in Szene erstellen")]
+        [MenuItem("TDU2/Create Traffic Manager In Scene")]
         public static void Create()
         {
 #if UNITY_2023_1_OR_NEWER
@@ -27,8 +27,8 @@ namespace TDU2.Map.EditorTools
 
         public override void OnInspectorGUI()
         {
-            EditorGUILayout.HelpBox("Verkehr aus <Insel>_ROAD_MAP/_ROAD_DETAIL.IA, Autos aus islands/<insel>/vehicules/traffic, Mischung aus aiconfig.cpr. " +
-                                    "Im Mehrspieler simuliert jeder Spieler die Autos in seiner Nähe; die anderen sehen sie synchron (TDU2Server leitet weiter).", MessageType.Info);
+            EditorGUILayout.HelpBox("Traffic from <Island>_ROAD_MAP/_ROAD_DETAIL.IA, cars from islands/<island>/vehicules/traffic, mix from aiconfig.cpr. " +
+                                    "In multiplayer every player simulates the cars near them; the others receive them synchronised (TDU2Server relays).", MessageType.Info);
             DrawDefaultInspector();
             var t = (TDU2Traffic)target;
             if (!Application.isPlaying) return;
@@ -37,13 +37,13 @@ namespace TDU2.Map.EditorTools
             using (new EditorGUI.DisabledScope(true))
             {
                 EditorGUILayout.TextField("Status", t.Status);
-                EditorGUILayout.IntField("Autos", t.CarCount);
-                EditorGUILayout.IntField("davon eigene", t.OwnedCount);
+                EditorGUILayout.IntField("Cars", t.CarCount);
+                EditorGUILayout.IntField("Owned by this player", t.OwnedCount);
             }
-            _showCars = EditorGUILayout.Foldout(_showCars, "Autos", true);
+            _showCars = EditorGUILayout.Foldout(_showCars, "Cars", true);
             if (_showCars)
                 foreach (var c in t.Info())
-                    EditorGUILayout.LabelField($"   {(c.mine ? "●" : "○")} {c.id & 0xFFFF:X4} {c.model}", $"{c.mode}  {c.kmh:0} km/h  {c.dist:0} m  Besitzer #{c.owner}");
+                    EditorGUILayout.LabelField($"   {(c.mine ? "●" : "○")} {c.id & 0xFFFF:X4} {c.model}", $"{c.mode}  {c.kmh:0} km/h  {c.dist:0} m  owner #{c.owner}");
             Repaint();
         }
     }

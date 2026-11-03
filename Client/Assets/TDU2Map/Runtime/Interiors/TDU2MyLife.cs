@@ -6,7 +6,7 @@ using TDU2.Online;
 using TDU2.Racing;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// MyTDULife (Tagebuch -> "My Life", home.vmf Clip /mylf) wie im Spiel:
@@ -588,7 +588,7 @@ namespace TDU2.Vehicles
             if (Cursor.lockState != CursorLockMode.None || !Cursor.visible) { Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
             if (Time.unscaledTime - _lifePhotoAt < 0.3f) return true;   // Taste, mit der geöffnet wurde
             // Auslösen / Abbrechen direkt (der Film-Dialog "Dieses Foto aufnehmen?" hing ohne Rückmeldung)
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space)) { TakeLifePhoto(); return true; }
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed()) { TakeLifePhoto(); return true; }
             // ESC/Rücktaste: zentraler Menüablauf (TDU2MenuFlow.cs) schließt den Sucher
             float dt = Time.unscaledDeltaTime;
             // Kamera um den Avatar: Maus ziehen (links/rechts gedrückt), Pfeile/WASD drehen, Mausrad/Bild-Tasten zoomen, Q/E Avatar drehen
@@ -597,8 +597,8 @@ namespace TDU2.Vehicles
                 _orbitYaw += Input.GetAxis("Mouse X") * 4f;
                 _orbitPitch = Mathf.Clamp(_orbitPitch - Input.GetAxis("Mouse Y") * 3f, -30f, 60f);
             }
-            float h = (Input.GetKey(KeyCode.RightArrow) || Input.GetKey(KeyCode.D) ? 1f : 0f) - (Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.A) ? 1f : 0f);
-            float v = (Input.GetKey(KeyCode.UpArrow) || Input.GetKey(KeyCode.W) ? 1f : 0f) - (Input.GetKey(KeyCode.DownArrow) || Input.GetKey(KeyCode.S) ? 1f : 0f);
+            float h = (TDU2.Vehicles.TDU2Nav.RightHeld() || Input.GetKey(KeyCode.D) ? 1f : 0f) - (TDU2.Vehicles.TDU2Nav.LeftHeld() || Input.GetKey(KeyCode.A) ? 1f : 0f);
+            float v = (TDU2.Vehicles.TDU2Nav.UpHeld() || Input.GetKey(KeyCode.W) ? 1f : 0f) - (TDU2.Vehicles.TDU2Nav.DownHeld() || Input.GetKey(KeyCode.S) ? 1f : 0f);
             _orbitYaw += h * 70f * dt;
             _orbitPitch = Mathf.Clamp(_orbitPitch + v * 40f * dt, -30f, 60f);
             float zoom = -Input.mouseScrollDelta.y * 0.25f + ((Input.GetKey(KeyCode.PageDown) || Input.GetKey(KeyCode.KeypadMinus) ? 1f : 0f) - (Input.GetKey(KeyCode.PageUp) || Input.GetKey(KeyCode.KeypadPlus) ? 1f : 0f)) * 1.5f * dt;

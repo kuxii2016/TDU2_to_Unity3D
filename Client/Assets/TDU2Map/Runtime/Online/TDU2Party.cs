@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using TDU2.Avatars;
 using TDU2.Flash;
 using TDU2.Formats;
+using TDU2.Interior;
+using TDU2.UI;
 using TDU2.Vehicles;
 using UnityEngine;
 
@@ -33,6 +35,8 @@ namespace TDU2.Online
         /// <summary>Mein Beifahrer (0 = keiner).</summary>
         public int Passenger { get; private set; }
         public static bool IsPassenger => Instance != null && Instance.RideWith != 0;
+        /// <summary>Gerade ein Einladungsfenster offen (andere Fenster wie die Freundschaftsanfrage warten).</summary>
+        public bool PopupOpen => _popup != null;
         /// <summary>Ich bin Gast im Haus von Spieler … (0 = nein).</summary>
         public int HomeHost { get; private set; }
         /// <summary>Meine Gäste im Haus.</summary>
@@ -584,7 +588,7 @@ namespace TDU2.Online
             }
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (TDU2GameData.ChatTyping || Time.timeScale <= 0f) return;
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed())
             {
                 if (!_gameBig) { OpenBig(); if (!g.CallClip("/pop_gameInvite", "open_big")) g.GotoLabel("/pop_gameInvite", "open_big", true); }
                 else if (Time.unscaledTime - _bigAt >= 0.5f)   // erst ansehen, dann (zweites Enter) annehmen
@@ -712,7 +716,7 @@ namespace TDU2.Online
                 else if (!TDU2GameData.ChatTyping && Time.timeScale > 0f)
                 {
                     var h = Hud;
-                    if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+                    if (TDU2.Vehicles.TDU2Controls.ConfirmPressed())
                     {
                         if (h == null || !h.CallClip("/HUD/contact", "accept")) Reply(true);
                         // Film meldet "acpt" erst nach der Animation – spätestens nach 1,5 s selbst antworten

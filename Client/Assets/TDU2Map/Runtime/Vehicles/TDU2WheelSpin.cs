@@ -28,7 +28,8 @@ namespace TDU2.Vehicles
                 float r = assets?.Rim != null ? assets.Rim.TireRadius(front) : 0.33f;
                 list.Add(new Wheel
                 {
-                    Disc = disc, Spin2 = spin2,
+                    Disc = disc,
+                    Spin2 = spin2,
                     DiscBase = disc != null ? disc.localRotation : Quaternion.identity,
                     Spin2Base = spin2 != null ? spin2.localRotation : Quaternion.identity,
                     Radius = Mathf.Max(0.15f, r),

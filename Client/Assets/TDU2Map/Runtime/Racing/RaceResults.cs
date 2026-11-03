@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using TDU2.Flash;
+using TDU2.UI;
 using TDU2.Vehicles;
 using UnityEngine;
 
@@ -308,12 +309,12 @@ namespace TDU2.Racing
             if (!_open) return;
             if (_champ) WatchChampionship();
 #if ENABLE_LEGACY_INPUT_MANAGER
-            if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) Send("Move", "up");
-            if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) Send("Move", "down");
-            if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) Send("Move", "left");
-            if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) Send("Move", "right");
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space)) Send("A");
-            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace)) { if (!Send("B")) Fire(Quit); }
+            if (TDU2.Vehicles.TDU2Nav.Up() || Input.GetKeyDown(KeyCode.W)) Send("Move", "up");
+            if (TDU2.Vehicles.TDU2Nav.Down() || Input.GetKeyDown(KeyCode.S)) Send("Move", "down");
+            if (TDU2.Vehicles.TDU2Nav.Left() || Input.GetKeyDown(KeyCode.A)) Send("Move", "left");
+            if (TDU2.Vehicles.TDU2Nav.Right() || Input.GetKeyDown(KeyCode.D)) Send("Move", "right");
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed()) Send("A");
+            if (TDU2.Vehicles.TDU2Nav.Back()) { if (!Send("B")) Fire(Quit); }
             if (Input.GetKeyDown(KeyCode.F10)) Fire(Quit);   // Notausgang
 #endif
         }

@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.Globalization;
 using TDU2.Flash;
 using TDU2.Online;
+using TDU2.UI;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Sticker-Shop (Spot ESTICK_*, Interieur istick_b, Verkäuferin = FpSelectable Typ 28 "StickersShop_area") mit dem
@@ -796,34 +798,34 @@ namespace TDU2.Vehicles
             bool arrowsToFilm = _mode == Mode.Menu || _mode == Mode.List || myColors || _mode == Mode.Place;
             if (arrowsToFilm)
             {
-                if (Input.GetKeyDown(KeyCode.UpArrow)) _ui.Input("Move", "up");
-                if (Input.GetKeyDown(KeyCode.DownArrow)) _ui.Input("Move", "down");
-                if (Input.GetKeyDown(KeyCode.LeftArrow)) _ui.Input("Move", "left");
-                if (Input.GetKeyDown(KeyCode.RightArrow)) _ui.Input("Move", "right");
+                if (TDU2.Vehicles.TDU2Nav.Up()) _ui.Input("Move", "up");
+                if (TDU2.Vehicles.TDU2Nav.Down()) _ui.Input("Move", "down");
+                if (TDU2.Vehicles.TDU2Nav.Left()) _ui.Input("Move", "left");
+                if (TDU2.Vehicles.TDU2Nav.Right()) _ui.Input("Move", "right");
             }
             if (_mode == Mode.List)
             {
-                if (Input.GetKeyDown(KeyCode.Q) || Input.GetKeyDown(KeyCode.PageUp)) _ui.CallClip("/stickers/list", "changeCategory", "left");
-                if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.PageDown)) _ui.CallClip("/stickers/list", "changeCategory", "right");
+                if (Input.GetKeyDown(KeyCode.Q) || Input.GetKeyDown(KeyCode.PageUp) || TDU2.Vehicles.TDU2Nav.LB()) _ui.CallClip("/stickers/list", "changeCategory", "left");
+                if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.PageDown) || TDU2.Vehicles.TDU2Nav.RB()) _ui.CallClip("/stickers/list", "changeCategory", "right");
             }
             if (_mode == Mode.Paint && !myColors)
             {
-                if (Input.GetKeyDown(KeyCode.Q) || Input.GetKeyDown(KeyCode.PageUp)) _ui.CallClip("/paint", "changeType", "left");
-                if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.PageDown)) _ui.CallClip("/paint", "changeType", "right");
+                if (Input.GetKeyDown(KeyCode.Q) || Input.GetKeyDown(KeyCode.PageUp) || TDU2.Vehicles.TDU2Nav.LB()) _ui.CallClip("/paint", "changeType", "left");
+                if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.PageDown) || TDU2.Vehicles.TDU2Nav.RB()) _ui.CallClip("/paint", "changeType", "right");
                 var dv = Vector2.zero;
-                if (Input.GetKey(KeyCode.LeftArrow)) dv.x -= 1f; if (Input.GetKey(KeyCode.RightArrow)) dv.x += 1f;
-                if (Input.GetKey(KeyCode.UpArrow)) dv.y -= 1f; if (Input.GetKey(KeyCode.DownArrow)) dv.y += 1f;
+                if (TDU2.Vehicles.TDU2Nav.LeftHeld()) dv.x -= 1f; if (TDU2.Vehicles.TDU2Nav.RightHeld()) dv.x += 1f;
+                if (TDU2.Vehicles.TDU2Nav.UpHeld()) dv.y -= 1f; if (TDU2.Vehicles.TDU2Nav.DownHeld()) dv.y += 1f;
                 if (dv != Vector2.zero) MovePick("/paint/color_box/color_picker", dv * Time.unscaledDeltaTime * 0.35f, SetPaint);
                 PickWithMouse("/paint/color_box/color_picker", SetPaint);
             }
             if (_mode == Mode.Place && _tool == "colo" && !myColors) PickWithMouse("/stickers/colors/color_box/color_picker", SetTint);
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space)) _ui.Input("A");
-            if (Input.GetKeyDown(KeyCode.X)) _ui.Input("X");
-            if (Input.GetKeyDown(KeyCode.Y) || Input.GetKeyDown(KeyCode.Z))
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed()) _ui.Input("A");
+            if (TDU2.Vehicles.TDU2Nav.X()) _ui.Input("X");
+            if (TDU2.Vehicles.TDU2Nav.Y() || Input.GetKeyDown(KeyCode.Z))
             {
                 _ui.Input("Y");
             }
-            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace))
+            if (TDU2.Vehicles.TDU2Nav.Back())
             {
                 // doppeltes ESC: Menü sicher verlassen (falls der Film hängt)
                 if (Time.unscaledTime - _lastEsc < 1.2f) { Close(false); return; }

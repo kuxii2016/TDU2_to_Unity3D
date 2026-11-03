@@ -1,7 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
+using TDU2.Interior;
+using TDU2.UI;
 using UnityEngine;
 
 namespace TDU2.Vehicles
@@ -23,6 +24,9 @@ namespace TDU2.Vehicles
         [Range(0.3f, 1.2f)] public float GripScale = 0.62f;
         public DrivingAids Aids = DrivingAids.Sport;
         public bool AutomaticGearbox = true;
+        /// <summary>Getriebe wie im Optionsmenü: Automatik, Manuell (sequenziell), H-Schaltung, H-Schaltung + Kupplung.</summary>
+        public enum GearboxMode { Automatic = 0, Manual = 1, HShifter = 2, HShifterClutch = 3 }
+        public GearboxMode Gearbox = GearboxMode.Automatic;
         public bool ShowHud = true;
         [Tooltip("Physik-Zeitschritt während der Fahrt (s). TDU2 rechnet die Räder zusätzlich in Unterschritten.")]
         public float FixedTimeStep = 0.01f;
@@ -159,6 +163,10 @@ namespace TDU2.Vehicles
         /// <summary>Aktuelles Auto entfernen, ohne die Freiflug-Kamera zu aktivieren (Interieur Ã¼bernimmt die Kamera).</summary>
         public void RemoveCar()
         {
+            // Ein noch laufender Ladevorgang ist damit überholt: sonst baute PollLoad das Auto später trotzdem (z.B. nach dem
+            // Rennschul-Kino startet das Wiederherstellen ein Laden, gleichzeitig geht es ins Interieur -> das Auto erschien mitten
+            // im Interieur, Kamera und Karosserie überlagerten den Raum).
+            if (_loadTask != null) { TDU2DebugLog.Event("RemoveCar: laufendes Laden verworfen"); _loadTask = null; }
             Despawn(false);
             if (_vcam != null) _vcam.enabled = false;
             var cam = Camera.main;
@@ -274,33 +282,51 @@ namespace TDU2.Vehicles
             _hasRoad = true;
         }
 
-        /// <summary>R / "Back on track": an die letzte Straßenstelle (bis 1 km), sonst auf die nächste Straße, sonst aufrichten.</summary>
+        /// <summary>
+        /// R / "Back on track" (Zurück auf die Straße): auf die nächste Straße des Straßennetzes (bis 500 m) in Fahrtrichtung, rechte
+        /// Fahrbahnhälfte; sonst an die letzte Straßenstelle (bis 1 km); sonst nur aufrichten.
+        /// Früher kam zuerst die "letzte Straßenstelle" – die Erkennung über die Oberfläche hält aber auch Felsen/Gebäude/Gelände-Asphalt
+        /// für Straße, dann landete man wieder neben der Straße.
+        /// </summary>
         public void ResetToRoad()
         {
             var v = Current;
             if (v == null) return;
             var root = Streamer != null ? Streamer.MapRoot : null;
             var here = v.transform.position;
+            var fwd = Vector3.ProjectOnPlane(v.transform.forward, Vector3.up);
+            if (fwd.sqrMagnitude < 1e-3f) fwd = Vector3.forward;
+            fwd.Normalize();
+            if (_minimap != null && root != null)
+            {
+                var g = root.InverseTransformPoint(here);
+                var gf = root.InverseTransformDirection(fwd); gf.y = 0f; gf = gf.sqrMagnitude > 1e-4f ? gf.normalized : Vector3.forward;
+                if (_minimap.NearestRoad(g, 500f, out var rp))
+                {
+                    // Straßenrichtung aus Nachbarpunkten (alle ~8 m), so ausgerichtet, dass sie zur bisherigen Fahrtrichtung passt
+                    var dir = gf;
+                    if (_minimap.NearestRoad(rp + gf * 10f, 9f, out var ahead) && (ahead - rp).sqrMagnitude > 1f) dir = ahead - rp;
+                    else if (_minimap.NearestRoad(rp - gf * 10f, 9f, out var behind) && (rp - behind).sqrMagnitude > 1f) dir = rp - behind;
+                    dir.y = 0f;
+                    if (dir.sqrMagnitude < 1e-4f) dir = gf;
+                    dir.Normalize();
+                    if (Vector3.Dot(dir, gf) < 0f) dir = -dir;
+                    // rechte Fahrbahnhälfte (Straßenpunkte liegen auf der Mittellinie); Feldwege sind schmal: Mitte
+                    int type = _minimap.NearestRoadType(rp, 2f);
+                    var right = Vector3.Cross(Vector3.up, dir);
+                    var target = rp + (type == 1 ? Vector3.zero : right * 2.2f);
+                    var wdir = root.TransformDirection(dir); wdir.y = 0f;
+                    TeleportSafe(root.TransformPoint(target), Quaternion.LookRotation(wdir.sqrMagnitude > 1e-4f ? wdir.normalized : fwd, Vector3.up));
+                    return;
+                }
+            }
             if (_hasRoad)
             {
                 var p = root != null ? root.TransformPoint(_roadPos) : _roadPos;
                 if ((p - here).sqrMagnitude < 1000f * 1000f) { TeleportSafe(p, _roadRot); return; }
             }
-            if (_minimap != null && root != null)
-            {
-                var g = root.InverseTransformPoint(here);
-                if (_minimap.NearestRoad(g, 300f, out var rp))
-                {
-                    var f = Vector3.ProjectOnPlane(v.transform.forward, Vector3.up);
-                    if (_minimap.NearestRoad(rp + new Vector3(f.x, 0f, f.z).normalized * 12f, 10f, out var n1) && (n1 - rp).sqrMagnitude > 1f)
-                    { var d = root.TransformVector(n1 - rp); d.y = 0f; if (Vector3.Dot(d, f) < 0f) d = -d; f = d; }
-                    TeleportSafe(root.TransformPoint(rp), Quaternion.LookRotation(f.sqrMagnitude > 1e-3f ? f.normalized : Vector3.forward, Vector3.up));
-                    return;
-                }
-            }
             var q = here; q.y = GroundY(q) + 0.3f;
-            var fw = Vector3.ProjectOnPlane(v.transform.forward, Vector3.up);
-            v.ResetVehicle(q, Quaternion.LookRotation(fw.sqrMagnitude > 1e-3f ? fw.normalized : Vector3.forward, Vector3.up));
+            v.ResetVehicle(q, Quaternion.LookRotation(fwd, Vector3.up));
         }
 
         /// <summary>
@@ -367,7 +393,7 @@ namespace TDU2.Vehicles
             string bnk = _bnkDir; var db = Database; int color = _colorIndex; bool snd = LoadSound;
             int rim = 0, interior = 0;
             if (TDU2CarChoices.TryGet(car.FileName, out var ch)) { color = _colorIndex = ch.Color; rim = ch.Rim; interior = ch.Interior; _colorFromChoice = true; }
-            else if (_colorFromChoice) { color = _colorIndex = 0; _colorFromChoice = false; } 
+            else if (_colorFromChoice) { color = _colorIndex = 0; _colorFromChoice = false; }
             _status = "Lade " + car.ModelName + " ...";
             _loadTask = Task.Run(() => CarAssets.Load(bnk, db, car, color, snd, rim, interior));
         }
@@ -612,6 +638,9 @@ namespace TDU2.Vehicles
         {
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (!ready) return;
+            // While a text field, the dev menu, the save screen or the free camera owns the keyboard, the car must not
+            // react to the hard-coded shortcuts either.
+            if (TDU2Controls.Blocked) return;
             if (Input.GetKeyDown(KeyCode.F2))
             {
                 if (Current != null) Despawn(true); else SpawnAtCamera();
@@ -622,15 +651,26 @@ namespace TDU2.Vehicles
             if (Input.GetKeyDown(KeyCode.F8)) SwitchCar(0);
             if (Current == null) return;
             if (Current.Aids != Aids) Current.Aids = Aids;
-            if (Current.AutomaticGearbox != AutomaticGearbox) Current.AutomaticGearbox = AutomaticGearbox;
-            if (Time.timeScale <= 0f) return;  
+            ApplyGearboxMode();
+            if (Time.timeScale <= 0f) return;
             if (TDU2Controls.Pressed("camera") && _vcam != null) _vcam.NextMode();
             if (TDU2Controls.Pressed("minimap") && _minimap != null) _minimap.ShowMinimap = !_minimap.ShowMinimap;
             if (_vcam != null) _vcam.LookBack = TDU2Controls.Held("lookback");
             if (TDU2Controls.Pressed("aids")) { Aids = (DrivingAids)(((int)Aids + 1) % 4); Current.Aids = Aids; }
-            if (TDU2Controls.Pressed("gearbox")) { AutomaticGearbox = !AutomaticGearbox; Current.AutomaticGearbox = AutomaticGearbox; }
-            if (TDU2Controls.Pressed("gearup")) Current.ShiftUp();
-            if (TDU2Controls.Pressed("geardown")) Current.ShiftDown();
+            if (TDU2Controls.Pressed("gearbox"))
+            {
+                // Taste "Automatik / Manuell": zwischen Automatik und dem zuletzt gewählten Handschaltmodus wechseln
+                if (Gearbox == GearboxMode.Automatic) Gearbox = _lastManualMode;
+                else { _lastManualMode = Gearbox; Gearbox = GearboxMode.Automatic; }
+                AutomaticGearbox = Gearbox == GearboxMode.Automatic;
+                ApplyGearboxMode();
+            }
+            if (Gearbox == GearboxMode.HShifter || Gearbox == GearboxMode.HShifterClutch) UpdateHShifter();
+            else
+            {
+                if (TDU2Controls.Pressed("gearup")) Current.ShiftUp();
+                if (TDU2Controls.Pressed("geardown")) Current.ShiftDown();
+            }
             if (TDU2Controls.Pressed("reset")) ResetToRoad();
             if (_audio != null) _audio.SetHorn(TDU2Controls.Held("horn"));
             if (_lights != null)
@@ -639,7 +679,7 @@ namespace TDU2.Vehicles
                 if (TDU2Controls.Pressed("blinkl")) { _lights.IndicatorLeft = !_lights.IndicatorLeft; _lights.IndicatorRight = false; }
                 if (TDU2Controls.Pressed("blinkr")) { _lights.IndicatorRight = !_lights.IndicatorRight; _lights.IndicatorLeft = false; }
                 if (TDU2Controls.Pressed("hazard")) _lights.Hazard = !_lights.Hazard;
-                _lights.Flash = TDU2Controls.Held("flash"); 
+                _lights.Flash = TDU2Controls.Held("flash");
             }
             var acc = _model != null ? TDU2Accessories.For(_model, _lights) : null;
             if (acc != null)
@@ -656,6 +696,53 @@ namespace TDU2.Vehicles
         }
 
         float _padCheckAt = -10f; bool _hasPad;
+        GearboxMode _lastManualMode = GearboxMode.Manual;
+        bool _lastAuto = true;
+        int _hGearKey = int.MinValue;   // per Taste gewählter Gang der H-Schaltung (bleibt bis zum nächsten)
+
+        /// <summary>Getriebemodus ans aktuelle Auto geben (Automatik/sequenziell/H-Schaltung, Kupplung vom Fahrer).</summary>
+        void ApplyGearboxMode()
+        {
+            if (Current == null) return;
+            // abwärtskompatibel: hat jemand nur AutomaticGearbox umgestellt (Inspector, alter Code), Modus nachziehen
+            if (AutomaticGearbox != _lastAuto)
+                Gearbox = AutomaticGearbox ? GearboxMode.Automatic : (Gearbox == GearboxMode.Automatic ? GearboxMode.Manual : Gearbox);
+            bool h = Gearbox == GearboxMode.HShifter || Gearbox == GearboxMode.HShifterClutch;
+            bool auto = Gearbox == GearboxMode.Automatic;
+            AutomaticGearbox = auto; _lastAuto = auto;
+            if (Current.AutomaticGearbox != auto) Current.AutomaticGearbox = auto;
+            Current.HShifter = h;
+            Current.ManualClutch = Gearbox == GearboxMode.HShifterClutch;
+            if (!Current.ManualClutch) Current.ClutchPedal = 0f;
+        }
+
+        /// <summary>
+        /// H-Schaltung: Gang = gedrückte Schaltgasse des Lenkrads (CAR_G1ST..G7TH/GREV; keine = Leerlauf) bzw. die Gang-Tasten
+        /// der Tastatur (1..7, 0 = R; der Gang bleibt eingelegt). Mit Kupplung: Gangwechsel nur mit getretener Kupplung,
+        /// sonst springt der Gang heraus (Leerlauf).
+        /// </summary>
+        void UpdateHShifter()
+        {
+            var v = Current;
+            if (v == null) return;
+            // Gang-Tasten auf der Tastatur rasten ein; auf Geräteknöpfe gelegte Gänge (Schaltung) liefert HGear, solange gehalten
+            for (int g = 1; g <= 7; g++) if (!TDU2Controls.IsJoystickBound("gear" + g) && TDU2Controls.Pressed("gear" + g)) _hGearKey = g;
+            if (!TDU2Controls.IsJoystickBound("gearR") && TDU2Controls.Pressed("gearR")) _hGearKey = -1;
+            if (TDU2Controls.Pressed("gearup")) _hGearKey = Mathf.Min((_hGearKey == int.MinValue ? v.Gear : _hGearKey) + 1, v.GearCount);
+            if (TDU2Controls.Pressed("geardown")) _hGearKey = Mathf.Max((_hGearKey == int.MinValue ? v.Gear : _hGearKey) - 1, -1);
+            int dev = TDU2InputDevices.HGear;   // int.MinValue = Gerät ohne H-Schaltung
+            if (dev != int.MinValue && dev != 0) _hGearKey = int.MinValue;   // Hebel eingelegt: Schaltung hat Vorrang vor Tasten
+            int want = dev != int.MinValue && (dev != 0 || _hGearKey == int.MinValue) ? dev : (_hGearKey == int.MinValue ? v.Gear : _hGearKey);
+            want = Mathf.Clamp(want, -1, Mathf.Max(1, v.GearCount));
+            if (want == v.Gear || v.Shifting) return;
+            if (Gearbox == GearboxMode.HShifterClutch && v.ClutchPedal < 0.5f)
+            {
+                if (v.Gear != 0) v.Shift(0, 0f);   // ohne Kupplung: Gang springt heraus
+                return;
+            }
+            v.Shift(want, 0.05f);
+        }
+
         bool HasGamepad()
         {
             if (Time.unscaledTime - _padCheckAt > 2f)
@@ -700,20 +787,29 @@ namespace TDU2.Vehicles
             float steer = 0f;
             if (!paused && TDU2Controls.Held("left")) steer -= 1f;
             if (!paused && TDU2Controls.Held("right")) steer += 1f;
-            // Gamepad (Input Manager Standardachsen), falls benutzt
-            float padH = 0f, padV = 0f;
-            // Standardachsen enthalten auch WASD/Pfeile -> nur mit angeschlossenem Gamepad nutzen, sonst gilt die eigene Belegung
-            if (!paused && HasGamepad())
-                try { padH = Input.GetAxisRaw("Horizontal"); padV = Input.GetAxisRaw("Vertical"); } catch (Exception) { }
-            if (Mathf.Abs(steer) < 0.01f && Mathf.Abs(padH) > 0.15f) steer = padH;
-            if (accel < 0.01f && padV > 0.15f) accel = padV;
-            if (brake < 0.01f && padV < -0.15f) brake = -padV;
-            float rate = Mathf.Abs(steer) > Mathf.Abs(_steerInput) ? 4f : 6f;
-            _steerInput = Mathf.MoveTowards(_steerInput, steer, rate * Time.deltaTime);
+            // Gamepad/Lenkrad (TDU2InputDevices: Geräteprofil aus StreamingAssets, Pedale kalibriert, Optionen Totzone/Linearität)
+            bool analog = false; float devSteer = 0f;
+            if (!paused && !TDU2Controls.Blocked && TDU2InputDevices.HasDevice)
+            {
+                devSteer = TDU2InputDevices.Steer;
+                float t = TDU2InputDevices.Throttle, b = TDU2InputDevices.Brake;
+                if (Mathf.Abs(steer) < 0.01f && Mathf.Abs(devSteer) > 0.001f) { steer = devSteer; analog = true; }
+                if (accel < 0.01f && t > 0f) accel = t;
+                if (brake < 0.01f && b > 0f) brake = b;
+            }
+            // Lenkrad: Lenkung direkt (der Fahrer hält das Rad), Tastatur/Pad: geglättet wie bisher
+            if (analog && TDU2InputDevices.IsWheel) _steerInput = steer;
+            else
+            {
+                float rate = (Mathf.Abs(steer) > Mathf.Abs(_steerInput) ? 4f : 6f) * (analog ? 2.5f : 1f);
+                _steerInput = Mathf.MoveTowards(_steerInput, steer, rate * Time.deltaTime);
+            }
             Current.AccelPedal = accel;
             Current.BrakePedal = brake;
             Current.Steer = _steerInput;
             Current.HandBrake = !paused && TDU2Controls.Held("handbrake") ? 1f : 0f;
+            if (Current.ManualClutch)
+                Current.ClutchPedal = paused ? 0f : Mathf.Max(TDU2InputDevices.Clutch, TDU2Controls.Held("clutch") ? 1f : 0f);
 #endif
             if (_audio != null && _vcam != null) _audio.InteriorView = _vcam.IsInterior;
         }

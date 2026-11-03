@@ -73,8 +73,8 @@ namespace TDU2.Flash
                             }
                     }
                 }
-                catch (Exception ex) 
-                { 
+                catch (Exception ex)
+                {
                     DebugManager.Error("Flash text not loadable: " + ex.Message);
                 }
                 _texts = result; _loadedKey = key;

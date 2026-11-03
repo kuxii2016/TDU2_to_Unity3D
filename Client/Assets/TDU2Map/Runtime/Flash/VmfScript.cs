@@ -40,7 +40,7 @@ namespace TDU2.Flash
         {
             if (d == null || !_btnObjs.TryGetValue(d, out var bo) || !bo.Members.TryGetValue(ev, out var h) || !(h is AsFunction fn)) return;
             try { InvokeTop(fn, bo, Array.Empty<object>()); }
-            catch (Exception ex) 
+            catch (Exception ex)
             {
                 DebugManager.Error("Flash-Button " + ev + ": " + ex.Message);
             }
@@ -57,8 +57,8 @@ namespace TDU2.Flash
                 if (!Attached(inst)) { _enterFrame.Remove(inst); continue; }
                 if (!_objVars.TryGetValue(VarKey(inst, "onEnterFrame"), out var f) || !(f is AsFunction fn)) { _enterFrame.Remove(inst); continue; }
                 try { InvokeTop(fn, inst, Array.Empty<object>()); }
-                catch (Exception ex) 
-                { 
+                catch (Exception ex)
+                {
                     DebugManager.Error("Flash onEnterFrame (" + PathOf(inst) + "): " + ex.Message);
                 }
             }
@@ -124,6 +124,131 @@ namespace TDU2.Flash
                 }
                 _vars[lp + ":empty"] = row == null ? "1" : "0"; _objVars[lp + ":empty"] = row == null ? 1.0 : 0.0;
             }
+            SyncScrollBar(l);
+        }
+
+        // ------------------------------------------------------------------ Scrollbalken der nativen Liste (cmon_list_scrollBar)
+        // Im Spiel bewegt die native Liste den Lift (scrollBar/lift mit up/middle/down) selbst und wertet Pfeile/Lift aus;
+        // der Film meldet nur "mylf:scrl:btnu|btnd:prss|rlse" und ruft liftState(0/1/2) für Normal/Über/Gedrückt.
+        readonly List<FlashList> _lists = new List<FlashList>();
+        FlashList _scrollHoldList, _liftDragList; int _scrollHoldDir; float _scrollHoldNext; float _liftGrab;
+
+        Instance ScrollBarOf(FlashList l) => l?.Owner != null ? Child(l.Owner, "scrollBar") : null;
+
+        /// <summary>Liste, zu der ein Scrollbalken-Befehl gehört: aktive Liste, sonst die zuletzt erzeugte sichtbare mit Scrollbalken.</summary>
+        public FlashList ScrollTarget()
+        {
+            if (_activeList != null && ScrollBarOf(_activeList) != null && Shown(_activeList.Owner)) return _activeList;
+            for (int i = _lists.Count - 1; i >= 0; i--)
+                if (ScrollBarOf(_lists[i]) != null && Shown(_lists[i].Owner)) return _lists[i];
+            return null;
+        }
+
+        /// <summary>Sichtbaren Ausschnitt verschieben (Auswahl bleibt im Bild), Lift nachführen.</summary>
+        public void ListScroll(FlashList l, int delta)
+        {
+            if (l == null || l.Rows.Count == 0) return;
+            int maxTop = Mathf.Max(0, l.Rows.Count - l.ViewSize);
+            int top = Mathf.Clamp(l.Top + delta, 0, maxTop);
+            if (top == l.Top) return;
+            ListSetTop(l, top);
+            FSCommand?.Invoke("sndp:move", "");
+        }
+
+        void ListSetTop(FlashList l, int top)
+        {
+            int oldLine = l.SelectedLine;
+            l.Top = top;
+            int sel = Mathf.Clamp(l.Selected, top, Mathf.Min(l.Rows.Count, top + l.ViewSize) - 1);
+            // wie die native Liste: Auswahl zuerst umstellen, dann die alte Zeile abwählen – die Filme fragen in
+            // PlayAnimSelectionOut per GetViewLineSelected(), ob die Zeile noch die aktuelle ist (setIconPad der Steuerung)
+            l.Selected = sel;
+            CallOn(l.Owner, "PlayAnimSelectionOut", (double)oldLine);
+            ListRefresh(l);
+            StoreClipVar(l.Owner, "line_view", (double)l.SelectedLine);
+            if (l.Active) CallOn(l.Owner, "PlayAnimSelectionIn", (double)l.SelectedLine);
+        }
+
+        bool TrackRange(FlashList l, out DisplayObject lift, out float y0, out float y1, out float liftH)
+        {
+            lift = null; y0 = y1 = liftH = 0f;
+            var sb = ScrollBarOf(l);
+            if (sb == null) return false;
+            var li = Child(sb, "lift"); var au = Child(sb, "arr_u"); var ad = Child(sb, "arr_d");
+            if (li?.Owner == null || au?.Owner == null || ad?.Owner == null) return false;
+            var bu = LocalBounds(au.Owner); var bd = LocalBounds(ad.Owner); var bl = LocalBounds(li.Owner);
+            if (!bu.HasValue || !bd.HasValue || !bl.HasValue) return false;
+            lift = li.Owner; y0 = bu.Value.yMax; y1 = bd.Value.yMin; liftH = bl.Value.height;
+            return y1 - y0 - liftH > 1f;
+        }
+
+        void SyncScrollBar(FlashList l)
+        {
+            if (!TrackRange(l, out var lift, out float y0, out float y1, out float liftH)) return;
+            int maxTop = Mathf.Max(0, l.Rows.Count - l.ViewSize);
+            float frac = maxTop > 0 ? Mathf.Clamp01(l.Top / (float)maxTop) : 0f;
+            var bl = LocalBounds(lift).Value;
+            float want = y0 + frac * (y1 - y0 - liftH);
+            lift.Matrix.Ty += want - bl.yMin;
+            lift.ScriptMatrix = true;
+        }
+
+        /// <summary>Scrollbalken-Befehl des Films ("mylf:scrl:…"). true = behandelt.</summary>
+        bool HandleScrollCommand(string cmd)
+        {
+            if (cmd == null || !cmd.StartsWith("mylf:scrl:", StringComparison.OrdinalIgnoreCase)) return false;
+            var l = ScrollTarget();
+            if (l == null) return false;
+            string c = cmd.ToLowerInvariant();
+            int dir = c.Contains(":btnu:") ? -1 : c.Contains(":btnd:") ? 1 : 0;
+            if (dir != 0 && c.EndsWith(":prss"))
+            {
+                ListScroll(l, dir);
+                _scrollHoldList = l; _scrollHoldDir = dir; _scrollHoldNext = Time.unscaledTime + 0.35f;   // halten = wiederholen
+            }
+            else if (c.EndsWith(":rlse")) _scrollHoldList = null;
+            return true;
+        }
+
+        /// <summary>Jedes Bild: Pfeil gehalten (wiederholen), Lift ziehen, Klick in die Leiste (Seite blättern).</summary>
+        void ListScrollTick()
+        {
+#if ENABLE_LEGACY_INPUT_MANAGER
+            bool down = UnityEngine.Input.GetMouseButton(0);
+            if (_scrollHoldList != null)
+            {
+                if (!down || !Shown(_scrollHoldList.Owner)) _scrollHoldList = null;
+                else if (Time.unscaledTime >= _scrollHoldNext) { _scrollHoldNext = Time.unscaledTime + 0.07f; ListScroll(_scrollHoldList, _scrollHoldDir); }
+            }
+            if (_liftDragList != null)
+            {
+                var dl = _liftDragList;
+                if (!down || !Shown(dl.Owner) || !TrackRange(dl, out var lft, out float a0, out float a1, out float lh))
+                {
+                    _liftDragList = null;
+                    var sbx = ScrollBarOf(dl);
+                    if (sbx != null) CallOn(sbx, "liftState", 0.0);
+                    return;
+                }
+                float my = MouseInParent(lft).y - _liftGrab;
+                float frac = Mathf.Clamp01((my - a0) / Mathf.Max(1f, a1 - a0 - lh));
+                int maxTop = Mathf.Max(0, dl.Rows.Count - dl.ViewSize);
+                int top = Mathf.RoundToInt(frac * maxTop);
+                if (top != dl.Top) ListSetTop(dl, top);
+                else SyncScrollBar(dl);
+                return;
+            }
+            if (!UnityEngine.Input.GetMouseButtonDown(0)) return;
+            var l = ScrollTarget();
+            if (l == null || !TrackRange(l, out var lift, out float y0, out float y1, out float liftH)) return;
+            var sb = ScrollBarOf(l);
+            var sr = ScreenBounds(sb.Owner);
+            if (!sr.HasValue || !sr.Value.Contains(MouseGui())) return;
+            var lb = LocalBounds(lift).Value;
+            float m = MouseInParent(lift).y;
+            if (m >= lb.yMin && m <= lb.yMax) { _liftDragList = l; _liftGrab = m - lb.yMin; CallOn(sb, "liftState", 2.0); }
+            else if (m > y0 && m < y1) ListScroll(l, (m < lb.yMin ? -1 : 1) * Mathf.Max(1, l.ViewSize - 1));   // Leiste: seitenweise
+#endif
         }
 
         /// <summary>Liste als geladen melden (beendet die Ladeanimation des Menüs).</summary>
@@ -151,15 +276,21 @@ namespace TDU2.Flash
             int oldLine = l.SelectedLine;
             int sel = Mathf.Clamp(index, 0, l.Rows.Count - 1);
             if (sel == l.Selected) return;
-            CallOn(l.Owner, "PlayAnimSelectionOut", (double)oldLine);
+            // Auswahl (und Ausschnitt) zuerst umstellen, dann die alte Zeile abwählen: PlayAnimSelectionOut fragt
+            // GetViewLineSelected() – vorher galt die alte Zeile dort noch als aktuell und blieb hervorgehoben
+            // (Steuerung: command_name/command_bind blieben auf "stop_on", jede überfahrene Zeile blieb weiß)
             l.Selected = sel;
             int top = l.Top;
             if (sel < top) top = sel;
             if (sel >= top + l.ViewSize) top = sel - l.ViewSize + 1;
-            if (top != l.Top) { l.Top = top; ListRefresh(l); }
+            bool scrolled = top != l.Top;
+            if (scrolled) l.Top = top;
+            CallOn(l.Owner, "PlayAnimSelectionOut", (double)oldLine);
+            if (scrolled) ListRefresh(l);
             StoreClipVar(l.Owner, "line_view", (double)l.SelectedLine);   // LineValidate liest die gewählte Zeile aus line_view
+            int moves = _moveSounds;
             CallOn(l.Owner, "PlayAnimSelectionIn", (double)l.SelectedLine);
-            if (sound) FSCommand?.Invoke("sndp:move", "");
+            if (sound && _moveSounds == moves) FSCommand?.Invoke("sndp:move", "");   // spielt der Film den Ton schon selbst: nicht doppelt
         }
 
         /// <summary>Liegt der Clip im Besitzer-Clip der aktiven nativen Liste (Zeilen-Buttons)?</summary>
@@ -183,6 +314,10 @@ namespace TDU2.Flash
                 case "GetViewLineSelected": return (double)(l.Selected - l.Top);
                 case "Activate":
                     l.Active = true; _activeList = l;
+                    // Wie die native Liste: nach dem ersten Aktivieren ist die Liste nicht mehr "am Öffnen". Die Spielerliste
+                    // (initFlashList) startet die Zeilenschleife InitLoop -> AfterLoop (Eingabe frei, Activate) nur, wenn
+                    // isOpening != true – ohne das blieb sie nach dem ersten Seitenwechsel gesperrt.
+                    StoreClipVar(l.Owner, "isOpening", false);
                     StoreClipVar(l.Owner, "line_view", (double)l.SelectedLine);
                     if (l.Rows.Count > 0) CallOn(l.Owner, "PlayAnimSelectionIn", (double)l.SelectedLine);
                     // Scrollbalken wie im Spiel einschalten (Pfeile/Lift melden dann "mylf:scrl:btnu|btnd|lift:prss")
@@ -216,8 +351,8 @@ namespace TDU2.Flash
             if (_depth > 24) return;
             _depth++; _inActions++;
             try { Exec(code, 0, code.Length, self, null, null, out _); }
-            catch (Exception ex) 
-            { 
+            catch (Exception ex)
+            {
                 DebugManager.Error("[TDU2] Flash-sction (" + PathOf(self) + "): " + ex.Message);
             }
             finally { _depth--; _inActions--; if (_inActions == 0) DrainActionQueue(); }
@@ -467,10 +602,16 @@ namespace TDU2.Flash
 
         float StartTime { get { if (_startTime < 0f) _startTime = Time.realtimeSinceStartup; return _startTime; } }
 
+        int _moveSounds;   // Anzahl "sndp:move" des Films (ListSelect spielt den Ton nur, wenn der Film es nicht tut)
+
         void RaiseUrl(string url, string args)
         {
             if (url != null && url.StartsWith("FSCommand:", StringComparison.OrdinalIgnoreCase))
+            {
+                HandleScrollCommand(url.Substring(10));   // Scrollbalken der nativen Liste (Befehl geht trotzdem raus, z.B. MyLife)
+                if (string.Equals(url, "FSCommand:sndp:move", StringComparison.OrdinalIgnoreCase)) _moveSounds++;
                 FSCommand?.Invoke(url.Substring(10), args);
+            }
         }
 
         // ------------------------------------------------------------------ Werte
@@ -957,6 +1098,7 @@ namespace TDU2.Flash
                 case "Object": return new AsObject();
                 case "stopDrag": EndDrag(); return Undefined;
                 case "getTextLength": return (double)MeasureVarText(args.Length > 0 ? ToStr(args[0]) : "");   // nativ im Spiel
+                case "setInputFocus": SetInputFocus(args.Length > 0 ? ToStr(args[0]) : null); return Undefined;   // nativ: Texteingabe (VmfHelpers)
                 case "ASFlashList":
                     {
                         // ASFlashList(Besitzer-Clip, Listenname, sichtbare Zeilen, Spalten) – im Spiel nativ
@@ -968,9 +1110,11 @@ namespace TDU2.Flash
                             Columns = args.Length > 3 ? (int)ToNum(args[3]) : 1,
                         };
                         _activeList = l;
+                        _lists.RemoveAll(x => x.Owner == l.Owner || x.Owner == null);
+                        _lists.Add(l);
                         try { ListCreated?.Invoke(l); }
-                        catch (Exception ex) 
-                        { 
+                        catch (Exception ex)
+                        {
                             DebugManager.Error("ASFlashList " + l.Name + ": " + ex.Message);
                         }
                         return l;
@@ -1149,6 +1293,10 @@ namespace TDU2.Flash
                     if (pass == 0 && !(path == focusPath || path.StartsWith(focusPath + "/", StringComparison.OrdinalIgnoreCase))) continue;
                     var inst = path == "/" || path.Length == 0 ? Root : ResolveClip(Root, path);
                     if (inst == null || !order.TryGetValue(inst, out int o)) continue;   // unsichtbar oder entfernt
+                    // Ohne Fokus-Treffer (zweiter Durchgang) keine geschlossenen Menüs: die stehen auf ihrem Label "default"
+                    // (z.B. /search_player liegt ganz oben – sein B() spielte die Schließen-Animation und sperrte die Eingabe,
+                    // die Rücktaste im Spielermenü "öffnete" so die Spielersuche).
+                    if (pass == 1 && inst != Root && IsClosedMenu(inst)) continue;
                     if (pass == 0 && inst == focus) o = int.MaxValue;                    // das Fokus-Menü selbst hat Vorrang
                     if (o > bestOrder) { bestOrder = o; best = fn; bestInst = inst; }
                 }
@@ -1157,12 +1305,16 @@ namespace TDU2.Flash
             var a = new object[args?.Length ?? 0];
             for (int i = 0; i < a.Length; i++) a[i] = args[i] is int iv ? (object)(double)iv : args[i] is float fv ? (object)(double)fv : args[i];
             try { InvokeTop(best, bestInst, a); }
-            catch (Exception ex) 
-            { 
-                DebugManager.Error("Flash-Input " + function + ": " + ex.Message); 
+            catch (Exception ex)
+            {
+                DebugManager.Error("Flash-Input " + function + ": " + ex.Message);
             }
             return true;
         }
+
+        /// <summary>Menü-Clip im Ruhezustand: angehalten auf seinem Label "default" (geschlossen, nichts zu sehen).</summary>
+        static bool IsClosedMenu(Instance inst) =>
+            inst != null && !inst.Playing && inst.Timeline.Labels.TryGetValue("default", out int f) && inst.Frame == f;
 
         /// <summary>
         /// Funktion eines bestimmten Clips aufrufen (z.B. Call("/", "ItemType", "over") oder Call("/cursor", "A")) – wie das Spiel

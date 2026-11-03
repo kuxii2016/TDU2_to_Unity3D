@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using TDU2.Flash;
 using TDU2.IO;
 using TDU2.Online;
+using TDU2.UI;
 using TDU2.Vehicles;
 using UnityEngine;
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
 using TDU2.Online;
 using TDU2.Traffic;
 using TDU2.World;
@@ -75,6 +76,14 @@ namespace TDU2.Vehicles
             }
         }
 
+        // Network stats
+        float _netStatsNext;
+        int _netInCount, _netOutCount;
+        float _netInRate, _netOutRate;
+        int _netInLast, _netOutLast;
+        readonly List<float> _netInHist = new List<float>(200);
+        readonly List<float> _netOutHist = new List<float>(200);
+
         TDU2Traffic Traffic
         {
             get
@@ -102,9 +111,27 @@ namespace TDU2.Vehicles
         }
 
         // ------------------------------------------------------------------ Eingabe
+        float _autoFlashLogNext;
         void Update()
         {
             SampleFrame();
+            if (Time.unscaledTime >= _netStatsNext)
+            {
+                _netStatsNext = Time.unscaledTime + 0.5f;
+                int nin = _netInLast; int nout = _netOutLast;
+                _netInRate = nin * 2f;
+                _netOutRate = nout * 2f;
+                _netInLast = 0; _netOutLast = 0;
+                _netInHist.Add(_netInRate);
+                _netOutHist.Add(_netOutRate);
+                if (_netInHist.Count > 200) _netInHist.RemoveAt(0);
+                if (_netOutHist.Count > 200) _netOutHist.RemoveAt(0);
+            }
+            if (Time.unscaledTime >= _autoFlashLogNext)
+            {
+                _autoFlashLogNext = Time.unscaledTime + 0.5f;
+                try { Flash.VmfPlayer.AppendFlashLog(); } catch { }
+            }
 #if ENABLE_LEGACY_INPUT_MANAGER
             if (Input.GetKeyDown(ToggleKey) && !TDU2GameData.ChatTyping)
             {
@@ -244,6 +271,7 @@ namespace TDU2.Vehicles
             Menu("Performance", UsageMenu),
             Menu("Avatar", AvatarMenu),
             Menu("Flash Debug", FlashMenu),
+            Menu("Flash Profiler", FlashProfilerMenu),
             Menu("GPS / Bookmarks", GpsMenu),
             Head("TOOLS"),
             Menu("Cutscene Tester", CutsceneMenu),
@@ -500,7 +528,77 @@ namespace TDU2.Vehicles
             foreach (var p in players) if (p != null && p.gameObject.name.StartsWith("FlashViewer ")) viewers.Add(p);
             if (viewers.Count > 0)
                 l.Add(Action_("Close loaded viewers (" + viewers.Count + ")", () => { foreach (var v in viewers) if (v != null) Destroy(v.gameObject); Toast("Viewers closed"); Rebuild(); }));
+            l.Add(Head("PROFILER"));
+            l.Add(Menu("Flash Profiler / Graph / Log", FlashProfilerMenu));
             return l;
+        }
+
+        bool _flashLogAuto = false;
+        float _flashLogNext;
+        List<float> _flashGraph = new List<float>(400);
+
+        List<Item> FlashProfilerMenu()
+        {
+            var l = new List<Item> { Head("FLASH PROFILER") };
+            l.Add(Info("Frame ms", () => Flash.VmfPlayer.LastFrameTimeMs.ToString("0.000")));
+            l.Add(Info("Update/Frame parts", () => "Tick " + Flash.VmfPlayer.LastTickTimeMs.ToString("0.000") + " / Mouse " + Flash.VmfPlayer.LastMouseTimeMs.ToString("0.000") + " / Apply " + Flash.VmfPlayer.LastApplyTimeMs.ToString("0.000")));
+            l.Add(Info("OnGUI Draw ms", () => Flash.VmfPlayer.LastDrawTimeMs.ToString("0.000")));
+            l.Add(Info("Raster integrate ms", () => Flash.VmfPlayer.LastRasterIntegrateTimeMs.ToString("0.000")));
+            l.Add(Info("Draws / Shapes / Texts", () => Flash.VmfPlayer.LastDrawCalls + " / " + Flash.VmfPlayer.LastShapeDraws + " / " + Flash.VmfPlayer.LastTextDraws));
+            l.Add(Info("Quad batches", () => Flash.VmfPlayer.LastQuadBatches.ToString()));
+            l.Add(Info("Raster pending bytes", () => (Flash.VmfPlayer.LastRasterPendingBytes / 1024f).ToString("0") + " KB"));
+            l.Add(Info("Raster queue / done", () => Flash.VmfPlayer.LastRasterQueueCount + " / " + Flash.VmfPlayer.LastRasterDoneCount));
+            l.Add(Bool("Auto-log to CSV (every 0.5s)", () => _flashLogAuto, v => { _flashLogAuto = v; _flashLogNext = Time.unscaledTime; }, false));
+            l.Add(Action_("Log now to CSV", () => { Flash.VmfPlayer.AppendFlashLog(); Toast("Logged to " + System.IO.Path.GetFileName(Flash.VmfPlayer.GetFlashLogPath())); }));
+            l.Add(Action_("Open log path", () => { try { System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + Flash.VmfPlayer.GetFlashLogPath() + "\""); } catch { } }));
+            l.Add(Action_("Clear graph history", () => { Flash.VmfPlayer.ClearFlashMetrics(); Toast("Cleared"); }));
+            l.Add(Head("GRAPH (Frame ms)"));
+            var hist = Flash.VmfPlayer.GetFrameHistory();
+            if (hist.Length == 0) l.Add(Info("no samples yet"));
+            else
+            {
+                float max = 0f;
+                for (int i = 0; i < hist.Length; i++) if (hist[i] > max) max = hist[i];
+                if (max < 0.01f) max = 0.01f;
+                l.Add(Info("Samples", () => hist.Length.ToString()));
+                l.Add(Info("Max / Avg", () => max.ToString("0.000") + " / " + (Average(hist)).ToString("0.000") + " ms"));
+                l.Add(Info("Graph", () => GraphStr(hist, 40, max)));
+            }
+            if (_flashLogAuto && Time.unscaledTime >= _flashLogNext)
+            {
+                _flashLogNext = Time.unscaledTime + 0.5f;
+                Flash.VmfPlayer.AppendFlashLog();
+            }
+            return l;
+        }
+
+        static float Average(float[] arr)
+        {
+            if (arr.Length == 0) return 0f;
+            float s = 0f;
+            for (int i = 0; i < arr.Length; i++) s += arr[i];
+            return s / arr.Length;
+        }
+
+        static string GraphStr(float[] arr, int width, float max)
+        {
+            if (arr.Length == 0) return "-";
+            System.Text.StringBuilder sb = new System.Text.StringBuilder(width + 2);
+            sb.Append('[');
+            for (int i = 0; i < width; i++)
+            {
+                int idx = arr.Length - width + i;
+                if (idx < 0) { sb.Append(' '); continue; }
+                float v = arr[idx] / max;
+                if (v >= 0.9f) sb.Append('#');
+                else if (v >= 0.7f) sb.Append('X');
+                else if (v >= 0.5f) sb.Append('=');
+                else if (v >= 0.3f) sb.Append('-');
+                else if (v >= 0.1f) sb.Append('.');
+                else sb.Append(' ');
+            }
+            sb.Append(']');
+            return sb.ToString();
         }
 
         List<Item> FlashLoadMenu()
@@ -869,6 +967,11 @@ namespace TDU2.Vehicles
                 Info("Players online", () => gd != null ? gd.PlayerCount.ToString() : "-"),
                 Info("Can send (UDP)", () => mp != null && mp.CanSend ? "YES" : "NO"),
                 Info("Server time", () => DateTimeOffset.FromUnixTimeMilliseconds((long)(TDU2Session.ServerSeconds * 1000.0)).ToLocalTime().ToString("HH:mm:ss")),
+                Head("NETWORK TRAFFIC"),
+                Info("In/Out (pps)", () => _netInRate.ToString("0") + " / " + _netOutRate.ToString("0")),
+                Info("Graph In", () => GraphStr(_netInHist.ToArray(), 38, Mathf.Max(1f, Max(_netInHist)))),
+                Info("Graph Out", () => GraphStr(_netOutHist.ToArray(), 38, Mathf.Max(1f, Max(_netOutHist)))),
+                Menu("Network Debug (Detailed)", NetworkDebugMenu),
                 Head("SETTINGS"),
                 Bool("Hide other players", () => TDU2Multiplayer.Hidden, v => TDU2Multiplayer.Hidden = v, false),
                 Menu("Visibility / sync (TDU2OnlineSettings)", OnlineSettingsMenu),
@@ -892,6 +995,63 @@ namespace TDU2.Vehicles
             }));
             l.Add(Menu("Players", PlayersMenu));
             return l;
+        }
+
+        static float Max(List<float> l)
+        {
+            if (l.Count == 0) return 0f;
+            float m = 0f;
+            for (int i = 0; i < l.Count; i++) if (l[i] > m) m = l[i];
+            return m;
+        }
+
+        List<Item> NetworkDebugMenu()
+        {
+            var gd = TDU2GameData.Instance;
+            var mp = Mgr != null ? Mgr.GetComponent<TDU2Multiplayer>() : null;
+            var tr = Traffic;
+            var l = new List<Item>
+            {
+                Head("NETWORK DEBUG"),
+                Info("UDP Connected", () => mp != null && mp.CanSend ? "YES" : "NO"),
+                Info("Players (total)", () => gd != null ? gd.Players.Count.ToString() : "0"),
+                Info("Remotes tracked", () => mp != null ? GetField(mp, "_remotes")?.ToString() ?? "-" : "-"),
+                Info("In/Out rate (pps)", () => _netInRate.ToString("0.0") + " / " + _netOutRate.ToString("0.0")),
+                Head("TRAFFIC NET"),
+                Info("Traffic cars", () => tr != null ? tr.CarCount + " / " + tr.MaxCars : "-"),
+                Info("Owned traffic", () => tr != null ? GetProp(tr, "OwnedCount")?.ToString() ?? "-" : "-"),
+                Info("Traffic sync", () => tr != null ? (tr.Sync ? "ON" : "OFF") : "-"),
+                Info("Traffic status", () => tr != null ? tr.Status : "-"),
+                Head("PLAYER LIST"),
+            };
+            if (gd != null)
+            {
+                foreach (var p in gd.Players.Values)
+                {
+                    var pi = p;
+                    l.Add(Info(pi.Nick + (pi.InCar ? " [CAR]" : ""), () => (pi.Island == 1 ? "IBZ" : pi.Island == 2 ? "HAW" : "-") + "  " + (pi.HasPos ? (pi.GamePos.magnitude / 1000f).ToString("0.1") + "km" : "-")));
+                }
+            }
+            if (l.Count < 15) l.Add(Info("No other players"));
+            return l;
+        }
+
+        static object GetField(object o, string name)
+        {
+            if (o == null) return null;
+            var f = o.GetType().GetField(name, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (f == null) return null;
+            var v = f.GetValue(o);
+            if (v is System.Collections.ICollection c) return c.Count;
+            return v;
+        }
+
+        static object GetProp(object o, string name)
+        {
+            if (o == null) return null;
+            var p = o.GetType().GetProperty(name, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            if (p == null) return null;
+            return p.GetValue(o);
         }
 
         List<Item> PlayersMenu()
@@ -1008,7 +1168,8 @@ namespace TDU2.Vehicles
             l.Add(Float("Send rate", () => tr.SendRate, v => tr.SendRate = v, 1f, 1f, 30f, 8f, "0", " /s"));
             l.Add(Float("Relevance distance", () => tr.RelevantDistance, v => tr.RelevantDistance = v, 50f, 200f, 3000f, 900f, "0", " m"));
             l.Add(Head("DEBUG"));
-            l.Add(Bool("Traffic debug overlay", () => tr.ShowDebug, v => tr.ShowDebug = v, false));
+            l.Add(Bool("Traffic debug overlay (routes/speed/target)", () => tr.ShowDebug, v => tr.ShowDebug = v, false));
+            l.Add(Menu("Traffic Debug Details", TrafficDebugMenu));
             l.Add(Menu("Car list", () =>
             {
                 var cl = new List<Item> { Head("TRAFFIC CARS  (● own · ○ remote)") };
@@ -1018,6 +1179,46 @@ namespace TDU2.Vehicles
                 return cl;
             }));
             return l;
+        }
+
+        List<Item> TrafficDebugMenu()
+        {
+            var tr = Traffic;
+            var l = new List<Item> { Head("TRAFFIC DEBUG DETAILS") };
+            if (tr == null) { l.Add(Info("no traffic")); return l; }
+            l.Add(Bool("Show in 3D (paths/speed/labels)", () => tr.ShowDebug, v => tr.ShowDebug = v, false));
+            l.Add(Info("Total / Own / Remote", () => tr.CarCount + " / " + tr.OwnedCount + " / " + (tr.CarCount - tr.OwnedCount)));
+            l.Add(Info("Physics / Sound", () => "p:" + tr.PhysicsMax + "@" + tr.PhysicsRadius + "m  s:" + tr.SoundMax + "@" + tr.SoundRadius + "m"));
+            l.Add(Head("NEARBY CARS (live)"));
+            int shown = 0;
+            var root = Mgr != null && Mgr.Streamer != null ? Mgr.Streamer.MapRoot : null;
+            var cam = Camera.main;
+            foreach (var c in tr.Info())
+            {
+                if (shown++ > 25) break;
+                float d = c.dist;
+                string distStr = d < 1000 ? d.ToString("0") + "m" : (d / 1000f).ToString("0.0") + "km";
+                l.Add(Info($"{(c.mine ? "●" : "○")} {c.model} [{c.mode}]", () => $"{c.kmh:0} km/h  {distStr}  Lane:{GetTrafficLane(tr, c.id)}"));
+            }
+            if (shown == 0) l.Add(Info("No traffic cars"));
+            return l;
+        }
+
+        static string GetTrafficLane(TDU2.Traffic.TDU2Traffic tr, uint id)
+        {
+            try
+            {
+                var f = tr.GetType().GetField("_cars", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (f == null) return "-";
+                var dict = f.GetValue(tr) as System.Collections.IDictionary;
+                if (dict == null || !dict.Contains(id)) return "-";
+                var car = dict[id];
+                var lane = car.GetType().GetField("Lane", BindingFlags.Public | BindingFlags.Instance)?.GetValue(car);
+                if (lane == null) return "-";
+                var ln = lane.GetType().GetField("Lane", BindingFlags.Public | BindingFlags.Instance)?.GetValue(lane);
+                return ln?.ToString() ?? "-";
+            }
+            catch { return "-"; }
         }
 
         TDU2MapStreamer Streamer
@@ -1099,6 +1300,12 @@ namespace TDU2.Vehicles
             l.Add(Float("Unload areas (+)", () => s.AreaUnloadMargin, v => s.AreaUnloadMargin = v, 100f, 100f, 5000f, 1000f, "0", " m"));
             l.Add(Float("Load sectors up to", () => s.SectorLoadDistance, v => s.SectorLoadDistance = v, 50f, 100f, 5000f, 700f, "0", " m"));
             l.Add(Float("Unload sectors (+)", () => s.SectorUnloadMargin, v => s.SectorUnloadMargin = v, 50f, 50f, 3000f, 300f, "0", " m"));
+            l.Add(Head("RENDER DISTANCE  (immediate)"));
+            l.Add(Table("Object render distance", TDU2RenderDistance.Names, () => (int)TDU2RenderDistance.Level, i => TDU2RenderDistance.Level = (RenderDistance)i, (int)RenderDistance.Normal));
+            l.Add(Info("Effective", () => "LOD bias " + QualitySettings.lodBias.ToString("0.00", CultureInfo.InvariantCulture) + "  ·  vegetation " + (s.VegetationDistance * TDU2RenderDistance.Multiplier).ToString("0", CultureInfo.InvariantCulture) + " m"));
+            l.Add(Head("TERRAIN DISPLAY  (immediate)"));
+            l.Add(Float("Lower terrain (sidewalks/roads on top)", () => s.TerrainLower, v => s.TerrainLower = v, 0.01f, 0f, 0.5f, 0.1f, "0.00", " m"));
+            l.Add(Float("Terrain depth push", () => s.TerrainDepthPush * 1000f, v => s.TerrainDepthPush = v / 1000f, 0.1f, 0f, 10f, 1.5f, "0.0", " mm/m"));
             l.Add(Head("DETAIL  (newly loaded tiles)"));
             l.Add(Float("Object LOD distance", () => s.LodDistanceScale, v => s.LodDistanceScale = v, 0.25f, 0.25f, 10f, 3f, "0.00", " x"));
             l.Add(Bool("Cull last LOD", () => s.CullLastLod, v => s.CullLastLod = v, false));

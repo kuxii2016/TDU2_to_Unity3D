@@ -15,7 +15,7 @@ namespace TDU2.Cinematics
     ///   bzw. Fx__Sound__&lt;LANG&gt;{LocalizedSoundFile[0]} in der Sprachbank "&lt;bank&gt;__&lt;sprache&gt;.bnk" (Stimmen).
     ///   .bfx: SND-Knoten (" DNS" bei Knoten+0xe0, Klasse 0x8540076c bei +0x58): +0x5c Schleifen (-1 = Schleife), +0x78 Name,
     ///   +0xa0 Ton-rsc, +0xac Lautstärke, +0xb0 Tonhöhe, +0xb4/+0xb8 Zufall, +0xc8/+0xd0 Nah/Fern; "LSGL" bei 0xb4 = Sprachweiche
-    ///   (Knoten nach Präfix "GE_", sonst "US_", sonst irgendeiner; "_W"-Zweitaufnahmen nur ohne normale).
+    ///   (Knoten nach Präfix "GE_", sonst "US_", sonst irgendeiner; "_W" = Frauenstimme: bei Spielerin bevorzugt, sonst nur ohne normale).
     ///   Entity__Fx (Name -> Fx__Root, Position) sind die Emitter für "snd:music"/"snd:timestop" und PlayEmitter("C_OUTRO").
     /// Die Positionen sind im Rahmen der Bank (Spielkoordinaten der Szene) und werden über <see cref="Frame"/> in die Welt gebracht.
     /// </summary>
@@ -53,6 +53,16 @@ namespace TDU2.Cinematics
         readonly Dictionary<ulong, ulong> _soundFiles = new Dictionary<ulong, ulong>();
         readonly Dictionary<string, (ulong root, Vector3 pos)> _emitters = new Dictionary<string, (ulong, Vector3)>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<ulong, List<Sound>> _resolved = new Dictionary<ulong, List<Sound>>();
+        readonly Dictionary<ulong, List<Sound>> _resolvedW = new Dictionary<ulong, List<Sound>>();
+
+        /// <summary>
+        /// Spielerin? Wählt die "_W"-Aufnahmen (Frauenstimme des Spieler-Avatars) vor den normalen, wie das Original
+        /// (LSGL-Weiche nach Avatar-Geschlecht). Standard: eigener Avatar (Spielstand/Intro-Wahl).
+        /// </summary>
+        public static Func<bool> PlayerIsWoman = () =>
+        {
+            try { var c = Avatars.AvatarConfigs.Local; return c != null && c.Sex == 1; } catch { return false; }
+        };
         readonly Dictionary<ulong, (float[] data, int ch, int rate)> _waves = new Dictionary<ulong, (float[], int, int)>();
         readonly Dictionary<ulong, AudioClip> _clips = new Dictionary<ulong, AudioClip>();
         string _prefix = "US_";
@@ -69,7 +79,7 @@ namespace TDU2.Cinematics
         {
             var a = new TDU2CinematicAudio { _bank = bank };
             try { a.LoadInternal(bankPath, lang); }
-            catch (Exception ex) { DebugManager.Warning("[TDU2] Kino-Töne " + Path.GetFileName(bankPath) + ": " + ex.Message); }
+            catch (Exception ex) { DebugManager.Warning("CinAudio " + Path.GetFileName(bankPath) + ": " + ex.Message); }
             return a;
         }
 
@@ -147,7 +157,7 @@ namespace TDU2.Cinematics
                         LanguageBankPath = p; lang = l;
                         break;
                     }
-                    catch (Exception ex) { DebugManager.Warning("[TDU2] Sprachbank " + p + ": " + ex.Message); _lang = null; }
+                    catch (Exception ex) { DebugManager.Warning("CinAudio " + p + ": " + ex.Message); _lang = null; }
                 }
             }
             _prefix = Prefix(lang);
@@ -200,7 +210,7 @@ namespace TDU2.Cinematics
                     if (e != null && WavDecoder.TryDecode(b.Read(e), out var data, out int ch, out int rate) && data != null && ch > 0 && rate > 0)
                         _waves[s.Rsc] = (data, ch, rate);
                 }
-            DebugManager.Info($"[TDU2] Kino-Töne {Path.GetFileName(bankPath)}: {_rootSources.Count} Fx, {_waves.Count} Töne, {_emitters.Count} Emitter" +
+            DebugManager.Info($"CinAudio {Path.GetFileName(bankPath)}: {_rootSources.Count} Fx, {_waves.Count} Töne, {_emitters.Count} Emitter" +
                               (_lang != null ? ", Stimmen " + Path.GetFileName(LanguageBankPath) : ""));
         }
 
@@ -251,11 +261,13 @@ namespace TDU2.Cinematics
 
         List<Sound> Resolve(ulong rootHc)
         {
+            bool woman = PlayerIsWoman != null && PlayerIsWoman();
+            var cache = woman ? _resolvedW : _resolved;
             lock (_resolved)
             {
-                if (_resolved.TryGetValue(rootHc, out var cached)) return cached;
+                if (cache.TryGetValue(rootHc, out var cached)) return cached;
                 var list = new List<Sound>();
-                _resolved[rootHc] = list;
+                cache[rootHc] = list;
                 if (!_rootSources.TryGetValue(rootHc, out var src) || !_sources.TryGetValue(src, out var source)) return list;
                 List<SndNode> nodes = null; bool ls = false;
                 if (source.bfx != 0 && _rsc.TryGetValue(source.bfx, out var be)) nodes = ParseBfx(_bank.Read(be), out ls);
@@ -266,9 +278,10 @@ namespace TDU2.Cinematics
                     SndNode chosen = null;
                     foreach (var prefix in new[] { _prefix, "US_", "" })
                     {
+                        // Spielerin: zuerst die "_W"-Aufnahme, sonst die normale (und umgekehrt)
                         for (int pass = 0; pass < 2 && chosen == null; pass++)
                             foreach (var n in nodes)
-                                if (n.Name.StartsWith(prefix, StringComparison.Ordinal) && n.Name.EndsWith("_W", StringComparison.Ordinal) == (pass == 1)
+                                if (n.Name.StartsWith(prefix, StringComparison.Ordinal) && n.Name.EndsWith("_W", StringComparison.Ordinal) == ((pass == 0) == woman)
                                     && FindWav(n.Rsc, out _) != null) { chosen = n; break; }
                         if (chosen != null) break;
                     }
@@ -294,8 +307,18 @@ namespace TDU2.Cinematics
 
         static Sound Copy(Sound s) => new Sound
         {
-            Name = s.Name, Rsc = s.Rsc, Volume = s.Volume, Pitch = s.Pitch, VolumeRandom = s.VolumeRandom, PitchRandom = s.PitchRandom,
-            ClipNear = s.ClipNear, ClipFar = s.ClipFar, Loop = s.Loop, Voice = s.Voice, HasPosition = s.HasPosition, Position = s.Position,
+            Name = s.Name,
+            Rsc = s.Rsc,
+            Volume = s.Volume,
+            Pitch = s.Pitch,
+            VolumeRandom = s.VolumeRandom,
+            PitchRandom = s.PitchRandom,
+            ClipNear = s.ClipNear,
+            ClipFar = s.ClipFar,
+            Loop = s.Loop,
+            Voice = s.Voice,
+            HasPosition = s.HasPosition,
+            Position = s.Position,
         };
 
         /// <summary>Fx__Root nach Name (z.B. "EVTE_to_player_01"), 0 = keiner.</summary>
@@ -312,6 +335,13 @@ namespace TDU2.Cinematics
         {
             if (_clips.TryGetValue(rsc, out var c)) return c;
             c = null;
+            // nachdekodieren, falls die Aufnahme beim Laden nicht dabei war (z.B. Geschlecht erst danach gewählt)
+            if (!_waves.ContainsKey(rsc))
+            {
+                var e = FindWav(rsc, out var b);
+                if (e != null && WavDecoder.TryDecode(b.Read(e), out var d, out int dch, out int drate) && d != null && dch > 0 && drate > 0)
+                    _waves[rsc] = (d, dch, drate);
+            }
             if (_waves.TryGetValue(rsc, out var w))
             {
                 c = AudioClip.Create("cin_" + rsc.ToString("X16"), w.data.Length / w.ch, w.ch, w.rate, false);
@@ -450,6 +480,7 @@ namespace TDU2.Cinematics
             foreach (var c in _clips.Values) if (c != null) UnityEngine.Object.Destroy(c);
             _clips.Clear();
             _waves.Clear();
+            lock (_resolved) { _resolved.Clear(); _resolvedW.Clear(); }
         }
     }
 }

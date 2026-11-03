@@ -96,6 +96,7 @@ namespace TDU2.Racing
         Material _activeMaterial;
         RaceOpponents _opponents;
         float _lastPenaltyT = -10f;
+        TDU2Vehicle _locked;   // Auto mit Startsperre (Countdown)
 
         Transform Root => Streamer != null ? Streamer.MapRoot : null;
 
@@ -159,9 +160,11 @@ namespace TDU2.Racing
         /// <summary>Während Vorbereitung/Countdown das Auto festhalten (nach dem Eingabe-Update des Fahrzeug-Managers).</summary>
         void LateUpdate()
         {
-            if (State != RaceState.Preparing && State != RaceState.Countdown) return;
             var v = Vehicles != null ? Vehicles.Current : null;
-            if (v == null) return;
+            bool hold = State == RaceState.Preparing || State == RaceState.Countdown;
+            if (v != null && v != _locked) { if (_locked != null) _locked.StartLock = false; _locked = null; }
+            if (v != null) { v.StartLock = hold; _locked = hold ? v : null; }
+            if (!hold || v == null) return;
             if (State == RaceState.Preparing) v.AccelPedal = 0f;   // im Countdown darf Gas gegeben werden (Drehzahl), die Bremse hält
             v.BrakePedal = 1f;
             v.HandBrake = 1f;
@@ -193,6 +196,7 @@ namespace TDU2.Racing
         void Go()
         {
             State = RaceState.Running;
+            if (_locked != null) { _locked.StartLock = false; _locked.BrakePedal = 0f; _locked.HandBrake = 0f; _locked = null; }
             ElapsedSeconds = 0f;
             var pos = VehicleIsland();
             _prevSigned = pos.HasValue && Next != null ? Signed(Next, pos.Value) : 0f;
@@ -378,7 +382,7 @@ namespace TDU2.Racing
             return cpIndex == 0 && !Race.IsCircuit;
         }
 
-        void OnDisable() { if (State != RaceState.Idle) Abort(false); }
+        void OnDisable() { if (State != RaceState.Idle) Abort(false); if (_locked != null) { _locked.StartLock = false; _locked = null; } }
     }
 
     /// <summary>Hängt am Spielerauto und meldet harte Kollisionen (Wände, Verkehr) an die laufende Prüfung.</summary>

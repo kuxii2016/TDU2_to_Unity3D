@@ -120,7 +120,8 @@ namespace TDU2.World
         /// Hauptthread: die Actors eines Sektors unter parent bauen (Platzierungen relativ zum Sektor-Ursprung).
         /// Gibt die Zahl gebauter Instanzen zurück.
         /// </summary>
-        public int Build(PmiFile pmi, Transform parent, GlobalTextureCache textures, BuildResources res, ObjectBuildOptions opt, Transform mapRoot = null)
+        public int Build(PmiFile pmi, Transform parent, GlobalTextureCache textures, BuildResources res, ObjectBuildOptions opt, Transform mapRoot = null,
+                         Action<PmiInstance, GameObject> onInstance = null)
         {
             if (pmi == null || parent == null || Model == null) return 0;
             int count = 0;
@@ -143,6 +144,10 @@ namespace TDU2.World
                 finally { set.Placements = new List<Matrix4x4>(); }
                 if (built != null && mapRoot != null && TrafficLights.Contains(g.Key))
                     foreach (var go in built) if (go != null) TDU2TrafficLights.Register(go.transform, mapRoot);
+                // je Instanz melden (gleiche Reihenfolge wie die Platzierungen), z.B. für den Schildertext am Schild selbst
+                if (built != null && onInstance != null)
+                    for (int i = 0; i < built.Count && i < g.Instances.Count; i++)
+                        if (built[i] != null) onInstance(g.Instances[i], built[i]);
                 count += list.Count;
             }
             return count;

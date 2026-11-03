@@ -5,7 +5,9 @@ using System.IO;
 using System.Reflection;
 using TDU2.Flash;
 using TDU2.Formats;
+using TDU2.Interior;
 using TDU2.Online;
+using TDU2.UI;
 using TDU2.Vehicles;
 using UnityEngine;
 
@@ -46,11 +48,11 @@ namespace TDU2.Racing
         [Tooltip("Immer das Auto der Prüfung verwenden (ig2 VMod) wie im Spiel.")]
         public bool UseTestCar = true;
         [Tooltip("Ab so vielen Fehlversuchen hintereinander gibt es mehr Zeit (0 = nie).")]
-        public int EaseAfterFails = 3;
+        public int EaseAfterFails = 2;
         [Tooltip("Zusätzliche Zeit je weiterem Fehlversuch (Anteil der Original-Zeit, 0.05 = +5 %).")]
-        public float EaseStep = 0.05f;
+        public float EaseStep = 0.08f;
         [Tooltip("Höchstens so viel zusätzliche Zeit (Anteil).")]
-        public float EaseMax = 0.30f;
+        public float EaseMax = 0.50f;
         [Tooltip("Schule, falls der Spot-Code nicht ermittelt werden kann ('A', 'B', 'C'; leer = alle der Insel).")]
         public string FallbackSchool = "";
 
@@ -125,7 +127,7 @@ namespace TDU2.Racing
             if (Manager == null) Manager = GetComponent<TDU2VehicleManager>();
             if (_hud != null && _hud.Minimap == null && Manager != null) _hud.Minimap = Manager.Minimap;
             TickPhase();
-            if (_resultDelay >= 0f) { _resultDelay -= Time.unscaledDeltaTime; if (_resultDelay < 0f) ShowResults(); }
+            if (_resultDelay >= 0f) { _resultDelay -= Time.unscaledDeltaTime; if (_resultDelay < 0f) ShowResultsAfterCinematic(); }
             if (!_open) return;
             if (Watchdog()) return;
 
@@ -138,23 +140,23 @@ namespace TDU2.Racing
             if (_film == null)
             {
                 // ohne Film: einfache Tastatursteuerung (Pfeile Lizenz/Prüfung, Enter starten, Esc schließen)
-                if (Input.GetKeyDown(KeyCode.LeftArrow)) SelectLicence((_licIndex + _licences.Count - 1) % Mathf.Max(1, _licences.Count));
-                if (Input.GetKeyDown(KeyCode.RightArrow)) SelectLicence((_licIndex + 1) % Mathf.Max(1, _licences.Count));
-                if (Input.GetKeyDown(KeyCode.UpArrow)) _testIndex = Mathf.Max(0, _testIndex - 1);
-                if (Input.GetKeyDown(KeyCode.DownArrow)) _testIndex = Mathf.Min(_tests.Count - 1, _testIndex + 1);
-                if (Input.GetKeyDown(KeyCode.Return)) StartTest(_testIndex);
-                if (Input.GetKeyDown(KeyCode.Escape)) Close();
+                if (TDU2.Vehicles.TDU2Nav.Left()) SelectLicence((_licIndex + _licences.Count - 1) % Mathf.Max(1, _licences.Count));
+                if (TDU2.Vehicles.TDU2Nav.Right()) SelectLicence((_licIndex + 1) % Mathf.Max(1, _licences.Count));
+                if (TDU2.Vehicles.TDU2Nav.Up()) _testIndex = Mathf.Max(0, _testIndex - 1);
+                if (TDU2.Vehicles.TDU2Nav.Down()) _testIndex = Mathf.Min(_tests.Count - 1, _testIndex + 1);
+                if (TDU2.Vehicles.TDU2Controls.ConfirmPressed()) StartTest(_testIndex);
+                if (Input.GetKeyDown(KeyCode.Escape) || TDU2.Vehicles.TDU2Nav.PadBack()) Close();
                 return;
             }
-            if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) _film.Input("Move", "up");
-            if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) _film.Input("Move", "down");
-            if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) _film.Input("Move", "left");
-            if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) _film.Input("Move", "right");
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space))
+            if (TDU2.Vehicles.TDU2Nav.Up() || Input.GetKeyDown(KeyCode.W)) _film.Input("Move", "up");
+            if (TDU2.Vehicles.TDU2Nav.Down() || Input.GetKeyDown(KeyCode.S)) _film.Input("Move", "down");
+            if (TDU2.Vehicles.TDU2Nav.Left() || Input.GetKeyDown(KeyCode.A)) _film.Input("Move", "left");
+            if (TDU2.Vehicles.TDU2Nav.Right() || Input.GetKeyDown(KeyCode.D)) _film.Input("Move", "right");
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed())
             {
                 if (!_film.Input("A")) _film.CallClip("/", "Open");   // auf der Schulübersicht: Lizenzrad wieder öffnen
             }
-            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace))
+            if (TDU2.Vehicles.TDU2Nav.Back())
             {
                 if (!_film.Input("B")) Close();
             }
@@ -251,6 +253,17 @@ namespace TDU2.Racing
             TDU2DebugLog.Event("Rennschul-Menü geschlossen: timeScale -> " + _savedTimeScale + ", Cursor -> " + _savedLock);
             if (_film != null) { _film.Visible = false; _film.GotoLabel("/", "default", false); }
         }
+
+        void OnEnable()
+        {
+            // ESC während einer Prüfung: Renn-Menü des Films (WhatGameMode 2) mit "Neu starten" und "Beenden"
+            TDU2PauseMenu.RegisterRace(this,
+                () => this != null && InTest,
+                () => { if (_pending != null) BeginTest(_pending); },
+                () => { if (_race != null && InTest) _race.Abort(); else ReturnToSchool(); });
+        }
+
+        void OnDisable() => TDU2PauseMenu.UnregisterRace(this);
 
         void OnDestroy()
         {
@@ -857,6 +870,18 @@ namespace TDU2.Racing
             // wie im Spiel: nach dem Ziel übernimmt der Autopilot, bremst ab und folgt der Straße
             if (_autopilot != null && Manager != null && Manager.Current != null) _autopilot.Begin(Manager);
             _resultDelay = 1.2f;   // im Original läuft hier die Sieg-/Niederlage-Cinematic (pack_racingschool)
+        }
+
+        /// <summary>Wie im Original: erst das Instruktor-Kino (Sieg/Niederlage, pack_racingschool), dann das Ergebnis.</summary>
+        void ShowResultsAfterCinematic()
+        {
+            var res = _lastResult;
+            var lic = _licences.Count > 0 ? _licences[_licIndex] : null;
+            char school = res?.Race != null && res.Race.School != '\0' ? res.Race.School : lic != null ? lic.School : 'A';
+            var cin = res != null && Manager != null ? RaceCinematics.RacingSchoolResult(Manager.BnkDir, school, res.Passed) : null;
+            if (cin == null) { ShowResults(); return; }
+            if (_autopilot != null) _autopilot.End();
+            RaceCinematics.Play(Manager, cin, ShowResults);
         }
 
         void ShowResults()

@@ -5,9 +5,10 @@ using System.Text;
 using System.Text.RegularExpressions;
 using TDU2.Flash;
 using TDU2.IO;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.UI
 {
     /// <summary>
     /// Oberflächen-Sounds wie im Spiel: die Flash-Filme melden "FSCommand:sndp:&lt;id&gt;" (z.B. HUD: chptpass beim Checkpoint,

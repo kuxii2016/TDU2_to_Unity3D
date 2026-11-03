@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using TDU2.Formats;
+using TDU2.Interior;
 using TDU2.Racing;
 using TDU2.Vehicles;
 using TDU2.World;
@@ -12,10 +13,10 @@ using UnityEngine;
 namespace TDU2.EditorTools
 {
     /// <summary>
-    /// Fenster "TDU2/Rennen (ig2)": Renn-/Prüfungsdateien (Bnk/ig2/*.ig2) laden, auf der Karte (SceneView) anzeigen
-    /// und alle Infos im Inspector zeigen (Auswahl = <see cref="TDU2RaceInfo"/>).
-    /// Im Play-Modus liegt die Strecke exakt auf der geladenen Insel (MapRoot); im Edit-Modus wird die Lage der Insel
-    /// aus den Streamer-Einstellungen (MirrorX/CenterWorld) nachgerechnet.
+    /// Window "TDU2/Races (ig2)": load race/test files (Bnk/ig2/*.ig2), show them on the map (Scene view) and
+    /// display all details in the Inspector (selection = <see cref="TDU2RaceInfo"/>).
+    /// In play mode the route lies exactly on the loaded island (MapRoot); in edit mode the island transform is
+    /// reconstructed from the streamer settings (MirrorX/CenterWorld).
     /// </summary>
     public sealed class TDU2RaceEditorWindow : EditorWindow
     {
@@ -30,19 +31,19 @@ namespace TDU2.EditorTools
         CarDatabase _cars;
         string _status = "";
 
-        // Auswahl
+        // Selection
         string _selected;
         RaceDefinition _race;
         Ige2File _ig2;
         LicenseInfo _license;
         TDU2RaceInfo _info;
 
-        // Anzeige
+        // Display
         bool _showRoute = true, _showGates = true, _showDecor = true, _showOpp = true, _showLabels = true;
         static readonly Dictionary<string, Matrix4x4> _islandMatrix = new Dictionary<string, Matrix4x4>();
 
-        [MenuItem("TDU2/Rennen (ig2) anzeigen")]
-        public static void Open() => GetWindow<TDU2RaceEditorWindow>("TDU2 Rennen");
+        [MenuItem("TDU2/Show Races (ig2)")]
+        public static void Open() => GetWindow<TDU2RaceEditorWindow>("TDU2 Races");
 
         void OnEnable()
         {
@@ -76,16 +77,16 @@ namespace TDU2.EditorTools
         {
             _files = Array.Empty<string>();
             _repo = null;
-            if (string.IsNullOrEmpty(_bnkDir) || !Directory.Exists(Path.Combine(_bnkDir, "ig2"))) { _status = "ig2-Ordner nicht gefunden"; return; }
+            if (string.IsNullOrEmpty(_bnkDir) || !Directory.Exists(Path.Combine(_bnkDir, "ig2"))) { _status = "ig2 folder not found"; return; }
             try
             {
                 _files = Directory.GetFiles(Path.Combine(_bnkDir, "ig2"), "*.ig2")
                     .Select(Path.GetFileNameWithoutExtension).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToArray();
                 _repo = RaceRepository.Load(_bnkDir);
                 RaceTexts.Ensure(_bnkDir, EditorPrefs.GetString("TDU2.RaceEditor.Lang", "ge"));
-                _status = _files.Length + " Dateien, " + (_repo.Database?.Licenses.Count ?? 0) + " Lizenzen";
+                _status = _files.Length + " files, " + (_repo.Database?.Licenses.Count ?? 0) + " licenses";
             }
-            catch (Exception ex) { _status = "Fehler: " + ex.Message; }
+            catch (Exception ex) { _status = "Error: " + ex.Message; }
         }
 
         CarDatabase Cars()
@@ -96,7 +97,7 @@ namespace TDU2.EditorTools
                 var f = CarDatabase.FindDatabase(_bnkDir);
                 if (f != null) _cars = CarDatabase.Load(f);
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Fahrzeugdatenbank: " + ex.Message); }
+            catch (Exception ex) { Debug.LogWarning("[TDU2] Car database: " + ex.Message); }
             return _cars;
         }
 
@@ -105,30 +106,30 @@ namespace TDU2.EditorTools
             using (new EditorGUILayout.HorizontalScope())
             {
                 EditorGUI.BeginChangeCheck();
-                _bnkDir = EditorGUILayout.TextField("Bnk-Ordner", _bnkDir);
+                _bnkDir = EditorGUILayout.TextField("Bnk folder", _bnkDir);
                 if (GUILayout.Button("…", GUILayout.Width(24)))
                 {
-                    var p = EditorUtility.OpenFolderPanel("Bnk-Ordner (enthält ig2/)", _bnkDir, "");
+                    var p = EditorUtility.OpenFolderPanel("Bnk folder (contains ig2/)", _bnkDir, "");
                     if (!string.IsNullOrEmpty(p)) _bnkDir = p;
                 }
                 if (EditorGUI.EndChangeCheck()) { EditorPrefs.SetString(PrefBnk, _bnkDir); Refresh(); }
-                if (GUILayout.Button("Neu laden", GUILayout.Width(80))) { _cars = null; Refresh(); }
+                if (GUILayout.Button("Reload", GUILayout.Width(80))) { _cars = null; Refresh(); }
             }
             EditorGUILayout.LabelField(_status, EditorStyles.miniLabel);
 
             using (new EditorGUILayout.HorizontalScope())
             {
                 _filter = EditorGUILayout.TextField("Filter", _filter);
-                _onlySchool = GUILayout.Toggle(_onlySchool, "nur Rennschule", GUILayout.Width(110));
+                _onlySchool = GUILayout.Toggle(_onlySchool, "racing school only", GUILayout.Width(110));
             }
             using (new EditorGUILayout.HorizontalScope())
             {
                 EditorGUI.BeginChangeCheck();
                 _showRoute = GUILayout.Toggle(_showRoute, "Route");
-                _showGates = GUILayout.Toggle(_showGates, "Tore");
-                _showDecor = GUILayout.Toggle(_showDecor, "Kegel/Absperrungen");
-                _showOpp = GUILayout.Toggle(_showOpp, "Fahrzeuge");
-                _showLabels = GUILayout.Toggle(_showLabels, "Beschriftung");
+                _showGates = GUILayout.Toggle(_showGates, "Gates");
+                _showDecor = GUILayout.Toggle(_showDecor, "Cones/barriers");
+                _showOpp = GUILayout.Toggle(_showOpp, "Vehicles");
+                _showLabels = GUILayout.Toggle(_showLabels, "Labels");
                 if (EditorGUI.EndChangeCheck()) SceneView.RepaintAll();
             }
 
@@ -136,10 +137,10 @@ namespace TDU2.EditorTools
             {
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    if (GUILayout.Button("In Szene zeigen")) FrameRace();
+                    if (GUILayout.Button("Show in scene")) FrameRace();
                     if (GUILayout.Button("Inspector")) Selection.activeObject = _info;
                     using (new EditorGUI.DisabledScope(!Application.isPlaying))
-                        if (GUILayout.Button(new GUIContent("Im Spiel starten", "Play-Modus: Prüfung direkt starten (RacingSchoolMenu)"))) StartInGame();
+                        if (GUILayout.Button(new GUIContent("Start in game", "Play mode: start the test directly (RacingSchoolMenu)"))) StartInGame();
                 }
             }
 
@@ -195,7 +196,7 @@ namespace TDU2.EditorTools
             var menu = UnityEngine.Object.FindObjectOfType<RacingSchoolMenu>();
             var man = UnityEngine.Object.FindObjectOfType<TDU2VehicleManager>();
 #endif
-            if (man == null) { ShowNotification(new GUIContent("Kein TDU2VehicleManager in der Szene")); return; }
+            if (man == null) { ShowNotification(new GUIContent("No TDU2VehicleManager in the scene")); return; }
             if (menu == null)
             {
                 var go = new GameObject("TDU2 Racing School");
@@ -204,18 +205,18 @@ namespace TDU2.EditorTools
                 menu.Manager = man;
                 menu.Interiors = man.GetComponent<TDU2Interiors>();
             }
-            if (!menu.StartTestDirect(_race)) ShowNotification(new GUIContent("Start nicht möglich (Daten noch nicht geladen?)"));
+            if (!menu.StartTestDirect(_race)) ShowNotification(new GUIContent("Could not start (data not loaded yet?)"));
         }
 
-        // ------------------------------------------------------------------ SceneView
+        // ------------------------------------------------------------------ Scene view
 
-        /// <summary>Inselkoordinaten → Welt: im Play-Modus MapRoot, sonst aus den Streamer-Einstellungen nachgerechnet.</summary>
+        /// <summary>Island coordinates → world: MapRoot in play mode, reconstructed from the streamer settings otherwise.</summary>
         Matrix4x4 IslandToWorld(out string note)
         {
             note = null;
             var s = FindStreamer();
             if (s != null && s.MapRoot != null) return s.MapRoot.localToWorldMatrix;
-            if (s == null) { note = "kein TDU2MapStreamer in der Szene – Inselkoordinaten"; return Matrix4x4.identity; }
+            if (s == null) { note = "no TDU2MapStreamer in the scene – island coordinates"; return Matrix4x4.identity; }
             string key = _bnkDir + "|" + s.Island;
             if (!_islandMatrix.TryGetValue(key, out var local))
             {
@@ -230,7 +231,7 @@ namespace TDU2.EditorTools
                 catch (Exception) { }
                 _islandMatrix[key] = local;
             }
-            note = "Edit-Modus: Lage aus Streamer-Einstellungen (Insel " + s.Island + ")";
+            note = "Edit mode: position from streamer settings (island " + s.Island + ")";
             return s.transform.localToWorldMatrix * local;
         }
 
@@ -285,7 +286,7 @@ namespace TDU2.EditorTools
                 Handles.DrawAAPolyLine(4f, pts.ToArray());
             }
 
-            // Tore
+            // Gates
             if (_showGates)
             {
                 foreach (var cp in race.Checkpoints)
@@ -311,11 +312,11 @@ namespace TDU2.EditorTools
                         if (_info != null) { _info.SelectedCheckpoint = cp.Index; Selection.activeObject = _info; EditorUtility.SetDirty(_info); }
                         sv.Repaint();
                     }
-                    if (_showLabels) Handles.Label(p + Vector3.up * 3.5f, "CP " + cp.Index + " " + cp.GateKind + (cp.IsFinish ? " (Ziel)" : "") + "  " + cp.Width.ToString("0.#") + " m", EditorStyles.miniBoldLabel);
+                    if (_showLabels) Handles.Label(p + Vector3.up * 3.5f, "CP " + cp.Index + " " + cp.GateKind + (cp.IsFinish ? " (finish)" : "") + "  " + cp.Width.ToString("0.#") + " m", EditorStyles.miniBoldLabel);
                 }
             }
 
-            // Deko
+            // Decor
             if (_showDecor)
             {
                 foreach (var d in race.Decors)
@@ -327,7 +328,7 @@ namespace TDU2.EditorTools
                 }
             }
 
-            // Fahrzeuge
+            // Vehicles
             if (_showOpp)
             {
                 foreach (var o in race.Opponents)
@@ -336,14 +337,14 @@ namespace TDU2.EditorTools
                     Handles.color = new Color(0.3f, 0.5f, 1f);
                     Handles.DrawWireCube(p + Vector3.up * 0.7f, new Vector3(2f, 1.4f, 2f));
                     Handles.ArrowHandleCap(0, p, Quaternion.LookRotation(f.sqrMagnitude > 1e-6f ? f : Vector3.forward), 5f, EventType.Repaint);
-                    if (_showLabels) Handles.Label(p + Vector3.up * 2.5f, "#" + o.CarId + "  " + (o.MaxSpeed * 3.6f).ToString("0") + " km/h  ab CP " + o.StartCheckpoint, EditorStyles.miniLabel);
+                    if (_showLabels) Handles.Label(p + Vector3.up * 2.5f, "#" + o.CarId + "  " + (o.MaxSpeed * 3.6f).ToString("0") + " km/h  from CP " + o.StartCheckpoint, EditorStyles.miniLabel);
                 }
             }
             Handles.zTest = oldZ;
         }
     }
 
-    /// <summary>Inspector-Objekt eines geladenen Rennens (nur Anzeige).</summary>
+    /// <summary>Inspector object of a loaded race (display only).</summary>
     [CustomEditor(typeof(TDU2RaceInfo))]
     public sealed class TDU2RaceInfoEditor : Editor
     {
@@ -353,60 +354,60 @@ namespace TDU2.EditorTools
         {
             var i = (TDU2RaceInfo)target;
             var r = i.Race;
-            if (r == null) { EditorGUILayout.HelpBox("Kein Rennen geladen (Fenster TDU2/Rennen (ig2) anzeigen).", MessageType.Info); return; }
+            if (r == null) { EditorGUILayout.HelpBox("No race loaded (window TDU2/Show Races (ig2)).", MessageType.Info); return; }
 
             EditorGUILayout.LabelField(r.Title + "  " + RaceTexts.Get(r.NameHc, ""), EditorStyles.boldLabel);
             var desc = RaceTexts.Get(r.DescHc, "");
             if (desc.Length > 0) EditorGUILayout.HelpBox(desc, MessageType.None);
 
-            Section("Allgemein");
-            Row("Datei", i.File + ".ig2");
-            Row("Lizenz", i.License != null ? i.License.DisplayName + "  (Hash " + i.License.Hash + ", Insel " + i.License.Island + ", Reihenfolge " + i.License.Order + ")" : "—");
-            Row("Schule", r.School == '\0' ? "—" : r.School == 'A' ? "A Asphalt" : r.School == 'B' ? "B Dirt" : r.School == 'C' ? "C Classic" : r.School.ToString());
-            Row("Insel (isla)", r.Island == 0 ? "0 Ibiza" : r.Island == 1 ? "1 Hawaii" : r.Island.ToString());
-            Row("Modus (gmth)", r.Mode.ToString());
-            Row("Testart / Ort / Wetter", r.TestType + " / " + r.Place + " / " + r.Weather);
-            Row("Benotet (TEST)", r.IsGradedTest ? "ja" : "nein");
+            Section("General");
+            Row("File", i.File + ".ig2");
+            Row("License", i.License != null ? i.License.DisplayName + "  (hash " + i.License.Hash + ", island " + i.License.Island + ", order " + i.License.Order + ")" : "—");
+            Row("School", r.School == '\0' ? "—" : r.School == 'A' ? "A Asphalt" : r.School == 'B' ? "B Dirt" : r.School == 'C' ? "C Classic" : r.School.ToString());
+            Row("Island (isla)", r.Island == 0 ? "0 Ibiza" : r.Island == 1 ? "1 Hawaii" : r.Island.ToString());
+            Row("Mode (gmth)", r.Mode.ToString());
+            Row("Test type / place / weather", r.TestType + " / " + r.Place + " / " + r.Weather);
+            Row("Graded (TEST)", r.IsGradedTest ? "yes" : "no");
 
-            Section("Zeiten");
-            Row("Ziel (timG)", Ms(r.TargetTimeMs));
-            Row("Silber / Bronze", Ms(r.SilverTimeMs) + " / " + Ms(r.BronzeTimeMs));
-            Row("Zeitlimit (ChCD/CtDw)", r.HasTimeLimit ? "Countdown " + Ms(r.TimeLimitMs) : (r.TimeLimitMs > 0 ? "Abbruch nach " + Ms(r.TimeLimitMs) : "—"));
-            Row("Strafen (PeLv / offR)", r.PenaltyLevel + " / " + (r.OffroadPenalty ? "Offroad" : "—"));
-            Row("Belohnung (rewm)", r.RewardMoney.ToString());
+            Section("Times");
+            Row("Target (timG)", Ms(r.TargetTimeMs));
+            Row("Silver / Bronze", Ms(r.SilverTimeMs) + " / " + Ms(r.BronzeTimeMs));
+            Row("Time limit (ChCD/CtDw)", r.HasTimeLimit ? "countdown " + Ms(r.TimeLimitMs) : (r.TimeLimitMs > 0 ? "abort after " + Ms(r.TimeLimitMs) : "—"));
+            Row("Penalties (PeLv / offR)", r.PenaltyLevel + " / " + (r.OffroadPenalty ? "offroad" : "—"));
+            Row("Reward (rewm)", r.RewardMoney.ToString());
 
-            Section("Fahrzeug");
+            Section("Vehicle");
             Row("VMod", r.CarId + "  " + i.CarName);
-            if (i.CarSticker != null) Row("Beklebung", i.CarSticker);
+            if (i.CarSticker != null) Row("Sticker", i.CarSticker);
 
-            Section("Strecke");
-            Row("Checkpoints", r.Checkpoints.Count + "  (Ziele " + r.TargetCount + ")");
-            Row("Rundkurs / Runden", (r.IsCircuit ? "ja" : "nein") + " / " + r.Laps + " (nblp " + r.LapsRaw + ")");
-            Row("Länge (leme)", r.Length.ToString("0") + " m");
+            Section("Route");
+            Row("Checkpoints", r.Checkpoints.Count + "  (targets " + r.TargetCount + ")");
+            Row("Circuit / laps", (r.IsCircuit ? "yes" : "no") + " / " + r.Laps + " (nblp " + r.LapsRaw + ")");
+            Row("Length (leme)", r.Length.ToString("0") + " m");
             Row("Start", r.StartPosition.ToString("F1") + (r.HasSpotStart ? "  (spotworld.bin)" : ""));
-            Row("Endet in Bremszone", r.EndsInBrakingZone ? "ja" : "nein");
+            Row("Ends in braking zone", r.EndsInBrakingZone ? "yes" : "no");
 
             _cps = EditorGUILayout.Foldout(_cps, "Checkpoints (" + r.Checkpoints.Count + ")", true);
             if (_cps)
                 foreach (var cp in r.Checkpoints)
                 {
                     var st = cp.Index == i.SelectedCheckpoint ? EditorStyles.boldLabel : EditorStyles.label;
-                    EditorGUILayout.LabelField($"  {cp.Index,2}  {cp.GateKind,-11} {cp.Width,5:0.0} m  {(cp.OnRoad ? "Straße" : "frei")}{(cp.IsFinish ? "  Ziel" : "")}", cp.Position.ToString("F1"), st);
+                    EditorGUILayout.LabelField($"  {cp.Index,2}  {cp.GateKind,-11} {cp.Width,5:0.0} m  {(cp.OnRoad ? "road" : "open")}{(cp.IsFinish ? "  finish" : "")}", cp.Position.ToString("F1"), st);
                 }
 
-            _decor = EditorGUILayout.Foldout(_decor, "Kegel/Absperrungen (" + r.Decors.Count + ")", true);
+            _decor = EditorGUILayout.Foldout(_decor, "Cones/barriers (" + r.Decors.Count + ")", true);
             if (_decor)
                 foreach (var d in r.Decors)
-                    EditorGUILayout.LabelField("  " + (d.IsSeparator ? "Absperrung" : "Kegel") + (d.IsLine ? " (Linie)" : ""), d.From.ToString("F1") + (d.IsLine ? " → " + d.To.ToString("F1") : ""));
+                    EditorGUILayout.LabelField("  " + (d.IsSeparator ? "barrier" : "cone") + (d.IsLine ? " (line)" : ""), d.From.ToString("F1") + (d.IsLine ? " → " + d.To.ToString("F1") : ""));
 
-            _opp = EditorGUILayout.Foldout(_opp, "Fahrzeuge (" + r.Opponents.Count + ")", true);
+            _opp = EditorGUILayout.Foldout(_opp, "Vehicles (" + r.Opponents.Count + ")", true);
             if (_opp)
                 foreach (var o in r.Opponents)
-                    EditorGUILayout.LabelField("  #" + o.CarId + " " + i.CarLabel(o.CarId), (o.MaxSpeed * 3.6f).ToString("0") + " km/h, ab CP " + o.StartCheckpoint);
+                    EditorGUILayout.LabelField("  #" + o.CarId + " " + i.CarLabel(o.CarId), (o.MaxSpeed * 3.6f).ToString("0") + " km/h, from CP " + o.StartCheckpoint);
 
             if (i.Ig2 != null)
             {
-                _tags = EditorGUILayout.Foldout(_tags, "Alle ig2-Einstellungen (" + i.Ig2.Settings.Count + ")", true);
+                _tags = EditorGUILayout.Foldout(_tags, "All ig2 settings (" + i.Ig2.Settings.Count + ")", true);
                 if (_tags)
                     foreach (var kv in i.Ig2.Settings.OrderBy(k => k.Key, StringComparer.Ordinal))
                         EditorGUILayout.LabelField("  " + kv.Key, TagText(kv.Value));

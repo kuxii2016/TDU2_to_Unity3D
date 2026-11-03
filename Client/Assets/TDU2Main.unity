@@ -93,8 +93,8 @@ LightmapSettings:
     m_ExportTrainingData: 0
     m_TrainingDataDestination: TrainingData
     m_LightProbeSampleCountMultiplier: 4
-  m_LightingDataAsset: {fileID: 0}
-  m_LightingSettings: {fileID: 0}
+  m_LightingDataAsset: {fileID: 112000000, guid: c3fda7d1136e08a42a11c4449b4650e9, type: 2}
+  m_LightingSettings: {fileID: 4890085278179872738, guid: 1f31d8f4d4c6e2943a5802f71d1f09ce, type: 2}
 --- !u!196 &4
 NavMeshSettings:
   serializedVersion: 2
@@ -262,6 +262,10 @@ MonoBehaviour:
   SendRate: 8
   RelevantDistance: 900
   ShowDebug: 0
+  DebugRoutes: 1
+  DebugArrows: 1
+  DebugLabels: 1
+  DebugRange: 140
   Manager: {fileID: 0}
 --- !u!4 &255755664
 Transform:
@@ -315,7 +319,7 @@ MonoBehaviour:
   PlaceViewerOnStart: 1
   StartPositionGame: {x: -1, y: 600, z: -1}
   StartFromGamePc: 1
-  AreaLoadDistance: 2500
+  AreaLoadDistance: 1500
   AreaUnloadMargin: 1000
   SectorLoadDistance: 900
   SectorUnloadMargin: 300
@@ -347,6 +351,8 @@ MonoBehaviour:
   ObjectBrightness: 0.5
   LoadInteriors: 1
   CutTunnelPortals: 1
+  CutTerrainUnderGround: 1
+  ShowSignText: 1
   WrapLighting: 0.35
   OriginalLighting: 1
   ShowGlowMaterials: 1
@@ -357,6 +363,8 @@ MonoBehaviour:
   SectorSkirt: 12
   AreaSkirt: 40
   IslandSkirt: 150
+  TerrainLower: 0.1
+  TerrainDepthPush: 0.0015
   Shaders:
     Object: {fileID: 4800000, guid: 3b2e7c03b7735184b93b02f073e9f6ba, type: 3}
     ObjectTransparent: {fileID: 4800000, guid: 9f4580349611f8646921c272b05456ea, type: 3}
@@ -784,76 +792,6 @@ MonoBehaviour:
   m_BeforeTransparentBundles: []
   m_BeforeStackBundles: []
   m_AfterStackBundles: []
---- !u!1 &1868117652
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1868117654}
-  - component: {fileID: 1868117653}
-  m_Layer: 0
-  m_Name: DiscordController
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1868117653
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1868117652}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2b8e2350ddf7a6447803a890d9f03a1b, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::DiscordController
-  Starttime: 0
-  applicationId: 1564941401722986496
-  optionalSteamId: 
-  joinRequest:
-    userId: 
-    username: 
-    discriminator: 
-    avatar: 
-  onConnect:
-    m_PersistentCalls:
-      m_Calls: []
-  onDisconnect:
-    m_PersistentCalls:
-      m_Calls: []
-  hasResponded:
-    m_PersistentCalls:
-      m_Calls: []
-  onJoin:
-    m_PersistentCalls:
-      m_Calls: []
-  onSpectate:
-    m_PersistentCalls:
-      m_Calls: []
-  onJoinRequest:
-    m_PersistentCalls:
-      m_Calls: []
---- !u!4 &1868117654
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1868117652}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -15021.937, y: 0, z: 26052.355}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -864,4 +802,3 @@ SceneRoots:
   - {fileID: 1489439014}
   - {fileID: 956752841}
   - {fileID: 255755664}
-  - {fileID: 1868117654}

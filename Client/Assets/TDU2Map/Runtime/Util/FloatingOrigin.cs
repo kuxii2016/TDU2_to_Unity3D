@@ -43,12 +43,18 @@ namespace TDU2
             if (f == null) return;
             var p = f.position;
             p.y = 0f;
+            if (float.IsNaN(p.x) || float.IsNaN(p.z) || float.IsInfinity(p.x) || float.IsInfinity(p.z)) return;   // kaputte Kamera nie auf die Welt übertragen
             if (p.magnitude < Threshold) return;
             Shift(p);
         }
 
         public static void Shift(Vector3 delta)
         {
+            if (float.IsNaN(delta.x) || float.IsNaN(delta.y) || float.IsNaN(delta.z) || float.IsInfinity(delta.x) || float.IsInfinity(delta.y) || float.IsInfinity(delta.z))
+            {
+                Debug.LogWarning("[TDU2] Floating Origin: ungültige Verschiebung " + delta + " ignoriert");
+                return;
+            }
             var scene = SceneManager.GetActiveScene();
             foreach (var root in scene.GetRootGameObjects())
                 root.transform.position -= delta;

@@ -64,8 +64,8 @@ namespace TDU2.Avatars
                     if (ci.Sex == 1 && cfg.Sex == 0 || ci.Sex == 2 && cfg.Sex == 1) continue;   // falsches Geschlecht
                     AvatarPartData data = null;
                     try { data = AvatarLibrary.LoadClothe(ci, i < cfg.Colors.Count ? cfg.Colors[i] : 0, hat); }
-                    catch (Exception ex) 
-                    { 
+                    catch (Exception ex)
+                    {
                         DebugManager.Error("Clothes " + ci.File + ": " + ex.Message);
                     }
                     clothes.Add((ci, data));
@@ -78,10 +78,10 @@ namespace TDU2.Avatars
         {
             if (_load == null || !_load.IsCompleted) return;
             var t = _load; _load = null;
-            if (t.IsFaulted) 
-            { 
+            if (t.IsFaulted)
+            {
                 DebugManager.Error("Avatar loding: " + t.Exception?.GetBaseException().Message);
-                return; 
+                return;
             }
             try { Build(t.Result.skel, t.Result.body, t.Result.clothes); }
             catch (Exception ex) { Debug.LogException(ex); }
@@ -89,10 +89,10 @@ namespace TDU2.Avatars
 
         void Build(XsbSkeleton skel, List<AvatarPartData> body, List<(ClotheInfo info, AvatarPartData data)> clothes)
         {
-            if (skel == null) 
-            { 
+            if (skel == null)
+            {
                 DebugManager.Error("Avatar: missing Skelett (avatar/common_bodies.bnk?)");
-                return; 
+                return;
             }
             Skeleton = skel;
             int n = skel.Count;

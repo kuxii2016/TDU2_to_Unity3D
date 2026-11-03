@@ -152,7 +152,7 @@ namespace TDU2.World
             // nur, wenn das Fahrzeug auf das Teil zu fährt
             var to = _rb.worldCenterOfMass - orb.worldCenterOfMass; to.y = 0f;
             if (to.sqrMagnitude > 1e-4f && Vector3.Dot(v, to) <= 0f) return;
-            Break(v);
+            Break(v, orb);
         }
 
         void OnCollisionEnter(Collision c)
@@ -171,12 +171,14 @@ namespace TDU2.World
             var n = c.contactCount > 0 ? c.GetContact(0).normal : Vector3.zero;
             float into = Mathf.Abs(Vector3.Dot(pre, n));
             SetVel(orb, pre - n * (into * k * Mathf.Sign(Vector3.Dot(pre, n))));
-            Break(pre);
+            Break(pre, orb);
         }
 
-        void Break(Vector3 hitVel)
+        void Break(Vector3 hitVel, Rigidbody by)
         {
             _free = true;
+            // Vibration/Force Feedback: das Spielerauto hat das Teil umgefahren (Stoß nach Masse des Teils)
+            Vehicles.TDU2ForceFeedback.ReportHit(by, _rb.mass, -hitVel);
             if (_trigger != null) Destroy(_trigger);
             _rb.isKinematic = false;
             _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;

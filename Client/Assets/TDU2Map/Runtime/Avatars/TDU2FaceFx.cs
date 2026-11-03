@@ -12,7 +12,7 @@ namespace TDU2.Avatars
     ///   avatar/avatar_face_fx.bnk: female.fxa / male.fxa = FxActor (42 Gesichtsknochen mit Ruhepose und Posen-Deltas je Knoten,
     ///   Gesichtsgraph mit 445 Knoten), Kino-Bänke: *.fxe = FxAnimSet (Kurven je Knoten, Hermite).
     ///   .sce-Spur "Morph" {u32 REFS-Index (Typ 0x0306 "...\female.fxa::Gruppe:Anim"), u64, f32 Länge, u32 0}: der Schlüssel startet
-    ///   die Animation am Darsteller, Ein-/Ausblenden 0,2 s (td2.exe FUN_00b77600 / FUN_00b77b20, OpenTDU2 IntroCinematic::applyFaceFx).
+    ///   die Animation am Darsteller, Ein-/Ausblenden 0,2 s (td2.exe FUN_00b77600 / FUN_00b77b20.
     /// Graph: Knotenwert = Kurve (+ Summe bzw. x Produkt der Eingänge über ihre Link-Funktionen), Korrektur-Links skalieren
     /// (1 - Faktor x Eingang), dann auf [min, max] geklemmt. Knochen = Ruhepose + Summe(Wert x Delta) (Position, Skalierung),
     /// Rotation = Ruhe x Produkt slerp(1, Delta, Wert).
@@ -360,11 +360,11 @@ namespace TDU2.Avatars
                             var b = BnkArchive.Open(p);
                             var ef = b.Find("female.fxa"); if (ef != null) _female = FaceFxActor.Parse(b.Read(ef));
                             var em = b.Find("male.fxa"); if (em != null) _male = FaceFxActor.Parse(b.Read(em));
-                            DebugManager.Info($"[TDU2] FaceFX: {(_female != null ? _female.Nodes.Length : 0)} / {(_male != null ? _male.Nodes.Length : 0)} Knoten (Frau/Mann)");
+                            DebugManager.Info($"FaceFX: {(_female != null ? _female.Nodes.Length : 0)} / {(_male != null ? _male.Nodes.Length : 0)} Knoten (Frau/Mann)");
                         }
-                        else DebugManager.Warning("[TDU2] FaceFX: avatar/avatar_face_fx.bnk fehlt");
+                        else DebugManager.Warning("FaceFX: avatar/avatar_face_fx.bnk missing");
                     }
-                    catch (Exception ex) { DebugManager.Error("[TDU2] FaceFX: " + ex.Message); }
+                    catch (Exception ex) { DebugManager.Error("FaceFX: " + ex.Message); }
                 }
                 return woman ? (_female ?? _male) : (_male ?? _female);
             }

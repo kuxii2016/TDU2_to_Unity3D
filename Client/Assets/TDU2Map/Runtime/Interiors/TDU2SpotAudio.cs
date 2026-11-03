@@ -4,9 +4,10 @@ using System.IO;
 using System.Threading.Tasks;
 using TDU2.Formats;
 using TDU2.IO;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Ton in Interieurs wie im Spiel: Autoradio aus, stattdessen die Spot-Musik aus sound/musics (MngMusic, "%sSound/Musics/%s").

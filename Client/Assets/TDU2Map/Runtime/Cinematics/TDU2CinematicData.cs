@@ -34,6 +34,12 @@ namespace TDU2.Cinematics
         }
 
         public static readonly uint TrackAnimation = Fold("Animation"), TrackVisibility = Fold("Visibility"), TrackMorph = Fold("Morph");
+        /// <summary>Spur "Up" (0x7055) der Ziel-Kameras: Oben-Vektor je Schlüssel.</summary>
+        public static readonly uint TrackUp = Fold("Up");
+
+        /// <summary>Alle Komponenten endlich (kein NaN/Unendlich)?</summary>
+        public static bool Finite(Vector3 v) => !(float.IsNaN(v.x) || float.IsNaN(v.y) || float.IsNaN(v.z) || float.IsInfinity(v.x) || float.IsInfinity(v.y) || float.IsInfinity(v.z));
+        public static bool Finite(Quaternion q) => !(float.IsNaN(q.x) || float.IsNaN(q.y) || float.IsNaN(q.z) || float.IsNaN(q.w) || float.IsInfinity(q.x) || float.IsInfinity(q.y) || float.IsInfinity(q.z) || float.IsInfinity(q.w));
 
         /// <summary>Eden-Heading (Rohwerte xyzw) -> Unity-Rotation (Spielraum).</summary>
         public static Quaternion ToUnity(Quaternion raw) => new Quaternion(-raw.x, -raw.y, -raw.z, raw.w);
@@ -127,18 +133,28 @@ namespace TDU2.Cinematics
             return null;
         }
 
-        /// <summary>Position im Szenenraum.</summary>
-        public Vector3 SamplePosition(float time)
+        /// <summary>
+        /// Ziel-Kamera (z.B. pack_racingschool cam_classic_win_01, Duelle): hat eine "Up"-Spur; ihre Positionsspur ist
+        /// [Kennung, x, y, z] (4 Werte, Kennung oft NaN) und die "Heading"-Spur enthält keinen Quaternion, sondern den
+        /// Zielpunkt [Kennung, x, y, z], auf den die Kamera blickt.
+        /// </summary>
+        public bool IsTargetCamera => IsCamera && Find(CinIds.TrackUp) != null;
+
+        /// <summary>xyz einer Vektorspur: bei 4+ Werten je Schlüssel stehen sie hinten ([Kennung, x, y, z]).</summary>
+        static Vector3 SampleVec3(CinTrack t, float time, Vector3 def)
         {
-            var t = Find(CinIds.TrackPosition);
-            if (t == null || t.Components < 3 || t.Times.Length == 0) return Vector3.zero;
+            if (t == null || t.Components < 3 || t.Times.Length == 0) return def;
+            int o = t.Components - 3;
             int k = CinIds.FindKey(t.Times, time, out float f);
-            int a = k * t.Components;
+            int a = k * t.Components + o;
             var pa = new Vector3(t.Values[a], t.Values[a + 1], t.Values[a + 2]);
             if (f <= 0f || k + 1 >= t.Times.Length) return pa;
-            int b = (k + 1) * t.Components;
+            int b = (k + 1) * t.Components + o;
             return Vector3.LerpUnclamped(pa, new Vector3(t.Values[b], t.Values[b + 1], t.Values[b + 2]), f);
         }
+
+        /// <summary>Position im Szenenraum.</summary>
+        public Vector3 SamplePosition(float time) => SampleVec3(Find(CinIds.TrackPosition), time, Vector3.zero);
 
         /// <summary>Heading als Eden-Rohquaternion (xyzw, normalisierte Lerp wie das Original).</summary>
         public Quaternion SampleHeadingRaw(float time)
@@ -157,8 +173,22 @@ namespace TDU2.Cinematics
             return len > 1e-8f ? new Quaternion(r.x / len, r.y / len, r.z / len, r.w / len) : Quaternion.identity;
         }
 
-        /// <summary>Rotation im Szenenraum (Unity-Konvention, +Z vorne).</summary>
-        public Quaternion SampleRotation(float time) => CinIds.ToUnity(SampleHeadingRaw(time));
+        /// <summary>Rotation im Szenenraum (Unity-Konvention, +Z vorne). Ziel-Kameras: Blick auf den Zielpunkt mit ihrem Oben-Vektor.</summary>
+        public Quaternion SampleRotation(float time)
+        {
+            if (IsTargetCamera)
+            {
+                var pos = SamplePosition(time);
+                var target = SampleVec3(Find(CinIds.TrackHeading), time, pos + Vector3.forward);
+                var up = SampleVec3(Find(CinIds.TrackUp), time, Vector3.up);
+                var dir = target - pos;
+                if (!CinIds.Finite(dir) || dir.sqrMagnitude < 1e-8f) return Quaternion.identity;
+                if (!CinIds.Finite(up) || up.sqrMagnitude < 1e-8f) up = Vector3.up;
+                return Quaternion.LookRotation(dir.normalized, up.normalized);
+            }
+            var q = SampleHeadingRaw(time);
+            return CinIds.Finite(q) ? CinIds.ToUnity(q) : Quaternion.identity;
+        }
 
         public float SampleFloat(uint id, float time, float def)
         {
@@ -422,8 +452,12 @@ namespace TDU2.Cinematics
                     {
                         var s = new Shot
                         {
-                            Start = time, Duration = CinIds.F32(d, v), Scene = (int)CinIds.U32(d, v + 4), CameraHash = CinIds.U32(d, v + 8),
-                            CameraStart = CinIds.F32(d, v + 0x0c), CameraEnd = CinIds.F32(d, v + 0x10),
+                            Start = time,
+                            Duration = CinIds.F32(d, v),
+                            Scene = (int)CinIds.U32(d, v + 4),
+                            CameraHash = CinIds.U32(d, v + 8),
+                            CameraStart = CinIds.F32(d, v + 0x0c),
+                            CameraEnd = CinIds.F32(d, v + 0x10),
                         };
                         if (vs >= 0x28)
                         {

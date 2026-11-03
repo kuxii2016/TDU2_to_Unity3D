@@ -7,9 +7,11 @@ using TDU2.Flash;
 using TDU2.Formats;
 using TDU2.Online;
 using TDU2.Story;
+using TDU2.UI;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Waschanlage (Spot ECW_*, Spielmodus CAR_WASH) wie im Spiel (Ablauf aus TestDrive2.exe: Menü 0xBFC280, "cwok" 0xBFC160,
@@ -93,7 +95,12 @@ namespace TDU2.Vehicles
             // Bank als absoluter Pfad (Path.Combine(BnkDir, abs) = abs); genau dieser Spot (mehrere Anlagen teilen sich ECW_A)
             _scene = TDU2StoryScene.Create(Manager, new TDU2StoryScene.Setup
             {
-                Bank = bank, SpotRef = s, Spot = s.Code, HideSpotInterior = true, LoadUi = false, IntroUi = false,
+                Bank = bank,
+                SpotRef = s,
+                Spot = s.Code,
+                HideSpotInterior = true,
+                LoadUi = false,
+                IntroUi = false,
             });
             int color = 0, rim = 0, interior = 0;
             if (TDU2CarChoices.TryGet(_car.FileName, out var ch)) { color = ch.Color; rim = ch.Rim; interior = ch.Interior; }
@@ -228,8 +235,8 @@ namespace TDU2.Vehicles
             if (_gofrAt > 0f && Time.unscaledTime >= _gofrAt) { _gofrAt = -1f; MenuDone(); return; }   // Rückfall, falls "gofr" ausbleibt
             if (!_menuOpen || _film == null) return;
 #if ENABLE_LEGACY_INPUT_MANAGER
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.E)) _film.Input("A");
-            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace)) { if (!_film.Input("B")) MenuDone(); else _gofrAt = Time.unscaledTime + 2.5f; }
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed()) _film.Input("A");
+            if (TDU2.Vehicles.TDU2Nav.Back()) { if (!_film.Input("B")) MenuDone(); else _gofrAt = Time.unscaledTime + 2.5f; }
 #endif
         }
 

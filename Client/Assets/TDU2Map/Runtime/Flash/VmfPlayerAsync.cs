@@ -138,7 +138,7 @@ namespace TDU2.Flash
             }
             if (_rasterThreads != null)
             {
-                foreach (var t in _rasterThreads) { try { t.Join(50); } catch {} }
+                foreach (var t in _rasterThreads) { try { t.Join(50); } catch { } }
             }
             _rasterThreads = null;
             _fontQueue = null;
@@ -285,7 +285,7 @@ namespace TDU2.Flash
                     LastRasterDoneCount = _rasterDone.Count;
                 }
             }
-            catch {}
+            catch { }
         }
 
         /// <summary>Rasterung als Textur ablegen (ersetzt eine kleinere Stufe).</summary>

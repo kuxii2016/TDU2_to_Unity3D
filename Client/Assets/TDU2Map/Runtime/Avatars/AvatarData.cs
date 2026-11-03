@@ -294,19 +294,19 @@ namespace TDU2.Avatars
                             if (!_bankByStem.ContainsKey(stem)) _bankByStem[stem] = f;
                         }
                 }
-                catch (Exception ex) 
-                { 
+                catch (Exception ex)
+                {
                     DebugManager.Error("Avatar clothing" + ex.Message);
                 }
                 foreach (var name in new[] { Path.Combine("avatar", "common_bodies.bnk"), Path.Combine("avatar", "clothes", "common_clothes.bnk") })
                 {
                     var p = Path.Combine(bnkDir ?? "", name);
-                    try 
-                    { 
-                        if (File.Exists(p)) CommonTextures.IndexBank(BnkArchive.Open(p)); 
-                    } 
-                    catch (Exception ex) 
-                    { 
+                    try
+                    {
+                        if (File.Exists(p)) CommonTextures.IndexBank(BnkArchive.Open(p));
+                    }
+                    catch (Exception ex)
+                    {
                         DebugManager.Error("Avatar: " + p + " - " + ex.Message);
                     }
                 }
@@ -372,8 +372,8 @@ namespace TDU2.Avatars
                 }
                 var e = _anims?.Find(name + ".anm");
                 c = e != null ? AnmClip.Parse(_anims.Read(e), name) : null;
-                if (c == null) 
-                { 
+                if (c == null)
+                {
                     DebugManager.Warning("Avatar animation Missing for: " + name);
                 }
                 _clips[name] = c;
@@ -437,8 +437,8 @@ namespace TDU2.Avatars
                                 _hairMat[m.Name ?? ""] = (new Color(pc.x, pc.y, pc.z, 1f), new Color(sc.x, sc.y, sc.z, 1f));
                             }
                     }
-                    catch (Exception ex) 
-                    { 
+                    catch (Exception ex)
+                    {
                         DebugManager.Error("hair_mat.2dm: " + ex.Message);
                     }
                 }
@@ -465,10 +465,10 @@ namespace TDU2.Avatars
             var e3dd = bank.Find(stem + ".3dd");
             var e3dg = bank.Find(stem + ".3dg");
             var e2dm = bank.Find(mat2dm ?? (stem + ".2dm"));
-            if (e3dd == null || e3dg == null) 
-            { 
+            if (e3dd == null || e3dg == null)
+            {
                 DebugManager.Warning("Avatar part missing: " + stem);
-                return null; 
+                return null;
             }
             var scene = Scene3DD.Parse(bank.Read(e3dd));
             var geo = Geometry3DG.Parse(bank.Read(e3dg));
@@ -530,14 +530,14 @@ namespace TDU2.Avatars
         public static void SetLocal(AvatarConfig cfg)
         {
             if (cfg == null) return;
-            if (TDU2Session.Save == null) 
-            { 
-                _offline = cfg.Encode(); 
-                LocalChanged?.Invoke(); 
-                return; 
+            if (TDU2Session.Save == null)
+            {
+                _offline = cfg.Encode();
+                LocalChanged?.Invoke();
+                return;
             }
             TDU2Session.Save.avatar = cfg.Encode();
-            if (TDU2Session.LoggedIn) 
+            if (TDU2Session.LoggedIn)
                 TDU2Session.SaveAsync();
             LocalChanged?.Invoke();
         }

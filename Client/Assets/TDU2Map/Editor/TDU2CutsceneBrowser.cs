@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using TDU2.Cinematics;
+using TDU2.UI;
 using TDU2.Vehicles;
 using TDU2.World;
 using UnityEditor;

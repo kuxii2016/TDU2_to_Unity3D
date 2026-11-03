@@ -2,9 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.UI
 {
     /// <summary>
     /// Menü-Musik wie im Spiel (FlashSounds::PlayFrontEndMusic, frontend/sounds/fe_snd.bnk sounds.ini "SetMusic"):

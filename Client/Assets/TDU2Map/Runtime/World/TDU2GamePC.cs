@@ -65,15 +65,15 @@ namespace TDU2
                 {
                     var g = Parse(File.ReadAllBytes(f));
                     g.Path = f;
-                    DebugManager.Debug($"[TDU2] GamePC.cpr: {f} – Start {g.StartIsland ?? "-"}, Haus {string.Join("/", g.Houses)}, " +
-                              $"Auto {string.Join(" ", g.DefaultCar)}, Garage {string.Join(" ", g.GarageCars)}, Geld {g.DefaultMoney}" +
-                              (g.HasStartPosition ? $", Position {g.StartPosition}" : ""));
+                    DebugManager.Info($"GamePC.cpr: {f} – Start island: {g.StartIsland ?? "-"}, Houses: {string.Join("/", g.Houses)}, " +
+                              $"Default cars: {string.Join(" ", g.DefaultCar)}, Garage cars: {string.Join(" ", g.GarageCars)}, Money: {g.DefaultMoney}" +
+                              (g.HasStartPosition ? $", Position: {g.StartPosition}" : ""));
                     _cached = g; _cachedKey = key;
                     return g;
                 }
-                catch (Exception ex) { Debug.LogWarning("[TDU2] GamePC.cpr nicht lesbar: " + f + " – " + ex.Message); }
+                catch (Exception ex) { DebugManager.Error("Failed to read GamePC.cpr: " + f + " – " + ex.Message); }
             }
-            Debug.LogWarning("[TDU2] GamePC.cpr nicht gefunden (StreamingAssets oder neben Euro/Bnk)");
+            DebugManager.Warning("GamePC.cpr not found (checked StreamingAssets and directories near Euro/Bnk)");
             _cached = null; _cachedKey = key;
             return null;
         }

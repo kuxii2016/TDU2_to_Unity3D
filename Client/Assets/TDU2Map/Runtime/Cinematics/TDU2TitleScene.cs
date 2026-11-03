@@ -2,14 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
-using TDU2.Cinematics;
 using TDU2.Formats;
 using TDU2.IO;
-using TDU2;
+using TDU2.Vehicles;
 using TDU2.World;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Cinematics
 {
     /// <summary>
     /// 3D-Hintergrund des "Press Start"-Bildschirms wie im Original (GMLogin, FUN_009c7ea0 / FUN_009c6b20; nach OpenTDU2
@@ -91,7 +90,11 @@ namespace TDU2.Vehicles
             string islandDir = IslandDir;
             if (string.IsNullOrEmpty(islandDir)) return false;
             string bankPath = Path.Combine(islandDir, "scenarics", "press_start.bnk");
-            if (!File.Exists(bankPath)) { DebugManager.Warning("[TDU2] Titel-Kino: " + bankPath + " fehlt"); return false; }
+            if (!File.Exists(bankPath))
+            {
+                DebugManager.Warning("Missing bnk: " + bankPath + " (!)");
+                return false;
+            }
             try
             {
                 var bank = BnkArchive.Open(bankPath);
@@ -121,13 +124,13 @@ namespace TDU2.Vehicles
                     if (stem.EndsWith("_" + digits, StringComparison.OrdinalIgnoreCase)) { cinEntry = e; break; }
                 }
                 _cin = cinEntry != null ? CinData.Parse(bank.Read(cinEntry), cinEntry.Name) : null;
-                if (_cin == null) { DebugManager.Warning("[TDU2] Titel-Kino: .cin zu " + _cinName + " fehlt"); return false; }
+                if (_cin == null) { DebugManager.Warning("Titel-Kino: .cin zu " + _cinName + " fehlt"); return false; }
                 for (int s = 0; s < _cin.SceneReferences.Count; s++)
                 {
                     string file = _cin.SceneFile(s);
                     var se = file != null ? bank.Find(file + ".sce") : null;
                     _scenes.Add(se != null ? CinScene.Parse(bank.Read(se), se.Name) : null);
-                    if (se == null) DebugManager.Warning("[TDU2] Titel-Kino: Szene " + file + " fehlt");
+                    if (se == null) DebugManager.Warning("Titel-Kino: Szene " + file + " fehlt");
                 }
                 if (_scenes.Count == 0 || _scenes[0] == null || _scenes[0].Objects.Count == 0) return false;
                 // Auto der Szene: Darsteller "CIN_CAR_xx" -> Entity__CinCar id_car -> DBCarPhysicsData
@@ -141,11 +144,11 @@ namespace TDU2.Vehicles
                 _carId = _carObj != null && cinCars.TryGetValue(_carObj.Name, out int idCar) ? idCar : -1;
                 _carResolved = false; _carFallbackTried = false;
                 LoadWeathers(islandDir);
-                DebugManager.Info($"[TDU2] Titel-Kino {_cinName} ({idx + 1}/{names.Count}): {_cin.Shots.Count} Shots, {_cin.Duration:0} s, Auto {(_car != null ? _car.ModelName : "-")}");
+                DebugManager.Info($"Titel-Kino {_cinName} ({idx + 1}/{names.Count}): {_cin.Shots.Count} Shots, {_cin.Duration:0} s, Auto {(_car != null ? _car.ModelName : "-")}");
             }
             catch (Exception ex)
             {
-                DebugManager.Error("[TDU2] Titel-Kino: " + ex.Message);
+                DebugManager.Error("Titel-Kino: " + ex.Message);
                 return false;
             }
             _time = 0f; _started = false; _waitSince = Time.unscaledTime; _carGrounded = false;
@@ -167,7 +170,7 @@ namespace TDU2.Vehicles
             _car = _carId >= 0 ? _mgr.Database.Cars.Find(c => c.Id == _carId) : null;
             if (_car != null && _mgr.Available.Count > 0 && !_mgr.Available.Exists(c => c.Id == _car.Id))
             {
-                DebugManager.Info($"[TDU2] Titel-Kino: Auto {_car.ModelName} ({_carId}) nicht installiert – Ersatz");
+                DebugManager.Info($"Titel-Kino: Auto {_car.ModelName} ({_carId}) nicht installiert – Ersatz");
                 _car = null;
             }
             if (_car == null) { _car = FallbackCar(); _carFallbackTried = true; }
@@ -186,7 +189,7 @@ namespace TDU2.Vehicles
             if (_car == null) return;
             string bnk = _mgr.BnkDir; var db = _mgr.Database; var car = _car;
             _carTask = Task.Run(() => CarAssets.Load(bnk, db, car, 0, false));
-            DebugManager.Debug("[TDU2] Titel-Kino Auto: " + car.ModelName);
+            DebugManager.Debug("Titel-Kino Auto: " + car.ModelName);
         }
 
         static int ForcedIndex()
@@ -202,9 +205,9 @@ namespace TDU2.Vehicles
             _weathers = null;
             string path = Path.Combine(islandDir, "fx", "cinematic_weathers.xmb");
             try { if (File.Exists(path)) _weathers = TDU2WeatherData.Load(path); }
-            catch (Exception ex) { DebugManager.Warning("[TDU2] cinematic_weathers.xmb: " + ex.Message); }
+            catch (Exception ex) { DebugManager.Warning("cinematic_weathers.xmb: " + ex.Message); }
             try { if (_weathers != null) _weathers.LoadModifiers(Path.Combine(islandDir, "fx", "cinematic_modifiers.xmb")); }
-            catch (Exception ex) { DebugManager.Warning("[TDU2] cinematic_modifiers.xmb: " + ex.Message); }
+            catch (Exception ex) { DebugManager.Warning("cinematic_modifiers.xmb: " + ex.Message); }
         }
 
         bool _probe;
@@ -266,7 +269,6 @@ namespace TDU2.Vehicles
                 _weather = w; _modifier = m;
                 var key = FindWeather(w, m);
                 TDU2Weather.Override = key;
-                DebugManager.Debug($"[TDU2] Titel-Kino Wetter {w}{(m.Length > 0 ? " / " + m : "")} -> {(key != null ? key.Name : "nicht gefunden")}");
             }
         }
 
@@ -294,11 +296,11 @@ namespace TDU2.Vehicles
                     }
                     catch (Exception ex)
                     {
-                        DebugManager.Error("[TDU2] Titel-Kino Auto: " + ex.Message);
+                        DebugManager.Error("Titel-Kino Auto: " + ex.Message);
                         if (_carGo != null) { UnityUtil.SafeDestroy(_carGo); _carGo = null; }
                     }
                 }
-                else if (task.Exception != null) DebugManager.Error("[TDU2] Titel-Kino Auto: " + task.Exception.GetBaseException().Message);
+                else if (task.Exception != null) DebugManager.Error("Titel-Kino Auto: " + task.Exception.GetBaseException().Message);
                 // Laden fehlgeschlagen: einmal mit einem vorhandenen Auto
                 if (_carGo == null && _loaded && !_carFallbackTried)
                 {

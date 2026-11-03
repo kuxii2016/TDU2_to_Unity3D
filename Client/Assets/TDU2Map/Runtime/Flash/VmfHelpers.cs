@@ -123,9 +123,9 @@ namespace TDU2.Flash
                     kv.Value.Applied = inst;
                 }
             }
-            catch (Exception ex) 
-            { 
-                DebugManager.Error("Flashpin: " +ex.Message);
+            catch (Exception ex)
+            {
+                DebugManager.Error("Flashpin: " + ex.Message);
             }
             finally { _applyingPins = false; }
         }
@@ -208,7 +208,7 @@ namespace TDU2.Flash
                 else Input(hint);
                 return;
             }
-            if (field != null) TextFieldClicked?.Invoke(field);
+            if (field != null) { FocusClicked(field); TextFieldClicked?.Invoke(field); }
         }
 
         /// <summary>
@@ -218,11 +218,99 @@ namespace TDU2.Flash
         /// </summary>
         bool HandleSubscribedClick(Vector2 gui)
         {
-            if (HintClicked == null && TextFieldClicked == null) return false;
+            if (HintClicked == null && TextFieldClicked == null && _focusRequested == null) return false;
             FindFreeTargets(gui, out string hint, out string field);
             if (hint != null && HintClicked != null) { HintClicked(hint); return true; }
-            if (field != null) TextFieldClicked?.Invoke(field);
+            if (field != null) { FocusClicked(field); TextFieldClicked?.Invoke(field); }
             return false;
+        }
+
+        // ------------------------------------------------------------------ Texteingabe (setInputFocus)
+        // Im Spiel nativ: der Film ruft setInputFocus("/:Variable") (z.B. "Nach Spieler suchen"), danach tippt die Engine in diese
+        // Variable. Hier: Tastatur -> Variable, solange ihr Textfeld sichtbar ist; blinkender Strich als Cursor (nur Anzeige);
+        // Klick in das Feld setzt den Fokus wieder. Enter/ESC bleiben beim Menü (A bzw. B des Films).
+        /// <summary>Variable, in die gerade getippt wird (null = keine Texteingabe).</summary>
+        public string InputFocus { get; private set; }
+        [Tooltip("Höchstlänge bei Texteingabe per setInputFocus")]
+        public int InputMaxLength = 24;
+        string _focusRequested;   // zuletzt vom Film angeforderte Variable (Klick ins Feld fokussiert sie erneut)
+        float _focusSince;
+
+        public void SetInputFocus(string variable)
+        {
+            InputFocus = string.IsNullOrEmpty(variable) ? null : variable;
+            if (InputFocus != null) _focusRequested = InputFocus;
+            _focusSince = Time.unscaledTime;
+        }
+
+        public void ClearInputFocus() { InputFocus = null; }
+
+        void FocusClicked(string field)
+        {
+            if (_focusRequested != null && SameVar(field, _focusRequested)) SetInputFocus(_focusRequested);
+        }
+
+        static string FocusKey(string v)
+        {
+            v = (v ?? "").Trim();
+            if (v.StartsWith("_root.", StringComparison.OrdinalIgnoreCase)) v = v.Substring(6);
+            else if (v.StartsWith("/:", StringComparison.Ordinal)) v = v.Substring(2);
+            else if (v.StartsWith("_level0.", StringComparison.OrdinalIgnoreCase)) v = v.Substring(8);
+            return v.ToLowerInvariant();
+        }
+
+        static bool SameVar(string a, string b) => FocusKey(a) == FocusKey(b);
+
+        /// <summary>Textfeld der fokussierten Variable gerade sichtbar?</summary>
+        bool FocusFieldVisible()
+        {
+            bool found = false;
+            void Walk(Instance inst)
+            {
+                foreach (var d in inst.List.Values)
+                {
+                    if (found) return;
+                    if (!d.Visible || d.ClipDepth != 0 || (d.Cx.Mul.w <= 0.003f && d.Cx.Add.w <= 0.003f)) continue;
+                    if (d.Sprite != null) { Walk(d.Sprite); continue; }
+                    if (Movie.Chars.TryGetValue(d.CharId, out var ch) && ch is VmfMovie.EditText et && et.Variable != null && SameVar(et.Variable, InputFocus)) found = true;
+                }
+            }
+            if (Root != null) Walk(Root);
+            return found;
+        }
+
+        /// <summary>Jedes Bild: getippte Zeichen in die fokussierte Variable.</summary>
+        void TextInputTick()
+        {
+            if (InputFocus == null) return;
+            if (!Visible || !FocusFieldVisible())
+            {
+                // Feld (noch) nicht da – kurz nach dem Aufruf läuft oft erst die Öffnen-Animation
+                if (Time.unscaledTime - _focusSince > 1.5f) InputFocus = null;
+                return;
+            }
+            _focusSince = Time.unscaledTime;
+#if ENABLE_LEGACY_INPUT_MANAGER
+            string s = UnityEngine.Input.inputString;
+            if (string.IsNullOrEmpty(s)) return;
+            string cur = GetVariable(InputFocus) ?? "";
+            bool changed = false;
+            foreach (char ch in s)
+            {
+                if (ch == '\b') { if (cur.Length > 0) { cur = cur.Substring(0, cur.Length - 1); changed = true; } }
+                else if (ch == '\n' || ch == '\r' || ch == '\t') continue;
+                else if (!char.IsControl(ch) && cur.Length < InputMaxLength) { cur += ch; changed = true; }
+            }
+            if (changed) SetVariable(InputFocus, cur);
+#endif
+        }
+
+        /// <summary>Anzeige eines Textfelds mit Cursor (nur für das fokussierte Feld, blinkend); null = normal.</summary>
+        string CaretText(VmfMovie.EditText t)
+        {
+            if (InputFocus == null || t?.Variable == null || !SameVar(t.Variable, InputFocus)) return null;
+            if ((Time.unscaledTime % 1f) >= 0.55f) return null;
+            return (GetVariable(InputFocus) ?? "") + "_";
         }
 
         void FindFreeTargets(Vector2 gui, out string hintOut, out string fieldOut)

@@ -4,7 +4,8 @@ using System.Threading.Tasks;
 using TDU2.Avatars;
 using TDU2.Flash;
 using TDU2.Formats;
-using TDU2.World;
+using TDU2.Interior;
+using TDU2.UI;
 using TDU2.Vehicles;
 using UnityEngine;
 
@@ -325,8 +326,8 @@ namespace TDU2.Story
         public static bool ValidatePressed()
         {
 #if ENABLE_LEGACY_INPUT_MANAGER
-            // einheitlich wie in den Interieurs/Läden (TDU2Interiors, TDU2MyHouse, Händler): Enter, Ziffernblock-Enter, E, Leertaste, Maus
-            return Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Space) || Input.GetMouseButtonDown(0);
+            // Laufmodus (Auswahl im Raum): wie in den Interieurs – Taste "Benutzen" (Laufen-Belegung), Bestätigen, Maus
+            return TDU2.Vehicles.TDU2Controls.Pressed("walk_use") || TDU2.Vehicles.TDU2Controls.ConfirmPressed() || Input.GetMouseButtonDown(0);
 #else
             return false;
 #endif
@@ -335,7 +336,7 @@ namespace TDU2.Story
         public static bool SkipPressed()
         {
 #if ENABLE_LEGACY_INPUT_MANAGER
-            return Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Space);
+            return TDU2.Vehicles.TDU2Controls.ConfirmPressed() || Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Space) || TDU2.Vehicles.TDU2Nav.PadBack() || TDU2.Vehicles.TDU2Nav.StartPressed();
 #else
             return false;
 #endif
@@ -586,9 +587,9 @@ namespace TDU2.Story
             if (_st == St.Choice && ui != null)
             {
 #if ENABLE_LEGACY_INPUT_MANAGER
-                if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) ui.SendKey(1);
-                if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) ui.SendKey(2);
-                if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Space)) ui.SendKey(13);
+                if (TDU2.Vehicles.TDU2Nav.Left() || Input.GetKeyDown(KeyCode.A)) ui.SendKey(1);
+                if (TDU2.Vehicles.TDU2Nav.Right() || Input.GetKeyDown(KeyCode.D)) ui.SendKey(2);
+                if (TDU2.Vehicles.TDU2Controls.ConfirmPressed()) ui.SendKey(13);
 #endif
             }
             // C_INTRO überspringen: ab 25 s (FUN_00da7e70)
@@ -1431,7 +1432,7 @@ namespace TDU2.Story
 
         void Finish()
         {
-                if (_carGo != null) UnityEngine.Object.Destroy(_carGo);
+            if (_carGo != null) UnityEngine.Object.Destroy(_carGo);
             _model?.Destroy(); _model = null; _carGo = null;
             _scene?.Dispose(); _scene = null;
             TDU2GameMode.Pop();
@@ -1478,8 +1479,12 @@ namespace TDU2.Story
             TDU2GameMode.Push(Gamemode.GAME_MODE_CINE);
             _scene = TDU2StoryScene.Create(Manager, new TDU2StoryScene.Setup
             {
-                Bank = "scenarics/cinematics/intro/solar_crown_int.bnk", Spot = "ECH_IA_1243I", Closed = true, ClosedAltitude = 0f,
-                ExtraBanks = new[] { "interior/ich_ib.bnk" }, IntroUi = false,
+                Bank = "scenarics/cinematics/intro/solar_crown_int.bnk",
+                Spot = "ECH_IA_1243I",
+                Closed = true,
+                ClosedAltitude = 0f,
+                ExtraBanks = new[] { "interior/ich_ib.bnk" },
+                IntroUi = false,
             });
         }
 
@@ -1596,9 +1601,9 @@ namespace TDU2.Story
             // Rückfall: Bild 9 ruft initParameter() – kam nach 1 s noch kein tuto:assi:open, selbst aufrufen
             if (!_initSeen && _t - _openT > 1f) { _initSeen = true; _g.Call("/driving_assistance", "initParameter"); }
 #if ENABLE_LEGACY_INPUT_MANAGER
-            if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A) || Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) Step(-1);
-            if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D) || Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) Step(1);
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.E))
+            if (TDU2.Vehicles.TDU2Nav.Left() || Input.GetKeyDown(KeyCode.A) || TDU2.Vehicles.TDU2Nav.Up() || Input.GetKeyDown(KeyCode.W)) Step(-1);
+            if (TDU2.Vehicles.TDU2Nav.Right() || Input.GetKeyDown(KeyCode.D) || TDU2.Vehicles.TDU2Nav.Down() || Input.GetKeyDown(KeyCode.S)) Step(1);
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed())
             {
                 if (!_g.Input("A")) Choose();
             }

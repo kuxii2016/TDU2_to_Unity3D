@@ -1,9 +1,11 @@
 using System;
 using System.IO;
 using TDU2.Flash;
+using TDU2.UI;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Flughafen (Interieur iair_a/iair_b, Hostess = FpSelectable Typ 32) mit dem Original-Film frontend/&lt;res&gt;/airport.bnk:
@@ -189,12 +191,12 @@ namespace TDU2.Vehicles
             if (_closeAt > 0f && Time.unscaledTime >= _closeAt) { _closeAt = -1f; Close(); return; }
             if (!_open || _film == null) return;
 #if ENABLE_LEGACY_INPUT_MANAGER
-            if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) _film.Input("Move", "up");
-            if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) _film.Input("Move", "down");
-            if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) { _film.Input("Move", "left"); CycleChoice(-1); }
-            if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) { _film.Input("Move", "right"); CycleChoice(1); }
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space)) _film.Input("A");
-            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace))
+            if (TDU2.Vehicles.TDU2Nav.Up() || Input.GetKeyDown(KeyCode.W)) _film.Input("Move", "up");
+            if (TDU2.Vehicles.TDU2Nav.Down() || Input.GetKeyDown(KeyCode.S)) _film.Input("Move", "down");
+            if (TDU2.Vehicles.TDU2Nav.Left() || Input.GetKeyDown(KeyCode.A)) { _film.Input("Move", "left"); CycleChoice(-1); }
+            if (TDU2.Vehicles.TDU2Nav.Right() || Input.GetKeyDown(KeyCode.D)) { _film.Input("Move", "right"); CycleChoice(1); }
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed()) _film.Input("A");
+            if (TDU2.Vehicles.TDU2Nav.Back())
             {
                 // doppeltes ESC schließt immer (falls der Film hängt)
                 if (Time.unscaledTime - _lastEsc < 1.5f) { Close(); return; }

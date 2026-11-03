@@ -5,9 +5,10 @@ using System.IO;
 using TDU2.Avatars;
 using TDU2.Flash;
 using TDU2.Online;
+using TDU2.UI;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.Interior
 {
     /// <summary>
     /// Kleidungsladen und Garderobe mit den Original-Filmen:
@@ -674,20 +675,20 @@ namespace TDU2.Vehicles
             // In der Stückauswahl (menu_item) nur links/rechts: hoch/runter erreichte sonst das Kategorie-Menü dahinter
             if (!_inItems)
             {
-                if (Input.GetKeyDown(KeyCode.UpArrow)) _ui.Input("Move", "up");
-                if (Input.GetKeyDown(KeyCode.DownArrow)) _ui.Input("Move", "down");
+                if (TDU2.Vehicles.TDU2Nav.Up()) _ui.Input("Move", "up");
+                if (TDU2.Vehicles.TDU2Nav.Down()) _ui.Input("Move", "down");
             }
             // links/rechts in der Stückauswahl direkt an menu_item (sonst fing menu_square dahinter die Eingabe und öffnete andere Menüs)
-            if (Input.GetKeyDown(KeyCode.LeftArrow)) MenuInput("Move", "left");
-            if (Input.GetKeyDown(KeyCode.RightArrow)) MenuInput("Move", "right");
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space))
+            if (TDU2.Vehicles.TDU2Nav.Left()) MenuInput("Move", "left");
+            if (TDU2.Vehicles.TDU2Nav.Right()) MenuInput("Move", "right");
+            if (TDU2.Vehicles.TDU2Controls.ConfirmPressed())
             {
                 // Laden: bereits gekauft -> der Film macht nichts ("Solded"), direkt anziehen
                 var e = Current;
                 if (_mode == ShopMode.Shop && e != null && e.Owned && _reopenAt < 0f) WearCurrent();
                 else MenuInput("A");
             }
-            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace))
+            if (TDU2.Vehicles.TDU2Nav.Back())
             {
                 // doppeltes ESC: sicher verlassen (falls der Film hängt)
                 if (Time.unscaledTime - _lastEsc < 1.2f) { Close(); return; }
@@ -698,6 +699,7 @@ namespace TDU2.Vehicles
             if (Input.GetKey(KeyCode.Q)) _turn -= 90f * Time.unscaledDeltaTime;
             if (Input.GetKey(KeyCode.E)) _turn += 90f * Time.unscaledDeltaTime;
             if (Input.GetMouseButton(1)) _turn += Input.GetAxis("Mouse X") * 4f;
+            _turn += TDU2.Vehicles.TDU2InputDevices.Look.x * 120f * Time.unscaledDeltaTime;   // Gamepad: rechter Stick
 #endif
         }
 

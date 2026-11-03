@@ -1,13 +1,14 @@
-using TDU2;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using TDU2.Flash;
+using TDU2.Interior;
 using TDU2.Online;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.UI
 {
     /// <summary>
     /// Original-Pausemenü (ESC) aus frontend/&lt;res&gt;/main.bnk (MAIN.vmf), gesteuert wie im Spiel:
@@ -44,6 +45,36 @@ namespace TDU2.Vehicles
         public static Func<bool> RaceActive;
         public static Action RaceQuit, RaceRestart;
         bool _raceMode;
+        Action _raceQuit, _raceRestart;   // Anbieter, der beim Öffnen aktiv war
+
+        /// <summary>Anbieter für das Renn-ESC-Menü (Meisterschaft, Rennschul-Prüfung, Missionen …).</summary>
+        sealed class RaceProvider { public object Owner; public Func<bool> Active; public Action Restart, Quit; }
+        static readonly List<RaceProvider> _raceProviders = new List<RaceProvider>();
+
+        /// <summary>
+        /// Renn-Modus des ESC-Menüs anmelden (WhatGameMode 2: "Neu starten" / "Beenden"). Mehrere Anbieter möglich; beim Öffnen
+        /// gilt der erste aktive. Gleicher Besitzer ersetzt seine alte Anmeldung.
+        /// </summary>
+        public static void RegisterRace(object owner, Func<bool> active, Action restart, Action quit)
+        {
+            _raceProviders.RemoveAll(p => p.Owner == owner || p.Owner == null || (p.Owner is UnityEngine.Object uo && uo == null));
+            _raceProviders.Add(new RaceProvider { Owner = owner, Active = active, Restart = restart, Quit = quit });
+        }
+
+        public static void UnregisterRace(object owner) => _raceProviders.RemoveAll(p => p.Owner == owner);
+
+        bool FindRace(out Action restart, out Action quit)
+        {
+            restart = null; quit = null;
+            foreach (var p in _raceProviders)
+            {
+                bool on = false;
+                try { on = p.Active != null && p.Active(); } catch (Exception) { }
+                if (on) { restart = p.Restart; quit = p.Quit; return true; }
+            }
+            if (RaceActive != null && RaceActive()) { restart = RaceRestart; quit = RaceQuit; return true; }
+            return false;
+        }
         public string LastCommand { get; private set; }
 
         // Menüpunkte, die hier funktionieren (alles andere ist im Film gesperrt dargestellt)
@@ -68,7 +99,7 @@ namespace TDU2.Vehicles
             bool inside = ti != null && ti.Inside;
             // ESC öffnet das Pausemenü überall (Freie Fahrt, Rennen, Interieur); im Interieur zusätzlich P.
             // Gehört ESC gerade dem Interieur (eigenes Menü, Sticker-Shop), nicht öffnen.
-            bool menuKey = Input.GetKeyDown(MenuKey) || (inside && Input.GetKeyDown(MenuKeyInterior));
+            bool menuKey = Input.GetKeyDown(MenuKey) || (inside && Input.GetKeyDown(MenuKeyInterior)) || TDU2Nav.StartPressed();   // Gamepad: Start
             if (!_open && inside && ti.EscOwned) menuKey = false;
             if (!_open && TDU2AccessoryMenu.OwnsEscape) menuKey = false;   // ESC schließt das Zubehörmenü (Verdeck/Fenster/Blinker)
             if (TDU2BigMap.IsOpen) { if (menuKey && !_open) Debug.Log("[TDU2] Pausemenü gesperrt: große Karte offen"); return; }   // große Karte offen: ESC gehört ihr
@@ -97,22 +128,34 @@ namespace TDU2.Vehicles
             if (_pendingDialog) AnswerDialog();
             // Mausrad in Listen (Steuerung)
             var al = _ui.ActiveList;
-            if (al != null && al.Active && _ui.IsShown(al.Owner))
+            if (al == null || !_ui.IsShown(al.Owner)) al = _ui.ScrollTarget();
+            if (al != null && _ui.IsShown(al.Owner))
             {
                 float wheel = Input.mouseScrollDelta.y;
-                if (wheel > 0.1f) _ui.ListMove(al, -1); else if (wheel < -0.1f) _ui.ListMove(al, 1);
+                if (al.Active) { if (wheel > 0.1f) _ui.ListMove(al, -1); else if (wheel < -0.1f) _ui.ListMove(al, 1); }
+                else if (Mathf.Abs(wheel) > 0.1f) _ui.ListScroll(al, wheel > 0f ? -1 : 1);
             }
             // Eingabe wie die Spiel-Engine an den Film weiterreichen
-            if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) _ui.Input("Move", "up");
-            if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) _ui.Input("Move", "down");
-            if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) _ui.Input("Move", "left");
-            if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) _ui.Input("Move", "right");
-            if (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.Space)) _ui.Input("A");
+            // Menü-Belegung (Optionen → Steuerung → Menü), dazu Gamepad-Steuerkreuz über das Geräteprofil
+            // Texteingabe (setInputFocus, z.B. "Nach Spieler suchen"): Buchstaben, Leertaste und Rücktaste gehören dem Textfeld –
+            // nur Enter/Pad-A bestätigt, ESC/Pad-B bricht ab
+            bool typing = _ui.InputFocus != null;
+            if (!typing)
+            {
+                if (TDU2Controls.Pressed("menu_up")) _ui.Input("Move", "up");
+                if (TDU2Controls.Pressed("menu_down")) _ui.Input("Move", "down");
+                if (TDU2Controls.Pressed("menu_left")) _ui.Input("Move", "left");
+                if (TDU2Controls.Pressed("menu_right")) _ui.Input("Move", "right");
+            }
+            if (typing ? (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter) || Input.GetKeyDown(KeyCode.JoystickButton0))
+                       : TDU2.Vehicles.TDU2Controls.ConfirmPressed()) _ui.Input("A");
             // Zurück; reagiert der Film nicht (keine B-Funktion erreichbar), Menü direkt schließen – nie im Pausenzustand hängen bleiben
-            if (menuKey || Input.GetKeyDown(KeyCode.Backspace))
+            // beim Tippen nur ESC (nicht P im Interieur) bzw. Pad-B/Start
+            bool escKey = typing ? (Input.GetKeyDown(MenuKey) || TDU2Nav.StartPressed()) : menuKey;
+            if (escKey || (typing ? TDU2.Vehicles.TDU2Nav.PadBack() : TDU2Controls.BackPressed()))
             {
                 if (!_ui.Input("B")) { _log.Add("B nicht verarbeitet -> direkt schließen"); Close(); }
-                else if (menuKey) _escAt = Time.unscaledTime;
+                else if (escKey) _escAt = Time.unscaledTime;
             }
             // ESC im Hauptmenü muss nach der Schließ-Animation "paou" liefern; blockiert der Film (z.B. _root.Input = false),
             // trotzdem schließen – im Optionsmenü führt ESC nur zurück und bleibt offen
@@ -123,8 +166,8 @@ namespace TDU2.Vehicles
                 if (!string.Equals(inOpt, "true", StringComparison.OrdinalIgnoreCase) && inOpt != "1") { _log.Add("ESC ohne paou -> schließen"); Close(); }
             }
             if (Input.GetKeyDown(KeyCode.F10)) Close();   // Notausgang
-            if (Input.GetKeyDown(KeyCode.X)) _ui.Input("X");
-            if (Input.GetKeyDown(KeyCode.Y)) _ui.Input("Y");
+            if (!typing && TDU2Controls.Pressed("menu_opt1")) _ui.Input("X");
+            if (!typing && TDU2Controls.Pressed("menu_opt2")) _ui.Input("Y");
 #endif
         }
 
@@ -229,7 +272,7 @@ namespace TDU2.Vehicles
             if (_ui == null || _open || TDU2Login.Active) return;
             _open = true; _closing = false;
             // Zustand wie das Spiel ihn vor "pain" setzt
-            _raceMode = RaceActive != null && RaceActive();
+            _raceMode = FindRace(out _raceRestart, out _raceQuit);
             _ui.SetValue("/:WhatGameMode", _raceMode ? 2 : 1);   // 1 Freie Fahrt, 2 Rennen (Fortsetzen/Neu starten/…/Beenden)
             _ui.SetValue("/:WhatPlatform", 1);       // PC (0 = Xbox 360, 2/3 = PS3 – dort virtuelle Tastatur)
             _ui.SetVariable("/:MenuType", "pc");
@@ -458,14 +501,13 @@ namespace TDU2.Vehicles
             string c = (cmd ?? "").Trim().ToLowerInvariant();
             if (c.StartsWith("sndp:")) { TDU2FrontendSounds.Command(c); return; }   // Menü-Sounds (fe_snd.bnk)
             if (c == "dbxo") { _pendingDialog = true; return; }
-            if (c.StartsWith("mylf:scrl:"))                                // Scrollbalken der Liste (Pfeile)
-            {
-                var l = _ui.ActiveList;
-                if (l != null && c.EndsWith(":prss")) { if (c.Contains(":btnu:")) _ui.ListMove(l, -1); else if (c.Contains(":btnd:")) _ui.ListMove(l, 1); }
-                return;
-            }      // Bestätigungsdialog (Spiel zeigt ihn, Film wartet auf Antwort)
+            if (c.StartsWith("mylf:scrl:")) return;                        // Scrollbalken der Liste: behandelt VmfPlayer (Pfeile/Lift)      // Bestätigungsdialog (Spiel zeigt ihn, Film wartet auf Antwort)
             if (HandleControlsCommand(c)) return;                     // Steuerung (Tastenbelegung)
             if (c == "pcrd:open") { OpenPlayerCard(); return; }       // Spielerkarte: Daten liefern
+            if (c == "plli") { Online.TDU2GameData.Ensure().RequestRecent(); ReloadPlayerLists(); return; }   // Spielerliste (Reiter) geöffnet
+            if (c == "psch:vali") { SearchPlayer(); return; }                                                   // "Spieler suchen": Name bestätigt
+            if (c == "psch:canc") return;                                                                        // Suche abgebrochen (Film schließt selbst)
+            if (HandleFriendCommand(c)) return;                       // Freund hinzufügen / entfernen (Spielerkarte)
             if (HandlePartyCommand(c)) return;                        // Beitreten / Einladen (Spielerkarte)
             if (_options != null && _options.Handle(_ui, c)) return;   // Optionsseiten
             switch (c)
@@ -474,11 +516,11 @@ namespace TDU2.Vehicles
                     Close();
                     break;
                 case "rest" when _raceMode:   // Rennen neu starten
-                    Close(); _raceMode = false; RaceRestart?.Invoke();
+                    { var a = _raceRestart; Close(); _raceMode = false; a?.Invoke(); }
                     break;
                 case "quit" when _raceMode:   // im Rennen: "Beenden" = Rennen abbrechen (nicht das Spiel)
                 case "fain" when _raceMode:
-                    Close(); _raceMode = false; RaceQuit?.Invoke();
+                    { var a = _raceQuit; Close(); _raceMode = false; a?.Invoke(); }
                     break;
                 case "exit:vali":      // "Spiel beenden" bestätigt
                 case "quit":
@@ -507,8 +549,10 @@ namespace TDU2.Vehicles
             _pendingDialog = false;
             string kase = _ui.GetVariable("/:DgbxCase") ?? "";
             // Im Rennen: "Beenden"/"Neu starten" direkt ausführen (die Antwortkette des Films kommt nicht immer an)
-            if (_raceMode && string.Equals(kase, "confirm_quit_race", StringComparison.OrdinalIgnoreCase)) { Close(); _raceMode = false; RaceQuit?.Invoke(); return; }
-            if (_raceMode && string.Equals(kase, "confirm_restart", StringComparison.OrdinalIgnoreCase)) { Close(); _raceMode = false; RaceRestart?.Invoke(); return; }
+            // Anbieter, der beim Öffnen aktiv war (Rennschule, Meisterschaft …) – nicht die statischen Meisterschafts-Aktionen,
+            // sonst taten "Neu starten"/"Beenden" in der Rennschule nichts
+            if (_raceMode && string.Equals(kase, "confirm_quit_race", StringComparison.OrdinalIgnoreCase)) { var a = _raceQuit ?? RaceQuit; Close(); _raceMode = false; a?.Invoke(); return; }
+            if (_raceMode && string.Equals(kase, "confirm_restart", StringComparison.OrdinalIgnoreCase)) { var a = _raceRestart ?? RaceRestart; Close(); _raceMode = false; a?.Invoke(); return; }
             var owners = _ui.FunctionOwners("DialogBox");
             string target = null;
             foreach (var o in owners) if (o.IndexOf("options", StringComparison.OrdinalIgnoreCase) >= 0) { target = o; break; }
@@ -537,8 +581,11 @@ namespace TDU2.Vehicles
             }
             else if (PlayerLists.Contains(l.Name ?? ""))
             {
+                Online.TDU2GameData.Ensure().RequestRecent();   // "Zuletzt gesehen" vom Server nachladen
+                if (_dumpAt < 0f) _dumpAt = Time.unscaledTime + 2.5f;   // Diagnose der Spielerliste (Logs/tdu2_pausemenu.txt): Zeilen kaum sichtbar
                 FillPlayers(l);
-                _playerLists.RemoveAll(x => x.Owner == l.Owner);
+                foreach (var old in _playerLists.FindAll(x => x.Owner == l.Owner)) _listPlayers.Remove(old);
+                _playerLists.RemoveAll(x => x.Owner == l.Owner || x.Owner == null);
                 _playerLists.Add(l);
             }
             _ui.ListRefresh(l);
@@ -582,7 +629,7 @@ namespace TDU2.Vehicles
                 if (r < 0 || r >= players.Count) continue;
                 string line = (op == "/" ? "" : op) + "/line" + i;
 
-                _ui.ForceVisible($"/players/players_list/line{i}/content/forbidden", false);
+                _ui.ForceVisible(line + "/content/forbidden", false);
                 _ui.GotoLabel(line + "/content/state", players[r].Online ? "online" : "offline", false);
 
 
@@ -590,7 +637,9 @@ namespace TDU2.Vehicles
                 // MyTDULife-Foto des Spielers (kommt per op "profile" nach, Version aus der Spielerliste)
                 var pl = players[r];
                 _ui.SetClipTexture(line + "/content/photo/lure", pl.Photo);
-                if (pl.PhotoVer > 0 && (pl.Photo == null || pl.PhotoTexVer != pl.PhotoVer))
+                SetPhotoState(line + "/content/photo", pl.Photo != null, IsFemale(pl));
+                // Profil noch nie geholt (Freunde/Club/Zuletzt gesehen kennen die Foto-Version nicht) -> wie beim Öffnen der Karte holen
+                if (pl.Life == null || (pl.PhotoVer > 0 && (pl.Photo == null || pl.PhotoTexVer != pl.PhotoVer)))
                     Online.TDU2GameData.Ensure().FetchLife(pl, _ => { if (_listPlayers.ContainsKey(l)) ApplyPlayerLineStates(l); });
             }
         }
@@ -603,12 +652,77 @@ namespace TDU2.Vehicles
             foreach (var l in _playerLists)
             {
                 if (l.Owner == null || !_ui.IsShown(l.Owner)) continue;
-                int before = l.Rows.Count;
+                // nur neu zeichnen, wenn sich der Inhalt geändert hat (jede Sekunde neu zeichnen setzte Auswahl/Animationen
+                // der Zeilen zurück – die Liste wirkte "hängend")
+                string before = RowsKey(l);
                 FillPlayers(l);
-                if (l.Rows.Count != before && l.Active) { _ui.ListRefresh(l); }
-                else _ui.ListRefresh(l);
+                if (RowsKey(l) == before) continue;
+                _ui.ListRefresh(l);
+                _ui.ListLoaded(l);
                 ApplyPlayerLineStates(l);
             }
+        }
+
+        static string RowsKey(VmfPlayer.FlashList l)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var r in l.Rows) { foreach (var c in r) sb.Append(c).Append('|'); sb.Append('\n'); }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Alle Spielerlisten neu füllen und als geladen melden – z.B. nach dem Reiterwechsel des Films ("plli") oder wenn
+        /// neue Daten (Zuletzt gesehen) vom Server kommen. Ohne das blieb eine Liste nach Freunde/Club im Ladezustand.
+        /// </summary>
+        void ReloadPlayerLists()
+        {
+            foreach (var l in _playerLists)
+            {
+                if (l.Owner == null) continue;
+                FillPlayers(l);
+                _ui.ListRefresh(l);
+                _ui.ListLoaded(l);
+                ApplyPlayerLineStates(l);
+            }
+        }
+
+        /// <summary>
+        /// Spielersuche (/search_player, _root.PlayerSearched): unter allen bekannten Spielern (online, Freunde, Club, zuletzt
+        /// gesehen) suchen. Gefunden -> endLoading() (Meldung "search_player_ok"), sonst timeOutLoading() ("nicht gefunden").
+        /// Ohne Antwort blieb die Suche im Ladezustand hängen und ließ sich nicht mehr verlassen.
+        /// </summary>
+        void SearchPlayer()
+        {
+            string name = (_ui.GetVariable("/:PlayerSearched") ?? "").Trim();
+            Online.PlayerInfo hit = null;
+            var gd = Online.TDU2GameData.Instance;
+            if (gd != null && name.Length > 0)
+                foreach (var ln in PlayerLists)
+                {
+                    foreach (var p in gd.ListFor(ln))
+                        if (p != null && string.Equals(p.Nick, name, StringComparison.OrdinalIgnoreCase)) { hit = p; break; }
+                    if (hit != null) break;
+                }
+            _log.Add($"{Time.unscaledTime:0.00} Spielersuche '{name}' -> {(hit != null ? hit.Nick : "nicht gefunden")}");
+            if (hit != null) _cardPlayer = hit;
+            // Wie im Original: "Nach Spieler suchen" schickt dem Spieler eine Freundschaftsanfrage (Erfolg = Dialog search_player_ok
+            // "Freundschaftsanfrage gesendet"). Der Server kennt alle Konten – auch Spieler, die nie in einer Liste standen.
+            var fr = Online.TDU2Session.LoggedIn && gd != null && name.Length > 0 ? Online.TDU2Friends.Ensure(gd.gameObject) : null;
+            if (fr != null)
+            {
+                fr.Request(name, r =>
+                {
+                    bool ok = r != null && r.ok;
+                    _log.Add($"{Time.unscaledTime:0.00} Freundschaftsanfrage '{name}' -> {(ok ? r.friendResult : (r?.error ?? "keine Antwort"))}");
+                    if (_ui == null) return;
+                    _ui.SetValue("/:PlayerFound", ok);
+                    _ui.CallClip("/search_player", ok ? "endLoading" : "timeOutLoading");
+                });
+                return;
+            }
+            _ui.SetValue("/:PlayerFound", hit != null);
+            if (hit != null) _ui.CallClip("/search_player", "endLoading");
+            else _ui.CallClip("/search_player", "timeOutLoading");
         }
 
         void OnListValidated(VmfPlayer.FlashList l)
@@ -681,6 +795,7 @@ namespace TDU2.Vehicles
             ApplyCardPhoto(p);
             if (p != null) Online.TDU2GameData.Ensure().FetchLife(p, OnCardLife);
             _ui.SetValue("/:listIsConnected", p != null && p.Online);
+            ApplyCardFriendState(p);
             var stats = PlayerCardStats.Default;
             try { if (CardStatsProvider != null && p != null) stats = CardStatsProvider(p); } catch (Exception ex) { Debug.LogException(ex); }
             SetPlayerCardValues(stats, false);   // die Karte liest die Werte selbst, sobald IsCardLoaded gesetzt ist
@@ -720,6 +835,27 @@ namespace TDU2.Vehicles
         {
             if (_ui == null) return;
             _ui.SetClipTexture(CardPath + "/content/photo/lure", p != null ? p.Photo : null);
+            SetPhotoState(CardPath + "/content/photo", p != null && p.Photo != null, IsFemale(p));
+        }
+
+        /// <summary>
+        /// Foto-Clip wie im Spiel umschalten: "loaded" entfernt die halbtransparente Standard-Silhouette über dem Bild,
+        /// ohne Foto der Platzhalter nach Geschlecht des Avatars ("empty_male" / "empty_female"). Nur bei Änderung springen.
+        /// </summary>
+        void SetPhotoState(string photoClip, bool loaded, bool female)
+        {
+            string want = loaded ? "loaded" : female ? "empty_female" : "empty_male";
+            if (_ui.Find(photoClip) == null) return;
+            if (_ui.Label(photoClip) == want) return;
+            _ui.GotoLabel(photoClip, want, false);
+        }
+
+        /// <summary>Avatar des Spielers weiblich? (Aussehen aus Spielerliste bzw. Profil; unbekannt = männlich)</summary>
+        static bool IsFemale(Online.PlayerInfo p)
+        {
+            if (p == null || string.IsNullOrEmpty(p.Avatar)) return false;
+            var c = TDU2.Avatars.AvatarConfig.Decode(p.Avatar);
+            return c != null && c.Sex == 1;
         }
 
         /// <summary>MyTDULife ist angekommen: offene Karte desselben Spielers aktualisieren.</summary>
@@ -770,6 +906,54 @@ namespace TDU2.Vehicles
             Online.TDU2GameData.Instance?.AddChatLine("TDU2", text, 0);
         }
 
+        // ------------------------------------------------------------------ Freunde (Spielerkarte: "frre" Anfrage, "delf" entfernen)
+        static Online.TDU2Friends Friends
+        {
+            get
+            {
+                if (Online.TDU2Friends.Instance != null) return Online.TDU2Friends.Instance;
+                var gd = Online.TDU2GameData.Instance;
+                return gd != null ? Online.TDU2Friends.Ensure(gd.gameObject) : null;
+            }
+        }
+
+        /// <summary>Menü der Karte: IsFriend -> "Aus Freundesliste entfernen" statt "Zu Freunden hinzufügen"; gesperrt für sich selbst/ohne Server.</summary>
+        void ApplyCardFriendState(Online.PlayerInfo p)
+        {
+            if (_ui == null) return;
+            string nick = p?.Nick ?? _ui.GetVariable("/:listAvatarName") ?? "";
+            var f = Friends;
+            bool self = string.Equals(nick, Online.TDU2Session.Nick, StringComparison.OrdinalIgnoreCase);
+            bool can = Online.TDU2Session.LoggedIn && f != null && nick.Length > 0 && !self;
+            bool friend = can && f.IsFriend(nick);
+            _ui.SetValue("/:IsFriend", friend);
+            _ui.SetValue("/:LockAddFriend", !can || friend || f.RequestSentTo(nick));
+            _ui.SetValue("/:LockAddToFriends", !can || friend || f.RequestSentTo(nick));
+            _ui.SetValue("/:LockDelFriend", !can || !friend);
+            _ui.SetValue("/:LockFriendRequest", !can);
+        }
+
+        bool HandleFriendCommand(string c)
+        {
+            bool add = c == "frre" || c == "pcrd:frre", del = c == "delf" || c == "pcrd:delf";
+            if (!add && !del) return false;
+            string nick = _cardPlayer?.Nick;
+            if (string.IsNullOrEmpty(nick)) nick = _ui.GetVariable("/:listAvatarName");
+            var f = Friends;
+            _log.Add($"{Time.unscaledTime:0.00} Freunde: {(add ? "Anfrage an" : "entfernen")} '{nick}'");
+            if (f == null || string.IsNullOrEmpty(nick)) return true;
+            void Done(Online.NetResponse r)
+            {
+                if (_ui == null) return;
+                ApplyCardFriendState(_cardPlayer);
+                string card = CardPath;
+                var ci = _ui.Find(card)?.Sprite;
+                if (ci != null && _ui.IsShown(ci)) _ui.CallClip(card, "setMenu");   // Menü der Karte neu aufbauen
+            }
+            if (add) f.Request(nick, Done); else f.Remove(nick, Done);
+            return true;
+        }
+
         bool HandlePartyCommand(string c)
         {
             var p = c == "join:wait" || c == "pjoi" || c == "pcrd:pjoi" || c == "pcrd:pinv" ? LiveCardPlayer() : _cardPlayer;
@@ -809,18 +993,26 @@ namespace TDU2.Vehicles
             return false;
         }
 
+        // Liste je Reiter wie im Original (_root.WhatListe: "driving" Fahren, "walkmode" Laufen/Avatar, "menu" Menü) –
+        // vorher zeigten alle drei Reiter dieselbe Fahren-Liste
+        List<TDU2Controls.Action> _shownControls = new List<TDU2Controls.Action>();
+
         void FillControls(VmfPlayer.FlashList l)
         {
             bool de = SavedLanguage() == "ge";
+            var cat = TDU2Controls.CategoryOf(_ui != null ? _ui.GetVariable("/:WhatListe") : null);
+            _shownControls = TDU2Controls.InCategory(cat);
             l.Rows.Clear();
-            foreach (var a in TDU2Controls.All) l.Rows.Add(new[] { de ? a.Name : a.NameEn, TDU2Controls.BindText(a), "" });
+            // dritte Spalte: Belegung am Gamepad/Lenkrad (Profil bzw. eigene Achse, z.B. "Achse 3−", "J2 Knopf 4")
+            foreach (var a in _shownControls) l.Rows.Add(new[] { de ? a.Name : a.NameEn, TDU2Controls.BindText(a), TDU2InputDevices.BindingText(a.Id) });
+            if (l.Selected >= l.Rows.Count) { l.Selected = 0; l.Top = 0; }
         }
 
         TDU2Controls.Action SelectedControl()
         {
             var l = _controlsList;
-            if (l == null || l.Selected < 0 || l.Selected >= TDU2Controls.All.Count) return null;
-            return TDU2Controls.All[l.Selected];
+            if (l == null || l.Selected < 0 || l.Selected >= _shownControls.Count) return null;
+            return _shownControls[l.Selected];
         }
 
         bool InBinder()
@@ -838,12 +1030,22 @@ namespace TDU2.Vehicles
         {
             if (!InBinder()) { _binderSince = -1f; return false; }
             // erst nach dem Öffnen der Eingabe-Box zuweisen (die Taste/der Klick, der sie geöffnet hat, zählt nicht)
-            if (_binderSince < 0f) { _binderSince = Time.unscaledTime; return true; }
+            if (_binderSince < 0f) { _binderSince = Time.unscaledTime; TDU2InputDevices.BeginAxisCapture(); return true; }
             if (Time.unscaledTime - _binderSince < 0.15f) return true;
+            var act = SelectedControl();
+            // Gas/Bremse/Kupplung/Lenken: Pedal treten bzw. Lenkrad drehen belegt die Achse (Gerät + Achse + Richtung)
+            if (act != null && TDU2InputDevices.IsAnalogAction(act.Id) && TDU2InputDevices.CaptureAxis(act.Id, out var axisText))
+            {
+                _binderSince = -1f;
+                FillControls(_controlsList);
+                _ui.ListRefresh(_controlsList);
+                _log.Add($"{Time.unscaledTime:0.00} Achse {axisText} -> {act.Id}");
+                _ui.GotoLabel(VmfPlayer.PathOf(_controlsList.Owner), "binder_out", true);
+                return true;
+            }
             var key = TDU2Controls.AnyKeyDown();
             if (key == KeyCode.None) return true;
             _binderSince = -1f;
-            var act = SelectedControl();
             if (key != KeyCode.Escape && act != null)
             {
                 TDU2Controls.Bind(act, key);
@@ -876,8 +1078,10 @@ namespace TDU2.Vehicles
                         _ui.ListLoaded(_controlsList);
                     }
                     return true;
+                case "widg:kmap:dflt":            // Standardbelegung (Hilfeleiste)
                 case "opts:cont:dflt":            // Standardbelegung
                     TDU2Controls.ResetDefaults();
+                    TDU2InputDevices.ClearOverrides();   // eigene Achsen-Belegungen des Geräts auch zurück auf das Profil
                     if (_controlsList != null) { FillControls(_controlsList); _ui.ListRefresh(_controlsList); }
                     return true;
                 case "opts:cont:bind:delt":       // Belegung löschen

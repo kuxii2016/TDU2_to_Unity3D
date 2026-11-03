@@ -4,10 +4,12 @@ using System.IO;
 using System.Threading.Tasks;
 using TDU2.Flash;
 using TDU2.Formats;
+using TDU2.Interior;
 using TDU2.IO;
+using TDU2.Vehicles;
 using UnityEngine;
 
-namespace TDU2.Vehicles
+namespace TDU2.UI
 {
     /// <summary>
     /// Große Karte (Taste M) wie im Original (TestDrive2Dev.exe, Spielmodus GM_MAP):
@@ -120,7 +122,7 @@ namespace TDU2.Vehicles
         {
             if (Manager == null) Manager = GetComponent<TDU2VehicleManager>();
             EnsureLoaded();
-            #if ENABLE_LEGACY_INPUT_MANAGER
+#if ENABLE_LEGACY_INPUT_MANAGER
             if (!_open)
             {
                 var pm = GetComponent<TDU2PauseMenu>();
@@ -129,7 +131,9 @@ namespace TDU2.Vehicles
                 if (TDU2Controls.Pressed("map") && _ui != null && Manager?.Streamer?.MapRoot != null && !Story.TDU2Story.BlocksMap) Open();
                 return;
             }
-            if (_contestEnterCup >= 0 && !_closing && (Time.unscaledTime >= _contestEnterAt || (_ui.Root != null && _ui.Root.Frame >= 60)))
+            // nur nach Zeit: Root.Frame stand nach einem vorigen Schließen (Rennstart aus der Karte) noch am Ende der
+            // Schließanimation -> co_direct_enter lief sofort, map_open danach drüber = leere Karte nach der Rückkehr zum Cup
+            if (_contestEnterCup >= 0 && !_closing && Time.unscaledTime >= _contestEnterAt && Time.frameCount - _openFrame > 2)
             {
                 // Treffpunkt: wie im Spiel direkt in den Wettbewerb der Meisterschaft (nach dem Aufbau der Karte)
                 int c = _contestEnterCup; _contestEnterCup = -1;
@@ -145,9 +149,9 @@ namespace TDU2.Vehicles
             }
             if (TDU2Controls.Pressed("map")) { Close(); return; }
             // Zurück wie im Spiel an den Film (Tooltip/Mini-Menü schließen bzw. Karte: "gofr"); reagiert er nicht, direkt schließen
-            if (Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.Backspace)) { if (!_ui.Input("B")) Close(); return; }
+            if (TDU2.Vehicles.TDU2Nav.Back()) { if (!_ui.Input("B")) Close(); return; }
             HandleInput();
-            #endif
+#endif
             UpdateCamera(false);
             RenderMap();
             UpdateOverlay();
@@ -424,22 +428,22 @@ namespace TDU2.Vehicles
                 _savedShadows = QualitySettings.shadows; QualitySettings.shadows = ShadowQuality.Disable;
                 _savedLodBias = QualitySettings.lodBias; QualitySettings.lodBias = Mathf.Min(_savedLodBias, MapLodBias);
                 _perfDisabled.Clear();
-                #if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_1_OR_NEWER
                 var grass = FindObjectsByType<TDU2.World.GrassRenderer>(FindObjectsSortMode.None);
                 var veg = FindObjectsByType<TDU2.World.VegetationRenderer>(FindObjectsSortMode.None);
-                #else
+#else
                 var grass = FindObjectsOfType<TDU2.World.GrassRenderer>();
                 var veg = FindObjectsOfType<TDU2.World.VegetationRenderer>();
-                #endif
+#endif
                 foreach (var b in grass) if (b != null && b.enabled) { b.enabled = false; _perfDisabled.Add(b); }
                 foreach (var b in veg) if (b != null && b.enabled) { b.enabled = false; _perfDisabled.Add(b); }
                 // Punkt-/Spotlichter (Laternen, Scheinwerfer) kosten von oben über die ganze Insel viel und sieht man nicht
                 _hiddenLights.Clear();
-                #if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_1_OR_NEWER
                 var lights = FindObjectsByType<Light>(FindObjectsSortMode.None);
-                #else
+#else
                 var lights = FindObjectsOfType<Light>();
-                #endif
+#endif
                 foreach (var l in lights) if (l != null && l.enabled && l.type != LightType.Directional) { l.enabled = false; _hiddenLights.Add(l); }
             }
             else
@@ -653,11 +657,11 @@ namespace TDU2.Vehicles
             get
             {
                 if (_interiors == null && Manager != null) _interiors = Manager.GetComponentInChildren<TDU2Interiors>();
-                #if UNITY_2023_1_OR_NEWER
+#if UNITY_2023_1_OR_NEWER
                 if (_interiors == null) _interiors = FindFirstObjectByType<TDU2Interiors>();
-                #else
+#else
                 if (_interiors == null) _interiors = FindObjectOfType<TDU2Interiors>();
-                #endif
+#endif
                 return _interiors;
             }
         }
@@ -787,17 +791,20 @@ namespace TDU2.Vehicles
         void HandleInput()
         {
             if (Time.frameCount - _openFrame < 3) return;
-            #if ENABLE_LEGACY_INPUT_MANAGER
+#if ENABLE_LEGACY_INPUT_MANAGER
             float w = _curWidth;
             var north = North(); var east = East();
             Vector3 move = Vector3.zero;
             if (_extended || _miniMenu)
             {
-                // ausgeklappter Tooltip / Mini-Menü: Pfeile gehören dem Film (Blättern der Liste, Menüauswahl) statt der Kamera
-                if (Input.GetKeyDown(KeyCode.LeftArrow) || Input.GetKeyDown(KeyCode.A)) _ui.Input("Move", "left");
-                if (Input.GetKeyDown(KeyCode.RightArrow) || Input.GetKeyDown(KeyCode.D)) _ui.Input("Move", "right");
-                if (Input.GetKeyDown(KeyCode.UpArrow) || Input.GetKeyDown(KeyCode.W)) _ui.Input("Move", "up");
-                if (Input.GetKeyDown(KeyCode.DownArrow) || Input.GetKeyDown(KeyCode.S)) _ui.Input("Move", "down");
+                // ausgeklappter Tooltip / Mini-Menü: Pfeile gehören dem Film (Blättern der Liste, Menüauswahl) statt der Kamera.
+                // Hoch/Runter wählen im Menü des Tooltips (/tool_tip/infos/menu bzw. /mini_menu/menu: Move/RollOver) – über
+                // Input("Move") landeten sie beim Navigator, die Auswahl ging nur mit der Maus.
+                if (TDU2.Vehicles.TDU2Nav.Left() || Input.GetKeyDown(KeyCode.A)) _ui.Input("Move", "left");
+                if (TDU2.Vehicles.TDU2Nav.Right() || Input.GetKeyDown(KeyCode.D)) _ui.Input("Move", "right");
+                if (TDU2.Vehicles.TDU2Nav.Up() || Input.GetKeyDown(KeyCode.W)) { if (!MenuCall("Move", "up")) _ui.Input("Move", "up"); }
+                if (TDU2.Vehicles.TDU2Nav.Down() || Input.GetKeyDown(KeyCode.S)) { if (!MenuCall("Move", "down")) _ui.Input("Move", "down"); }
+                if (TDU2Nav.Stick != Vector2.zero || TDU2InputDevices.Look != Vector2.zero) _padCursor = true;
             }
             else
             {
@@ -805,12 +812,13 @@ namespace TDU2.Vehicles
                 if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow)) move -= north;
                 if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) move += east;
                 if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow)) move -= east;
+                move += PadMapInput(north, east);   // Gamepad: linker Stick = Cursor, rechter Stick/Steuerkreuz = Karte schieben
             }
             float speed = PanSpeed * w * (Input.GetKey(KeyCode.LeftShift) ? 2.5f : 1f);
             _target += move * speed * Time.unscaledDeltaTime;
 
             // Ziehen mit der linken Maustaste (Weltpunkt unter der Maus bleibt unter der Maus)
-            var mp = Input.mousePosition;
+            var mp = Pointer();
             if (Input.GetMouseButtonDown(0) && !((_extended || _miniMenu) && _ui.MouseOverButton)) { _dragging = true; _lastMouse = mp; }
             if (Input.GetMouseButtonDown(1) || Input.GetMouseButtonDown(2)) { _dragging = true; _lastMouse = mp; }   // auch rechte/mittlere Taste
             if (!Input.GetMouseButton(0) && !Input.GetMouseButton(1) && !Input.GetMouseButton(2)) _dragging = false;
@@ -823,8 +831,8 @@ namespace TDU2.Vehicles
 
             // Zoom über den Film (Animationen von Cursor/Spots wie im Spiel), Mausrad/Bild/±
             float wheel = Input.mouseScrollDelta.y;
-            bool zin = wheel > 0.1f || Input.GetKeyDown(KeyCode.PageUp) || Input.GetKeyDown(KeyCode.KeypadPlus) || Input.GetKeyDown(KeyCode.Plus) || Input.GetKeyDown(KeyCode.E);
-            bool zout = wheel < -0.1f || Input.GetKeyDown(KeyCode.PageDown) || Input.GetKeyDown(KeyCode.KeypadMinus) || Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.Q);
+            bool zin = wheel > 0.1f || TDU2InputDevices.ButtonPressed("map_zoomin") || Input.GetKeyDown(KeyCode.PageUp) || Input.GetKeyDown(KeyCode.KeypadPlus) || Input.GetKeyDown(KeyCode.Plus) || Input.GetKeyDown(KeyCode.E);
+            bool zout = wheel < -0.1f || TDU2InputDevices.ButtonPressed("map_zoomout") || Input.GetKeyDown(KeyCode.PageDown) || Input.GetKeyDown(KeyCode.KeypadMinus) || Input.GetKeyDown(KeyCode.Minus) || Input.GetKeyDown(KeyCode.Q);
             // an den Grenzen nicht an den Film geben (weiter rauszoomen startet dort den Abspann)
             if (zin && _zoom > 1) { if (!_ui.CallClip("/navigator", "setZoom", "in")) SetZoom(_zoom - 1); }
             if (zout && _zoom < 4) { if (!_ui.CallClip("/navigator", "setZoom", "out")) SetZoom(_zoom + 1); }
@@ -850,14 +858,16 @@ namespace TDU2.Vehicles
             if (_miniMenu && Input.GetMouseButtonUp(1) && (mp - _downMouseR).sqrMagnitude < 36f) _ui.Input("B");
             if (Input.GetMouseButtonUp(0) && !click)
                 Debug.Log("[TDU2] Karte: Klick nicht für die Karte (gezogen " + ((mp - _downMouse).magnitude > 6f) + ", Filmleiste " + OverFilmBar(mp) + ", Menü " + (_extended || _miniMenu) + ")");
-            if (click || Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+            if (click || TDU2.Vehicles.TDU2Controls.ConfirmPressed())
             {
                 Debug.Log("[TDU2] Karte: " + (click ? "Klick" : "Enter") + " – Spot " + (_hover >= 0 && _hover < _spots.Count ? _spots[_hover].label + " " + _spots[_hover].spot.Code : "-") + ", Mitspieler " + _hoverPlayer + ", Tooltip " + _extended + ", Mini-Menü " + _miniMenu);
                 // Klick gehört der Karte: der Film soll das Loslassen nicht mehr sehen (sonst traf es das gerade geöffnete
                 // Mini-Menü bzw. ein Tasten-Symbol darunter -> B -> Menü sofort wieder zu)
                 if (click) _ui.ConsumeClick();
                 if (!_miniMenu) _cursorWorld = GroundPoint(mp);
-                if (_extended || _miniMenu) _ui.Input("A");    // Menü im Tooltip / Mini-Menü
+                // Menü im Tooltip / Mini-Menü: Enter/A bestätigt den gewählten Eintrag (Teleport, GPS-Ziel, Lesezeichen …) im Menü
+                // selbst – Input("A") traf sonst den Navigator, der den Tooltip nur erneut aufklappte
+                if (_extended || _miniMenu) { if (click || !MenuCall("A")) _ui.Input("A"); }
                 else if (_hoverPlayer >= 0) { _selectedPlayer = _hoverPlayer; _selected = -1; _ui.Input("A"); }   // Mitspieler: Infos
                 else if (_hover >= 0)
                 {
@@ -890,14 +900,66 @@ namespace TDU2.Vehicles
             bool tabR = Input.GetKeyDown(KeyCode.JoystickButton5) || (Input.GetKeyDown(KeyCode.Tab) && !Input.GetKey(KeyCode.LeftShift) && !Input.GetKey(KeyCode.RightShift));
             bool tabL = Input.GetKeyDown(KeyCode.JoystickButton4) || (Input.GetKeyDown(KeyCode.Tab) && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)));
             if ((tabR || tabL) && _contestCup < 0 && !_extended && !_miniMenu) _ui.CallClip("/presets", "Move", tabR ? "right" : "left");
-            if (Input.GetKeyDown(KeyCode.X)) _ui.Input("X");
-            if (Input.GetKeyDown(KeyCode.Y)) _ui.Input("Y");
+            if (TDU2.Vehicles.TDU2Nav.X()) _ui.Input("X");
+            if (TDU2.Vehicles.TDU2Nav.Y()) _ui.Input("Y");
             // T = direkt an die Cursorposition teleportieren
             if (Input.GetKeyDown(KeyCode.T) && _hoverPlayer >= 0) { TeleportToPlayer(_hoverPlayer); Close(); return; }
             if (Input.GetKeyDown(KeyCode.T) && _contestCup >= 0 && _hover >= 0 && _spots[_hover].race >= 0) { _pendingStart = (_spots[_hover].cup, _spots[_hover].race); Close(); return; }
             if (Input.GetKeyDown(KeyCode.T)) { _cursorWorld = GroundPoint(mp); if (_hover >= 0) { TeleportToSpot(_spots[_hover].spot); Close(); } else if (OnRoad(out _)) { TeleportToCursor(); Close(); } else Sound("wrong"); }
             ClampTarget();
-            #endif
+#endif
+        }
+
+        // ------------------------------------------------------------------ Gamepad (wie im Original: MAP_CURSOR_* linker Stick,
+        // MAP_UP/DOWN/LEFT/RIGHT rechter Stick, Zoom RT/LT). Der Cursor ist dann ein eigener Punkt statt der Maus.
+        bool _padCursor;
+        Vector2 _padCur = new Vector2(-1f, -1f);   // Bildschirmkoordinaten wie Input.mousePosition (unten links = 0)
+        Vector3 _lastMousePos;
+
+        /// <summary>Zeigeposition für Karte/Cursor: Maus oder (nach Stick-Benutzung) der Gamepad-Cursor.</summary>
+        Vector3 Pointer()
+        {
+#if ENABLE_LEGACY_INPUT_MANAGER
+            var m = Input.mousePosition;
+            if ((m - _lastMousePos).sqrMagnitude > 4f || Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1)) { _padCursor = false; _padCur = new Vector2(m.x, m.y); }
+            _lastMousePos = m;
+            if (!_padCursor) return m;
+#endif
+            if (_padCur.x < 0f) _padCur = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+            return new Vector3(_padCur.x, _padCur.y, 0f);
+        }
+
+        /// <summary>Gamepad auf der Karte: Cursor bewegen (am Rand schiebt er die Karte), rechter Stick/Steuerkreuz schiebt. Rückgabe: Kartenbewegung.</summary>
+        Vector3 PadMapInput(Vector3 north, Vector3 east)
+        {
+            var st = TDU2Nav.Stick;
+            var look = TDU2InputDevices.Look;
+            Vector3 move = Vector3.zero;
+            if (st != Vector2.zero || look != Vector2.zero) { if (!_padCursor) { _padCursor = true; _padCur = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f); } }
+            if (!_padCursor) return move;
+            float dt = Time.unscaledDeltaTime;
+            _padCur += st * Screen.height * 0.75f * dt;
+            float mx = Screen.width * 0.08f, my = Screen.height * 0.12f;
+            var push = Vector2.zero;
+            if (_padCur.x < mx) { push.x = -1f; _padCur.x = mx; } else if (_padCur.x > Screen.width - mx) { push.x = 1f; _padCur.x = Screen.width - mx; }
+            if (_padCur.y < my) { push.y = -1f; _padCur.y = my; } else if (_padCur.y > Screen.height - my) { push.y = 1f; _padCur.y = Screen.height - my; }
+            var pan = look + push;
+            if (TDU2Nav.PadUpHeld() && st == Vector2.zero) pan.y += 1f;
+            if (TDU2Nav.PadDownHeld() && st == Vector2.zero) pan.y -= 1f;
+            if (TDU2Nav.PadRightHeld() && st == Vector2.zero) pan.x += 1f;
+            if (TDU2Nav.PadLeftHeld() && st == Vector2.zero) pan.x -= 1f;
+            move += north * pan.y + east * pan.x;
+            return move;
+        }
+
+        /// <summary>Funktion im Menü des offenen Tooltips bzw. Mini-Menüs aufrufen; false = kein sichtbares Menü.</summary>
+        bool MenuCall(string fn, params object[] args)
+        {
+            if (_ui == null) return false;
+            string path = _miniMenu ? "/mini_menu/menu" : _extended ? "/tool_tip/infos/menu" : null;
+            var d = path != null ? _ui.Find(path) : null;
+            if (d?.Sprite == null || !_ui.IsShown(d.Sprite)) return false;
+            return _ui.CallClip(path, fn, args);
         }
 
         Vector3 North() { var r = Manager.Streamer.MapRoot; var v = r.TransformVector(Vector3.back); v.y = 0f; return v.normalized; }   // Spiel -Z = oben auf der Karte
@@ -1106,11 +1168,12 @@ namespace TDU2.Vehicles
             }
 
             // Cursor an der Maus
-            #if ENABLE_LEGACY_INPUT_MANAGER
-            var mouse = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
-            #else
+#if ENABLE_LEGACY_INPUT_MANAGER
+            var pm = Pointer();
+            var mouse = new Vector2(pm.x, Screen.height - pm.y);
+#else
             var mouse = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
-            #endif
+#endif
             var cl = _ui.GuiToLocal("/", mouse);
             if (cl.HasValue) _ui.SetPosition("/curseur", cl.Value);
             // Über Tooltip/Menüs liegt der Kartencursor des Films darunter -> dort den Mauszeiger von Windows zeigen (immer obenauf)
@@ -1125,9 +1188,9 @@ namespace TDU2.Vehicles
             // Nur bei Änderung umschalten (sonst startet das Bild jedes Mal neu).
             if (Time.frameCount % 4 == 0)
             {
-                #if ENABLE_LEGACY_INPUT_MANAGER
-                _cursorWorld = GroundPoint(Input.mousePosition);
-                #endif
+#if ENABLE_LEGACY_INPUT_MANAGER
+                _cursorWorld = GroundPoint(Pointer());
+#endif
                 if (!_miniMenu)
                 {
                     bool offroad = _hover < 0 && _hoverPlayer < 0 && !OnRoad(out _);
@@ -1215,6 +1278,8 @@ namespace TDU2.Vehicles
         }
 
         /// <summary>Blips der Mitspieler (Label "player" im Spot-Symbol); liefert den Spieler unter dem Mauszeiger.</summary>
+        readonly Dictionary<int, string> _playerLabel = new Dictionary<int, string>();
+
         int UpdatePlayerBlips(Vector2 mouse, ref float best)
         {
             var gd = Online.TDU2GameData.Instance;
@@ -1238,9 +1303,16 @@ namespace TDU2.Vehicles
                     bool fresh = _ui.Find("/pack/" + name) == null;
                     var d = _ui.AttachSprite("/pack", _pointChar, name, _pointDepth0 + MaxSpots + 1 + slot);
                     if (d == null) continue;
+                    // Original-Labels im Spot-Symbol je Beziehung: player (weiß), friend (grün), clubMember (orange)
+                    var rel = Online.TDU2Friends.RelationOf(p.Nick);
+                    string label = rel == Online.PlayerRelation.Friend ? "friend" : rel == Online.PlayerRelation.Club ? "clubMember" : "player";
+                    if (fresh || !_playerLabel.TryGetValue(p.Id, out var oldLabel) || oldLabel != label)
+                    {
+                        _ui.GotoLabel("/pack/" + name + "/spot", label, false);
+                        _playerLabel[p.Id] = label;
+                    }
                     if (fresh)
                     {
-                        _ui.GotoLabel("/pack/" + name + "/spot", "player", false);
                         _ui.CallClip("/pack/" + name, "LOD", _lod ? 1 : 0);
                         _ui.SetVisible("/pack/" + name + "/fleche", false);
                     }
@@ -1253,7 +1325,7 @@ namespace TDU2.Vehicles
                 }
             var gone = new List<int>();
             foreach (var kv in _playerSlots) if (!seen.Contains(kv.Key)) gone.Add(kv.Key);
-            foreach (var id in gone) { _ui.Detach("/pack", _pointDepth0 + MaxSpots + 1 + _playerSlots[id]); _playerSlots.Remove(id); }
+            foreach (var id in gone) { _ui.Detach("/pack", _pointDepth0 + MaxSpots + 1 + _playerSlots[id]); _playerSlots.Remove(id); _playerLabel.Remove(id); }
             return hover;
         }
 
@@ -1590,7 +1662,7 @@ namespace TDU2.Vehicles
             var gps = TDU2Gps.Instance;
             if (gps == null || !game.HasValue) { if (sound) Sound("wrong"); return; }
 #if ENABLE_LEGACY_INPUT_MANAGER
-            bool under = _selected < 0 && GpsTargetUnderMouse(Input.mousePosition);
+            bool under = _selected < 0 && GpsTargetUnderMouse(Pointer());
 #else
             bool under = false;
 #endif

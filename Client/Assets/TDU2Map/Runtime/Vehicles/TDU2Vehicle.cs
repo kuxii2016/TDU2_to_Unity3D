@@ -56,6 +56,16 @@ namespace TDU2.Vehicles
         public LayerMask GroundMask = ~(1 << 2);
         public Func<Vector3, (bool ok, float y)> GroundFallback;
         public float AccelPedal, BrakePedal, Steer, HandBrake;
+        /// <summary>
+        /// Startsperre (Countdown von Rennen/Cups/Fahrschule): Auto steht fest wie im Original – kein Wechsel in den Rückwärtsgang
+        /// durch die gehaltene Bremse (sonst wurde Bremse = Gas und das Auto rollte zurück), Gas nur zum Hochdrehen.
+        /// </summary>
+        public bool StartLock;
+        /// <summary>H-Schaltung: Gänge setzt der Fahrer direkt (kein automatischer Rückwärtsgang beim Bremsen im Stand).</summary>
+        public bool HShifter;
+        /// <summary>Kupplung vom Fahrer (Pedal/Taste): 0 = eingekuppelt, 1 = getreten. Nur mit <see cref="ManualClutch"/>.</summary>
+        public bool ManualClutch;
+        public float ClutchPedal;
         public float Throttle { get; private set; }
         public float Brake { get; private set; }
         public float HoldAmount { get; private set; }
@@ -90,12 +100,13 @@ namespace TDU2.Vehicles
             _rb.interpolation = RigidbodyInterpolation.Interpolate;
             _rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
             _rb.maxAngularVelocity = isBike ? 40f : 30f;
-            #if UNITY_6000_0_OR_NEWER
+#if UNITY_6000_0_OR_NEWER
             _rb.linearDamping = 0f;
-            #else
+#else
             _rb.drag = 0f;
-            #endif
+#endif
 
+            if (isBike) foreach (var w in Wheels) w.Anchor.x = 0f;
             #region Vehicle Center/Gravity
             float zf = 0, zr = 0, yWheel = 0; int nf = 0, nr = 0;
             foreach (var w in Wheels) { if (w.Front) { zf += w.Anchor.z; nf++; } else { zr += w.Anchor.z; nr++; } yWheel += w.Anchor.y; }
@@ -142,6 +153,7 @@ namespace TDU2.Vehicles
                 w.Inertia = Mathf.Max(0.3f, 0.75f * w.Mass * w.Radius * w.Radius);
                 w.MuLong = (w.Front ? c.MaxLongFrictionFront : c.MaxLongFrictionRear);
                 w.MuLat = (w.Front ? c.MaxLatFrictionFront : c.MaxLatFrictionRear);
+                if (isBike && !w.Front) w.MuLat *= BikeRearGrip;
                 w.Driven = c.Drive == 1 || (c.Drive == 3 && w.Front) || (c.Drive != 1 && c.Drive != 3 && !w.Front);
                 #endregion
             }
@@ -188,17 +200,18 @@ namespace TDU2.Vehicles
             float dt = Time.fixedDeltaTime;
             var tr = transform;
             bool isBike = Car != null && Car.IsBike;
-            #if UNITY_6000_0_OR_NEWER
+#if UNITY_6000_0_OR_NEWER
             Vector3 vel = _rb.linearVelocity;
-            #else
+#else
             Vector3 vel = _rb.velocity;
-            #endif
+#endif
             ForwardSpeed = Vector3.Dot(vel, tr.forward);
             SpeedKmh = vel.magnitude * 3.6f;
             float g = Physics.gravity.magnitude;
             UpdateSteering(dt);
+            if (StartLock && Gear <= 0 && !Shifting) { int old = Gear; Gear = 1; _reverseTimer = 0f; GearChanged?.Invoke(old, Gear); }
             UpdateGearbox(dt);
-            if (Gear < 0) { Throttle = Mathf.Clamp01(BrakePedal); Brake = Mathf.Clamp01(AccelPedal); }
+            if (Gear < 0 && !HShifter) { Throttle = Mathf.Clamp01(BrakePedal); Brake = Mathf.Clamp01(AccelPedal); }   // Arcade: Bremse = Rückwärts-Gas
             else { Throttle = Mathf.Clamp01(AccelPedal); Brake = Mathf.Clamp01(BrakePedal); }
             float holdTarget = AutoHold && Throttle < 0.05f && Mathf.Abs(ForwardSpeed) < AutoHoldSpeed ? 1f : 0f;
             HoldAmount = Mathf.MoveTowards(HoldAmount, holdTarget, dt * (holdTarget > HoldAmount ? 3f : 20f));
@@ -235,7 +248,18 @@ namespace TDU2.Vehicles
                 Vector3 fwd = WheelForward(w, n);
                 Vector3 right = Vector3.Cross(n, fwd);
                 Vector3 force = n * w.Fz + fwd * w.Fx + right * w.Fy;
-                _rb.AddForceAtPosition(force, w.ContactPoint);
+                if (isBike)
+                {
+                    // Ein echtes Bike legt sich so weit in die Kurve, dass die Resultierende durch den Schwerpunkt geht -> kein Rollmoment.
+                    // Unser Körper bleibt aufrecht (Schräglage nur sichtbar), also Seitenkraft auf Schwerpunkthöhe ansetzen; sonst kippt
+                    // ihn die Kurvenkraft nach außen, die Aufrichtung hält dagegen und es ruckelt beim "Neigen".
+                    Vector3 lat = right * w.Fy;
+                    Vector3 up = transform.up;
+                    Vector3 atCg = w.ContactPoint + up * Vector3.Dot(_rb.worldCenterOfMass - w.ContactPoint, up);
+                    _rb.AddForceAtPosition(force - lat, w.ContactPoint);
+                    _rb.AddForceAtPosition(lat, atCg);
+                }
+                else _rb.AddForceAtPosition(force, w.ContactPoint);
                 if (w.GroundCollider != null && w.GroundCollider.attachedRigidbody != null)
                     w.GroundCollider.attachedRigidbody.AddForceAtPosition(-force, w.ContactPoint);
             }
@@ -243,6 +267,17 @@ namespace TDU2.Vehicles
             Aerodynamics(vel);
             Stability(dt, g);
             OffroadDamping(vel, dt);
+
+            if (StartLock && AnyWheelGrounded)
+            {
+                // festhalten: waagerechte Bewegung/Drehung weg (Hang, Gas im Countdown), Federung arbeitet weiter
+#if UNITY_6000_0_OR_NEWER
+                Vector3 lv = _rb.linearVelocity; _rb.linearVelocity = new Vector3(0f, lv.y, 0f);
+#else
+                Vector3 lv = _rb.velocity; _rb.velocity = new Vector3(0f, lv.y, 0f);
+#endif
+                Vector3 av = _rb.angularVelocity; _rb.angularVelocity = new Vector3(av.x, 0f, av.z);
+            }
         }
 
         // ------------------------------------------------------------------ Untergrund (Asphalt / Gras / Erde)
@@ -342,12 +377,23 @@ namespace TDU2.Vehicles
             float vel = Config != null ? Config.GetCurve("SteeringVelocity", 360f).Evaluate(SpeedKmh) : 360f;
             if (isBike)
             {
-                maxAngle = Mathf.Clamp(maxAngle * 0.7f, 16f, 28f);
-                sens = sens / 0.9f;
-                vel = vel * 0.8f;
+                // Bike: Lenkeinschlag kinematisch begrenzen. Mit 2 Rädern reicht bei Tempo schon 1-2° für volle Querbeschleunigung
+                // (delta = L * a / v²); früher waren es mind. 16° -> Vorderrad überfordert, Gierrate schießt über, das Heck bricht aus.
+                float v = Mathf.Max(Mathf.Abs(ForwardSpeed), 1f);
+                float wbB = Mathf.Max(0.8f, Car.Wheelbase * 0.001f);
+                float kin = Mathf.Atan(wbB * 9.81f * BikeMaxLatG / (v * v)) * Mathf.Rad2Deg * 1.15f + 0.5f;
+                maxAngle = Mathf.Clamp(Mathf.Min(maxAngle * 0.8f, kin), 1.2f, 28f);
+                sens = 1f;
+                vel = Mathf.Max(maxAngle * 4.5f, 25f);   // voller Einschlag in ~0,22 s, gleich weich bei jedem Tempo
             }
             float target = Mathf.Clamp(Steer, -1f, 1f) * maxAngle * sens;
             _steerCurrent = Mathf.MoveTowards(_steerCurrent, target, vel * dt);
+            if (isBike)
+            {
+                // ein Rad je Achse: kein Ackermann, keine Spur (sonst lenkt das Hinterrad dauerhaft mit / links-rechts ungleich)
+                foreach (var w in Wheels) w.SteerAngle = w.Front ? _steerCurrent : 0f;
+                return;
+            }
 
             float wb = Mathf.Max(1f, Car.Wheelbase * 0.001f), track = Mathf.Max(1f, Car.TrackFront * 0.001f);
             float a = _steerCurrent * Mathf.Deg2Rad;
@@ -451,13 +497,16 @@ namespace TDU2.Vehicles
                 absSlip = isBikePhy ? -5f : -10f; tcSlip = isBikePhy ? -1f : -1f;
             }
             bool absOn = (c != null ? c.Abs : true) && Aids != DrivingAids.Off && SpeedKmh > (Config?.Get("AbsControlVelocityMin", 1f) ?? 1f);
-            bool tcOn = (c != null ? c.TractionControl : true) && tcSlip > 0f;
+            if (isBikePhy && Aids != DrivingAids.Off && tcSlip <= 0f) tcSlip = Aids == DrivingAids.HyperSport ? 2f : 1f;
+            bool tcOn = (isBikePhy && Aids != DrivingAids.Off) || ((c != null ? c.TractionControl : true) && tcSlip > 0f);
 
             // ---- Motor / Kupplung
             float throttle = Mathf.Clamp01(Throttle) * (1f - _tcCut);
             if (_limiterTimer > 0f) { _limiterTimer -= h; throttle = 0f; }
             float ratio = CurrentRatio();
             bool inGear = Gear != 0 && !Shifting;
+            // Kupplung vom Fahrer: getreten = Kraftschluss offen (Motor dreht frei), dazwischen schleift sie
+            float engage = ManualClutch ? 1f - Mathf.Clamp01(ClutchPedal) : 1f;
             // Während des Schaltvorgangs kein Gas: Kraftschluss ist offen (Gear = 0), Drehzahl fällt ab.
             // Erst beim Einkuppeln wird wieder Moment aufgenommen kein "Gas durchschalten".
             if (Shifting) throttle = 0f;
@@ -473,7 +522,7 @@ namespace TDU2.Vehicles
             bool slipping = false;
             float clutchTorque = 0f;
             float rpm;
-            if (inGear && coupledW >= _idleW * 1.05f)
+            if (inGear && engage > 0.9f && coupledW >= _idleW * 1.05f)
             {
                 _engineW = coupledW;
                 rpm = _engineW * 30f / Mathf.PI;
@@ -485,7 +534,16 @@ namespace TDU2.Vehicles
                 rpm = _engineW * 30f / Mathf.PI;
                 float te = EngineTorqueAt(rpm, throttle);
                 float friction = (c.EngineDamping > 0 ? c.EngineDamping : 0.1f) * _engineW * 0.5f;
-                if (inGear && throttle > 0.02f)
+                if (inGear && ManualClutch && engage > 0.02f)
+                {
+                    // schleifende Kupplung vom Fahrer: Moment je nach Pedalstellung, Motor wird zur Raddrehzahl gezogen
+                    slipping = true;
+                    clutchTorque = Mathf.Max(0f, te) * engage;
+                    float targetW = Mathf.Max(coupledW, _idleW * 1.1f);
+                    _engineW += (te * (1f - engage) - friction) / _engineInertia * h;
+                    _engineW = Mathf.MoveTowards(_engineW, targetW, engage * 400f * h);
+                }
+                else if (inGear && !ManualClutch && throttle > 0.02f)
                 {
                     slipping = true;
                     float launchW = Mathf.Lerp(_idleW * 1.2f, Mathf.Min(c.TorqueRpm, c.RedLine * 0.7f) * Mathf.PI / 30f, throttle);
@@ -506,7 +564,7 @@ namespace TDU2.Vehicles
 
             float driveTotal = 0f;   // Moment an den Antriebsrädern (Summe)
             float dir = Gear < 0 ? -1f : 1f;
-            if (inGear) driveTotal = (slipping ? clutchTorque : EngineTorque) * ratio * 0.92f * dir;
+            if (inGear && engage > 0.02f) driveTotal = (slipping ? clutchTorque : EngineTorque) * ratio * 0.92f * dir;
 
             float frontT = driveTotal * _frontDriveShare, rearT = driveTotal * (1f - _frontDriveShare);
             AxleDiff(true, frontT, c.DiffValueFront, h);
@@ -532,14 +590,23 @@ namespace TDU2.Vehicles
                 w.Fx += w.FxStep * weight;
                 w.Fy += w.FyStep * weight;
                 sumFx += w.FxStep;
-                if (w.Driven && w.Grounded) tcMaxSlip = Mathf.Max(tcMaxSlip, w.SlipRatio);
+                if (w.Driven && w.Grounded)
+                {
+                    if (isBikePhy)
+                    {
+                        // Bike: kombinierter Schlupf (längs + quer), damit Gas in Schräglage das Heck nicht wegschiebt
+                        float sx = Mathf.Max(0f, w.SlipRatio) / 0.10f, sy = Mathf.Tan(Mathf.Min(Mathf.Abs(w.SlipAngle), 1.4f)) / Mathf.Tan(0.14f);
+                        tcMaxSlip = Mathf.Max(tcMaxSlip, 0.10f * Mathf.Sqrt(sx * sx + sy * sy * 0.8f));
+                    }
+                    else tcMaxSlip = Mathf.Max(tcMaxSlip, w.SlipRatio);
+                }
             }
 
             // ---- Traktionskontrolle
             // Schlupfgrenze der DB als Vielfaches des Peak-Schlupfs (Sport 0.8 = knapp unter dem Optimum, HyperSport 10 = fast aus)
             bool isBikeT = Car != null && Car.IsBike;
             float tcKappa = 0.10f * Mathf.Clamp(tcSlip, 0.6f, 10f);
-            if (tcOn && tcMaxSlip > tcKappa) _tcCut = Mathf.MoveTowards(_tcCut, isBikeT ? 0.7f : 0.9f, h * 8f);
+            if (tcOn && tcMaxSlip > tcKappa) _tcCut = Mathf.MoveTowards(_tcCut, 0.9f, h * (isBikeT ? 12f : 8f));
             else _tcCut = Mathf.MoveTowards(_tcCut, 0f, h * 4f);
             return sumFx;
         }
@@ -790,44 +857,63 @@ namespace TDU2.Vehicles
         }
 
         /// <summary>
-        /// Bikes: Der Rigidbody wird aufrecht gehalten (RÃ¼ckstellmoment + DÃ¤mpfung der Roll-/Nickrate);
-        /// die SchrÃ¤glage ist rein visuell und folgt der Querbeschleunigung. So bleibt das Fahrzeug
-        /// mit der 2-Rad-Physik beherrschbar, ohne dass es bei Stillstand umkippt.
+        /// Bikes: Der Rigidbody bleibt aufrecht, die Schräglage ist rein sichtbar (folgt der Querbeschleunigung).
+        ///  - Aufrichten nur um die Rollachse (früher auch Nicken zur Welt-Senkrechten: kämpfte an Steigungen gegen die Federung).
+        ///  - Gierstabilisierung: Gierrate wird zur Soll-Gierrate aus Lenkwinkel/Tempo gezogen (je nach Fahrhilfe stark/schwach),
+        ///    damit das Heck nicht ausbricht.
         /// </summary>
         void BikeBalance(float dt)
         {
             var tr = transform;
-            float speedFactor = Mathf.Clamp01(Mathf.Abs(ForwardSpeed) / 12f);
+            Vector3 av = _rb.angularVelocity;
+            Vector3 fwd = tr.forward;
+            // Soll-Oben: Welt-Senkrechte in der Ebene senkrecht zur Längsachse (= nur Rollen)
+            Vector3 want = Vector3.ProjectOnPlane(Vector3.up, fwd);
+            if (want.sqrMagnitude > 1e-6f)
+            {
+                want.Normalize();
+                float ang = Vector3.SignedAngle(tr.up, want, fwd) * Mathf.Deg2Rad;
+                float rollRate = Vector3.Dot(av, fwd);
+                float k = AnyWheelGrounded ? 1f : 0.35f;
+                const float w0 = 11f, zeta = 0.9f;   // Eigenfrequenz/Dämpfung der Aufrichtung (unabhängig von Masse/Trägheit)
+                _rb.AddTorque(fwd * ((w0 * w0 * ang - 2f * zeta * w0 * rollRate) * k), ForceMode.Acceleration);
+            }
             if (AnyWheelGrounded)
             {
-                Vector3 up = tr.up;
-                float tilt = Vector3.Angle(up, Vector3.up) * Mathf.Deg2Rad;
-                if (tilt > 1e-3f)
-                {
-                    Vector3 axis = Vector3.Cross(up, Vector3.up);
-                    if (axis.sqrMagnitude > 1e-8f)
-                    {
-                        float strength = Mathf.Lerp(12f, 6f, speedFactor);
-                        _rb.AddTorque(axis.normalized * tilt * _rb.mass * strength);
-                    }
-                }
-                Vector3 av = _rb.angularVelocity;
-                float rollRate = Vector3.Dot(av, tr.forward);
                 float pitchRate = Vector3.Dot(av, tr.right);
-                _rb.AddTorque(-tr.forward * rollRate * _rb.mass * 1.8f);
-                _rb.AddTorque(-tr.right * pitchRate * _rb.mass * 0.9f);
+                _rb.AddTorque(-tr.right * pitchRate * 2.5f, ForceMode.Acceleration);   // Nick-Schwingen dämpfen
             }
 
-            float yawRate = Vector3.Dot(_rb.angularVelocity, tr.up);
+            float yawRate = Vector3.Dot(av, tr.up);
 #if UNITY_6000_0_OR_NEWER
-            float vFwd = Vector3.Dot(_rb.linearVelocity, tr.forward);
+            Vector3 lv = _rb.linearVelocity;
 #else
-            float vFwd = Vector3.Dot(_rb.velocity, tr.forward);
+            Vector3 lv = _rb.velocity;
 #endif
+            float vFwd = Vector3.Dot(lv, fwd);
+
+            // ---- Gierstabilisierung
+            bool frontDown = false, rearDown = false;
+            foreach (var w in Wheels) { if (!w.Grounded) continue; if (w.Front) frontDown = true; else rearDown = true; }
+            if (frontDown && rearDown && Mathf.Abs(vFwd) > 2f && !StartLock)
+            {
+                float wb = Mathf.Max(0.8f, Car.Wheelbase * 0.001f);
+                float yawWant = vFwd * Mathf.Tan(_steerCurrent * Mathf.Deg2Rad) / wb;
+                float yawMax = 9.81f * BikeMaxLatG * 1.1f / Mathf.Max(Mathf.Abs(vFwd), 1f);
+                yawWant = Mathf.Clamp(yawWant, -yawMax, yawMax);
+                float gain = Aids == DrivingAids.Secure ? 9f : Aids == DrivingAids.Sport ? 6f : Aids == DrivingAids.HyperSport ? 3.5f : 1.5f;
+                gain *= Mathf.Clamp01((Mathf.Abs(vFwd) - 2f) / 4f);
+                _rb.AddTorque(tr.up * (-(yawRate - yawWant) * gain), ForceMode.Acceleration);
+            }
+
+            // ---- sichtbare Schräglage (Ziel; geglättet wird in LateUpdate je Bild -> kein Treppeneffekt bei 50 Hz Physik)
             float latAcc = vFwd * yawRate;
+            if (!AnyWheelGrounded) latAcc = 0f;
+            _latAccF += (latAcc - _latAccF) * (1f - Mathf.Exp(-dt / 0.12f));
             float maxLean = Car != null && Car.MaxLeanAngle > 0f ? Car.MaxLeanAngle : 45f;
-            _leanTargetDeg = Mathf.Clamp(Mathf.Atan2(latAcc, 9.81f) * Mathf.Rad2Deg * 0.75f, -maxLean * 0.8f, maxLean * 0.8f);
-            _leanVis = Mathf.MoveTowards(_leanVis, _leanTargetDeg, dt * 100f);
+            float lean = Mathf.Atan2(_latAccF, 9.81f) * Mathf.Rad2Deg * 0.9f;
+            lean *= Mathf.Clamp01((Mathf.Abs(vFwd) - 1f) / 3f);   // im Stand/Schritttempo aufrecht
+            _leanTargetDeg = Mathf.Clamp(lean, -maxLean * 0.85f, maxLean * 0.85f);
         }
 
         // ------------------------------------------------------------------ Getriebe (Automatik wie im Spiel / manuell)
@@ -844,7 +930,8 @@ namespace TDU2.Vehicles
             bool stopped = Mathf.Abs(ForwardSpeed) < 0.6f;
 
             // RÃ¼ckwÃ¤rtsgang: Bremse im Stand halten (TDU-Verhalten), Gas im RÃ¼ckwÃ¤rtsgang = Bremse
-            if (stopped && BrakePedal > 0.3f && AccelPedal < 0.05f && Gear > 0)
+            if (HShifter) { _reverseTimer = 0f; }   // H-Schaltung: der Fahrer wählt R/1 selbst
+            else if (stopped && BrakePedal > 0.3f && AccelPedal < 0.05f && Gear > 0 && !StartLock)
             {
                 _reverseTimer += dt;
                 if (_reverseTimer > (Config?.Get("ReverseTime", 0.6f) ?? 0.6f)) { Shift(-1, 0f); _reverseTimer = 0f; }
@@ -897,6 +984,8 @@ namespace TDU2.Vehicles
         }
 
         public void ShiftUp() { if (Gear < _nbGears) Shift(Gear + 1, Car.ShiftTimeUp); }
+        /// <summary>Zahl der Vorwärtsgänge.</summary>
+        public int GearCount => _nbGears;
         public void ShiftDown() { if (Gear > -1) Shift(Gear - 1, Car.ShiftTimeDown); }
 
         /// <summary>Auto aufrichten und anhalten.</summary>
@@ -937,6 +1026,8 @@ namespace TDU2.Vehicles
             if (SteeringWheel != null) SteeringWheel.localRotation = _steeringWheelBase * Quaternion.AngleAxis(-_steerCurrent * 12f * SteeringWheelSign, Vector3.forward);
             // Bike: Lenker (BARS) dreht mit, Modell lehnt sich in die Kurve
             if (BikeSteerNode != null) BikeSteerNode.localRotation = _bikeSteerBase * Quaternion.AngleAxis(_steerCurrent * BikeSteerSign, Vector3.up);
+            if (Car != null && Car.IsBike)
+                _leanVis = Mathf.SmoothDamp(_leanVis, _leanTargetDeg, ref _leanVel, 0.09f, 220f, Mathf.Max(Time.deltaTime, 1e-4f));
             if (ModelRoot != null && Car != null && Car.IsBike)
                 ModelRoot.localRotation = _modelRootBase * Quaternion.AngleAxis(-_leanVis * LeanSign, Vector3.forward);
         }
@@ -955,7 +1046,11 @@ namespace TDU2.Vehicles
         public float LeanSign = 1f;
         Quaternion _bikeSteerBase = Quaternion.identity;
         Quaternion _modelRootBase = Quaternion.identity;
-        float _leanVis, _leanTargetDeg;
+        float _leanVis, _leanTargetDeg, _leanVel, _latAccF;
+        [Tooltip("Bike: maximale Querbeschleunigung in g (begrenzt Lenkeinschlag und Soll-Gierrate).")]
+        [Range(0.6f, 1.6f)] public float BikeMaxLatG = 1.05f;
+        [Tooltip("Bike: Seitenhalt des Hinterrads relativ zur DB (> 1 = stabiler, weniger Übersteuern).")]
+        [Range(0.8f, 1.5f)] public float BikeRearGrip = 1.15f;
         /// <summary>
         /// Lenkrichtung der sichtbaren RÃ¤der empirisch prÃ¼fen: Ein positiver Lenkwinkel dreht in der Physik um +Hochachse
         /// (rechts). Gespiegeltes Visual und um 180Â° gedrehte Radknoten kehren die Richtung je nach Rad um â€“ deshalb
