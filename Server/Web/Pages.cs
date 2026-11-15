@@ -626,20 +626,42 @@ load(); setInterval(load,15000);
     </div>
     <div class=""field"" style=""margin-top:14px""><label>Startautos (kommagetrennt)</label><input id=""starterCars""></div>
     <div class=""field"" style=""margin-top:14px""><label>MOTD / Begrüßung</label><input id=""motd""></div>
+    <div class=""split"" style=""margin-top:22px""><h3>MasterServer (Serverliste)</h3></div>
+    <div style=""margin-top:6px""><label style=""display:flex;align-items:center;gap:8px""><input type=""checkbox"" id=""masterEnabled"" style=""width:auto""> Beim MasterServer anmelden (Heartbeat, saubere Abmeldung)</label></div>
+    <div class=""field-row"" style=""margin-top:10px"">
+      <div class=""field""><label>Master-URL</label><input id=""masterUrl"" placeholder=""http://localhost:8080""></div>
+      <div class=""field""><label>Port in der Liste (0 = TCP-Port)</label><input id=""masterPort"" type=""number"" min=""0""></div>
+    </div>
+    <div class=""field-row"" style=""margin-top:14px"">
+      <div class=""field""><label>Name in der Liste</label><input id=""masterName"" placeholder=""TDU2-Server""></div>
+      <div class=""field""><label>Öffentlicher Host (leer = Absender-IP)</label><input id=""masterHost"" placeholder=""leer = automatisch""></div>
+    </div>
+    <div class=""field-row"" style=""margin-top:14px"">
+      <div class=""field""><label>Mod-Nachricht (leer = MOTD)</label><input id=""masterModMessage""></div>
+      <div class=""field""><label>Version</label><input id=""masterVersion""></div>
+    </div>
+    <div style=""margin-top:10px""><label style=""display:flex;align-items:center;gap:8px""><input type=""checkbox"" id=""masterLocked"" style=""width:auto""> Passwortgeschützt (locked)</label></div>
+    <div class=""hint"" style=""margin-top:10px"" id=""masterInfo""></div>
     <div class=""hint"" style=""margin-top:12px"" id=""webInfo""></div>
     <div style=""margin-top:20px""><button class=""btn"" onclick=""saveConfig()"">Speichern</button></div>
   </div>
 </div>
 <script>
 {PermScript(permission)}
-const KEYS=['tcpPort','udpPort','maxPlayers','startMoney','startSpot','startIsland','starterCars','motd'];
+const KEYS=['tcpPort','udpPort','maxPlayers','startMoney','startSpot','startIsland','starterCars','motd',
+  'masterUrl','masterPort','masterName','masterHost','masterModMessage','masterVersion'];
 async function load(){{
   const c=await api('/config/data'); if(!c) return;
   for(const k of KEYS){{const el=document.getElementById(k); if(el) el.value=c[k];}}
+  document.getElementById('masterEnabled').checked=!!c.masterEnabled;
+  document.getElementById('masterLocked').checked=!!c.masterLocked;
+  document.getElementById('masterInfo').textContent='Status: '+(c.masterStatus||'aus')+(c.masterId?' · ID '+c.masterId:'');
   document.getElementById('webInfo').textContent='Web-Panel erreichbar unter http://'+c.webHost+':'+c.webPort;
 }}
 async function saveConfig(){{
   const d={{}}; for(const k of KEYS) d[k]=document.getElementById(k).value;
+  d.masterEnabled=document.getElementById('masterEnabled').checked?'on':'';
+  d.masterLocked=document.getElementById('masterLocked').checked?'on':'';
   const res=await api('/config/save',d,'POST');
   if(res&&res.ok) toast('Konfiguration gespeichert.'); else toast('Fehler: '+((res&&res.error)||''),true);
 }}
@@ -752,7 +774,7 @@ load();
       <div class=""field-row"" style=""margin-top:12px"">
         <div class=""field""><label>E-Mail</label><input id=""e_email""></div>
         <div class=""field""><label>Rolle</label>
-          <select id=""e_permission"" {(string.Equals(permission,"admin")||string.Equals(permission,"dev")?"":"disabled")}>
+          <select id=""e_permission"" {(string.Equals(permission, "admin") || string.Equals(permission, "dev") ? "" : "disabled")}>
             <option value=""player"">player</option><option value=""helper"">helper</option>
             <option value=""mod"">mod</option><option value=""admin"">admin</option><option value=""dev"">dev</option>
           </select></div>

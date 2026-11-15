@@ -80,9 +80,22 @@ public sealed class StatusHandler : RequestHandler
 
     static PlayerEntry Entry(Session s, DateTime now) => new()
     {
-        id = s.PlayerId, nick = s.Nick, carId = s.CarId, color = s.Color, money = s.Money, nbCars = s.NbCars,
-        inCar = s.InCar && (now - s.LastUdp).TotalSeconds < InCarTimeout, px = s.Px, pz = s.Pz, nationality = s.Nationality,
-        island = s.Island, avatar = s.Avatar ?? "", rideWith = s.RideWith, passenger = s.Passenger,
-        mood = s.Mood ?? "", moodTxt = s.MoodTxt ?? "", photoVer = s.PhotoVer,
+        id = s.PlayerId,
+        nick = s.Nick,
+        carId = s.CarId,
+        color = s.Color,
+        money = s.Money,
+        nbCars = s.NbCars,
+        inCar = s.InCar && (now - s.LastUdp).TotalSeconds < InCarTimeout,
+        px = s.Px,
+        pz = s.Pz,
+        nationality = s.Nationality,
+        island = s.Island,
+        avatar = s.Avatar ?? "",
+        rideWith = s.RideWith,
+        passenger = s.Passenger,
+        mood = s.Mood ?? "",
+        moodTxt = s.MoodTxt ?? "",
+        photoVer = s.PhotoVer,
     };
 }

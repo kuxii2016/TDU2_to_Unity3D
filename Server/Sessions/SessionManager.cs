@@ -62,11 +62,19 @@ public sealed class SessionManager
         var sv = a.save;
         var s = new Session
         {
-            Id = Credentials.NewToken(), Nick = a.nick, Conn = conn,
-            PlayerId = NewPlayerId(), UdpKey = BitConverter.ToUInt32(RandomNumberGenerator.GetBytes(4)),
-            Money = sv?.money ?? 0, NbCars = sv?.ownedCars?.Count ?? 0, Nationality = a.nationality,
-            Island = Islands.Code(sv?.island), Avatar = sv?.avatar ?? "",
-            Mood = sv?.myLife?.mood ?? "", MoodTxt = sv?.myLife?.moodText ?? "", PhotoVer = sv?.myLife?.photoVer ?? 0,
+            Id = Credentials.NewToken(),
+            Nick = a.nick,
+            Conn = conn,
+            PlayerId = NewPlayerId(),
+            UdpKey = BitConverter.ToUInt32(RandomNumberGenerator.GetBytes(4)),
+            Money = sv?.money ?? 0,
+            NbCars = sv?.ownedCars?.Count ?? 0,
+            Nationality = a.nationality,
+            Island = Islands.Code(sv?.island),
+            Avatar = sv?.avatar ?? "",
+            Mood = sv?.myLife?.mood ?? "",
+            MoodTxt = sv?.myLife?.moodText ?? "",
+            PhotoVer = sv?.myLife?.photoVer ?? 0,
         };
         conn.Session = s;
         _byId[s.Id] = s;

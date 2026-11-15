@@ -22,8 +22,14 @@ public sealed class RecentHandler : RequestHandler
         foreach (var p in Ctx.Recent.Latest(me.Nick, Count))
             resp.recent.Add(new RecentEntry
             {
-                nick = p.nick, lastSeen = p.lastSeen, online = online.Contains(p.nick), carId = p.carId, color = p.color,
-                nbCars = p.nbCars, money = p.money, nationality = p.nationality,
+                nick = p.nick,
+                lastSeen = p.lastSeen,
+                online = online.Contains(p.nick),
+                carId = p.carId,
+                color = p.color,
+                nbCars = p.nbCars,
+                money = p.money,
+                nationality = p.nationality,
             });
         return resp;
     }

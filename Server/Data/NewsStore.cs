@@ -120,9 +120,15 @@ public sealed class NewsStore
     {
         var n = new NewsItem
         {
-            header = Cut(header, MaxHeader), message = Cut(message, MaxMessage), icon = Cut(icon, MaxIcon),
-            island = island, author = author ?? "", created = DateTime.UtcNow.ToString("o"),
-            kind = Kind(kind), version = Cut(version, MaxVersion), category = Category(kind, category),
+            header = Cut(header, MaxHeader),
+            message = Cut(message, MaxMessage),
+            icon = Cut(icon, MaxIcon),
+            island = island,
+            author = author ?? "",
+            created = DateTime.UtcNow.ToString("o"),
+            kind = Kind(kind),
+            version = Cut(version, MaxVersion),
+            category = Category(kind, category),
         };
         lock (_lock)
         {
@@ -185,8 +191,18 @@ public sealed class NewsStore
 
     static NewsItem Copy(NewsItem n) => new()
     {
-        id = n.id, header = n.header, message = n.message, icon = n.icon, island = n.island, author = n.author, created = n.created, updated = n.updated,
-        hasImage = n.hasImage, kind = n.kind ?? "", version = n.version ?? "", category = n.category ?? "",
+        id = n.id,
+        header = n.header,
+        message = n.message,
+        icon = n.icon,
+        island = n.island,
+        author = n.author,
+        created = n.created,
+        updated = n.updated,
+        hasImage = n.hasImage,
+        kind = n.kind ?? "",
+        version = n.version ?? "",
+        category = n.category ?? "",
     };
 
     static string Cut(string v, int max) { v = (v ?? "").Trim(); return v.Length > max ? v[..max] : v; }

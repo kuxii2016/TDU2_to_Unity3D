@@ -110,7 +110,13 @@ public sealed class SurveyStore
     {
         var e = new SurveyEntry
         {
-            id = s.id, question = s.question, text = s.text, answers = s.answers.ToList(), open = s.IsOpen, created = s.created, closes = s.closes,
+            id = s.id,
+            question = s.question,
+            text = s.text,
+            answers = s.answers.ToList(),
+            open = s.IsOpen,
+            created = s.created,
+            closes = s.closes,
             counts = Enumerable.Repeat(0, s.answers.Count).ToList(),
         };
         foreach (var v in s.votes.Values) if (v >= 0 && v < e.counts.Count) { e.counts[v]++; e.total++; }
@@ -134,8 +140,13 @@ public sealed class SurveyStore
         }
         var s = new SurveyItem
         {
-            question = question, text = Cut(text, MaxText), answers = ans, island = island, closes = closesIso,
-            author = author ?? "", created = DateTime.UtcNow.ToString("o"),
+            question = question,
+            text = Cut(text, MaxText),
+            answers = ans,
+            island = island,
+            closes = closesIso,
+            author = author ?? "",
+            created = DateTime.UtcNow.ToString("o"),
         };
         lock (_lock)
         {

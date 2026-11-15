@@ -208,7 +208,7 @@ namespace TDU2.Online
             var copy = JsonUtility.FromJson<SaveData>(json);
             var client = Client; string nick = Nick, token = Token, session = SessionId;
             try { SaveCopied?.Invoke(nick, JsonUtility.FromJson<SaveData>(json)); }
-            catch (Exception e) { Debug.LogWarning("[TDU2] Savegame: " + e.Message); }
+            catch (Exception e) { Debug.LogWarning("Savegame: " + e.Message); }
             SaveStarted?.Invoke();
             _saving = Task.Run(() =>
             {

@@ -189,7 +189,7 @@ namespace TDU2.Online
                 if (all != _lastMeshAll || direct != _lastMeshDirect)
                 {
                     _lastMeshAll = all; _lastMeshDirect = direct;
-                    Debug.Log($"[TDU2] P2P: {direct}/{all} Mitspieler direkt, {all - direct} über das Relay des Servers");
+                    Debug.Log($"P2P: {direct}/{all} Mitspieler direkt, {all - direct} über das Relay des Servers");
                 }
             }
             // Ping alle 2 s: Laufzeit messen, NAT/CGNAT-Zuordnung offen halten (auch ohne Zustandspakete, z.B. im Menü)
@@ -301,7 +301,7 @@ namespace TDU2.Online
                 _recv = new Thread(() => ReceiveLoop(udp)) { IsBackground = true, Name = "TDU2 UDP" };
                 _recv.Start();
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] UDP: " + ex.Message); _udp = null; }
+            catch (Exception ex) { Debug.LogWarning("UDP: " + ex.Message); _udp = null; }
         }
 
         void ReceiveLoop(UdpClient udp)
@@ -872,11 +872,11 @@ namespace TDU2.Online
         {
             if (r.Load == null || !r.Load.IsCompleted) return;
             var t = r.Load; r.Load = null;
-            if (t.IsFaulted) { Debug.LogWarning("[TDU2] Mitspieler-Auto: " + t.Exception?.GetBaseException().Message); return; }
+            if (t.IsFaulted) { Debug.LogWarning("Mitspieler-Auto: " + t.Exception?.GetBaseException().Message); return; }
             if (r.LoadCarId != r.CarId || r.LoadColor != r.Color || r.LoadRim != r.Rim || r.LoadInterior != r.Interior) { t.Result?.DestroyTextures(); return; }   // inzwischen gewechselt
             DestroyModel(r);
             try { Build(r, t.Result); }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Mitspieler-Auto aufbauen: " + ex.Message); t.Result?.DestroyTextures(); }
+            catch (Exception ex) { Debug.LogWarning("Mitspieler-Auto aufbauen: " + ex.Message); t.Result?.DestroyTextures(); }
         }
 
         void Build(Remote r, CarAssets a)

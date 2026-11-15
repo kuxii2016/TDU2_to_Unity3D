@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using TDU2Server.Core;
 
@@ -193,9 +192,18 @@ public sealed class WebPanel
                 bool online = _ctx.Actions.Players().Any(s => string.Equals(s.Nick, a.nick, StringComparison.OrdinalIgnoreCase));
                 return new
                 {
-                    nick = a.nick, email = a.email, permission = a.permission, nationality = a.nationality,
-                    money = a.save?.money ?? 0, cars = a.save?.ownedCars?.Count ?? 0, island = Islands.Name(Islands.Code(a.save?.island)),
-                    created = a.created, lastLogin = a.lastLogin, banned = a.IsBanned, bannedUntil = a.bannedUntil, banReason = a.banReason,
+                    nick = a.nick,
+                    email = a.email,
+                    permission = a.permission,
+                    nationality = a.nationality,
+                    money = a.save?.money ?? 0,
+                    cars = a.save?.ownedCars?.Count ?? 0,
+                    island = Islands.Name(Islands.Code(a.save?.island)),
+                    created = a.created,
+                    lastLogin = a.lastLogin,
+                    banned = a.IsBanned,
+                    bannedUntil = a.bannedUntil,
+                    banReason = a.banReason,
                     online,
                 };
             });
@@ -209,18 +217,36 @@ public sealed class WebPanel
             if (a == null) return Results.Json(new { ok = false, error = "not_found" }, statusCode: 404);
             return Results.Json(new
             {
-                ok = true, nick = a.nick, email = a.email, permission = a.permission, nationality = a.nationality,
-                created = a.created, lastLogin = a.lastLogin, banned = a.IsBanned, bannedUntil = a.bannedUntil, banReason = a.banReason,
+                ok = true,
+                nick = a.nick,
+                email = a.email,
+                permission = a.permission,
+                nationality = a.nationality,
+                created = a.created,
+                lastLogin = a.lastLogin,
+                banned = a.IsBanned,
+                bannedUntil = a.bannedUntil,
+                banReason = a.banReason,
                 tokens = a.tokenHashes.Count,
                 carCatalog = _ctx.Config.starterCars ?? new(),
                 save = new
                 {
-                    island = a.save?.island, money = a.save?.money ?? 0, currentCar = a.save?.currentCar,
-                    cars = a.save?.ownedCars ?? new(), starterChosen = a.save?.starterChosen ?? false,
-                    nbCars = a.save?.ownedCars?.Count ?? 0, avatar = a.save?.avatar,
-                    houses = a.save?.houses?.Count ?? 0, odometers = a.save?.odometers?.Count ?? 0,
-                    version = a.save?.version ?? 0, interior = a.save?.interior, savedAt = a.save?.savedAt,
-                    px = a.save?.px ?? 0, py = a.save?.py ?? 0, pz = a.save?.pz ?? 0, heading = a.save?.heading ?? 0,
+                    island = a.save?.island,
+                    money = a.save?.money ?? 0,
+                    currentCar = a.save?.currentCar,
+                    cars = a.save?.ownedCars ?? new(),
+                    starterChosen = a.save?.starterChosen ?? false,
+                    nbCars = a.save?.ownedCars?.Count ?? 0,
+                    avatar = a.save?.avatar,
+                    houses = a.save?.houses?.Count ?? 0,
+                    odometers = a.save?.odometers?.Count ?? 0,
+                    version = a.save?.version ?? 0,
+                    interior = a.save?.interior,
+                    savedAt = a.save?.savedAt,
+                    px = a.save?.px ?? 0,
+                    py = a.save?.py ?? 0,
+                    pz = a.save?.pz ?? 0,
+                    heading = a.save?.heading ?? 0,
                     hasPosition = a.save?.hasPosition ?? false,
                     liveries = a.save?.liveries?.Count ?? 0,
                     stickerBoards = a.save?.stickerBoards?.Count ?? 0,
@@ -242,9 +268,12 @@ public sealed class WebPanel
                     favoriteList = a.save?.favoriteSpots ?? new(),
                     carConfigList = a.save?.carConfigs?.Select(c => c.car).ToList() ?? new(),
                     liveryList = a.save?.liveries?.Select(l => l.car).ToList() ?? new(),
-                    mood = a.save?.myLife?.mood, moodText = a.save?.myLife?.moodText,
-                    gender = a.save?.myLife?.gender, birthDay = a.save?.myLife?.birthDay,
-                    birthMonth = a.save?.myLife?.birthMonth, birthYear = a.save?.myLife?.birthYear,
+                    mood = a.save?.myLife?.mood,
+                    moodText = a.save?.myLife?.moodText,
+                    gender = a.save?.myLife?.gender,
+                    birthDay = a.save?.myLife?.birthDay,
+                    birthMonth = a.save?.myLife?.birthMonth,
+                    birthYear = a.save?.myLife?.birthYear,
                     hasPhoto = !string.IsNullOrEmpty(a.save?.myLife?.photo),
                 },
             });
@@ -385,8 +414,18 @@ public sealed class WebPanel
         app.MapGet("/news", (HttpContext http) => Require(http, u => Results.Content(Pages.NewsPage(u.Nick, u.Permission), "text/html")));
         app.MapGet("/news/list", (HttpContext http) => Require(http, u => Json(_ctx.News.All().Select(n => new
         {
-            id = n.id, header = n.header, message = n.message, icon = n.icon, island = n.island, islandName = n.island == 0 ? "Alle" : Islands.Name(n.island),
-            author = n.author, created = n.created, updated = n.updated, hasImage = n.hasImage, kind = n.kind ?? "", version = n.version ?? "",
+            id = n.id,
+            header = n.header,
+            message = n.message,
+            icon = n.icon,
+            island = n.island,
+            islandName = n.island == 0 ? "Alle" : Islands.Name(n.island),
+            author = n.author,
+            created = n.created,
+            updated = n.updated,
+            hasImage = n.hasImage,
+            kind = n.kind ?? "",
+            version = n.version ?? "",
             category = n.category ?? "",
         }))));
         app.MapGet("/news/image", (HttpContext http) => Require(http, u =>
@@ -439,9 +478,19 @@ public sealed class WebPanel
             var list = _ctx.Surveys.All(out var raw);
             return Json(list.Select(s => new
             {
-                id = s.id, question = s.question, text = s.text, answers = s.answers, counts = s.counts, total = s.total, open = s.open,
-                closed = raw.TryGetValue(s.id, out var it) && !it.open, created = s.created, closes = s.closes,
-                island = it?.island ?? 0, islandName = (it?.island ?? 0) == 0 ? "Alle" : Islands.Name(it.island), author = it?.author ?? "",
+                id = s.id,
+                question = s.question,
+                text = s.text,
+                answers = s.answers,
+                counts = s.counts,
+                total = s.total,
+                open = s.open,
+                closed = raw.TryGetValue(s.id, out var it) && !it.open,
+                created = s.created,
+                closes = s.closes,
+                island = it?.island ?? 0,
+                islandName = (it?.island ?? 0) == 0 ? "Alle" : Islands.Name(it.island),
+                author = it?.author ?? "",
             }));
         }));
         app.MapPost("/surveys/save", (HttpContext http) => Require(http, u =>
@@ -496,6 +545,15 @@ public sealed class WebPanel
                 var cars = f["starterCars"].ToString();
                 if (!string.IsNullOrWhiteSpace(cars))
                     cfg.starterCars = cars.Split(new[] { ',', '\n', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                // MasterServer (Serverliste): Änderungen greifen sofort, die Anmeldung läuft im Hintergrund weiter.
+                cfg.masterEnabled = !string.IsNullOrEmpty(f["masterEnabled"].ToString());
+                if (!string.IsNullOrWhiteSpace(f["masterUrl"])) cfg.masterUrl = f["masterUrl"].ToString().Trim();
+                cfg.masterName = f["masterName"].ToString().Trim();
+                cfg.masterHost = f["masterHost"].ToString().Trim();
+                if (int.TryParse(f["masterPort"], out var mport)) cfg.masterPort = mport;
+                cfg.masterModMessage = f["masterModMessage"].ToString().Trim();
+                if (!string.IsNullOrWhiteSpace(f["masterVersion"])) cfg.masterVersion = f["masterVersion"].ToString().Trim();
+                cfg.masterLocked = !string.IsNullOrEmpty(f["masterLocked"].ToString());
                 ServerConfig.Save(_ctx.ConfigFile, cfg);
                 _ctx.Audit.Add("mod", u.Nick, "config.json geändert");
                 Log.Info($"[Mod] {u.Nick}: config.json geändert");
@@ -512,10 +570,29 @@ public sealed class WebPanel
         var cfg = _ctx.Config;
         return new
         {
-            tcpPort = cfg.tcpPort, udpPort = cfg.udpPort, dataDir = cfg.dataDir,
-            startSpot = cfg.startSpot, startIsland = cfg.startIsland, startMoney = cfg.startMoney,
-            maxPlayers = cfg.maxPlayers, motd = cfg.motd, starterCars = string.Join(", ", cfg.starterCars),
-            webHost = cfg.webHost, webPort = cfg.webPort,
+            tcpPort = cfg.tcpPort,
+            udpPort = cfg.udpPort,
+            dataDir = cfg.dataDir,
+            startSpot = cfg.startSpot,
+            startIsland = cfg.startIsland,
+            startMoney = cfg.startMoney,
+            maxPlayers = cfg.maxPlayers,
+            motd = cfg.motd,
+            starterCars = string.Join(", ", cfg.starterCars),
+            webHost = cfg.webHost,
+            webPort = cfg.webPort,
+            masterEnabled = cfg.masterEnabled,
+            masterUrl = cfg.masterUrl,
+            masterId = cfg.masterId,
+            masterName = cfg.masterName,
+            masterHost = cfg.masterHost,
+            masterPort = cfg.masterPort,
+            masterModMessage = cfg.masterModMessage,
+            masterVersion = cfg.masterVersion,
+            masterLocked = cfg.masterLocked,
+            masterHeartbeatMs = cfg.masterHeartbeatMs,
+            masterRetryMs = cfg.masterRetryMs,
+            masterStatus = _ctx.Master?.Status ?? "aus",
         };
     }
 
@@ -524,13 +601,23 @@ public sealed class WebPanel
         var now = DateTime.UtcNow;
         return _ctx.Actions.Players().Select(s => (object)new
         {
-            id = s.PlayerId, nick = s.Nick, island = Islands.Name(s.Island), islandCode = s.Island,
-            carId = s.CarId, inCar = s.InCar && (now - s.LastUdp).TotalSeconds < 10,
-            money = s.Money, nbCars = s.NbCars, nationality = s.Nationality,
-            px = Math.Round(s.Px, 1), pz = Math.Round(s.Pz, 1),
-            rideWith = s.RideWith, passenger = s.Passenger,
-            udp = s.UdpEndPoint?.ToString() ?? "", lastUdp = s.LastUdp == DateTime.MinValue ? "" : (now - s.LastUdp).TotalSeconds.ToString("0") + "s",
-            since = s.Since.ToString("HH:mm:ss"), minutes = (int)(DateTime.Now - s.Since).TotalMinutes,
+            id = s.PlayerId,
+            nick = s.Nick,
+            island = Islands.Name(s.Island),
+            islandCode = s.Island,
+            carId = s.CarId,
+            inCar = s.InCar && (now - s.LastUdp).TotalSeconds < 10,
+            money = s.Money,
+            nbCars = s.NbCars,
+            nationality = s.Nationality,
+            px = Math.Round(s.Px, 1),
+            pz = Math.Round(s.Pz, 1),
+            rideWith = s.RideWith,
+            passenger = s.Passenger,
+            udp = s.UdpEndPoint?.ToString() ?? "",
+            lastUdp = s.LastUdp == DateTime.MinValue ? "" : (now - s.LastUdp).TotalSeconds.ToString("0") + "s",
+            since = s.Since.ToString("HH:mm:ss"),
+            minutes = (int)(DateTime.Now - s.Since).TotalMinutes,
             remote = s.Conn?.Remote ?? "",
         }).ToList();
     }
@@ -548,7 +635,8 @@ public sealed class WebPanel
         // Partner, denen der Server die Endpunkte dieses Spielers für P2P vermittelt (gleiche Lobby, beide P2P-fähig, UDP bekannt)
         var peers = all.Where(o => o != s && TDU2Server.Sessions.LobbyManager.SameLobby(s, o)).Select(o => new
         {
-            id = o.PlayerId, nick = o.Nick,
+            id = o.PlayerId,
+            nick = o.Nick,
             p2p = s.P2P && o.P2P && s.UdpEndPoint != null && o.UdpEndPoint != null,
             sameLan = s.UdpEndPoint != null && o.UdpEndPoint != null && Equals(s.UdpEndPoint.Address, o.UdpEndPoint.Address),
         }).ToList();
@@ -558,28 +646,52 @@ public sealed class WebPanel
         return new
         {
             ok = true,
-            id = s.PlayerId, nick = s.Nick,
-            since = s.Since.ToString("dd.MM. HH:mm:ss"), minutes = (int)(DateTime.Now - s.Since).TotalMinutes,
+            id = s.PlayerId,
+            nick = s.Nick,
+            since = s.Since.ToString("dd.MM. HH:mm:ss"),
+            minutes = (int)(DateTime.Now - s.Since).TotalMinutes,
             // Verbindung
-            tcp = s.Conn?.Remote ?? "", ip = (s.Conn?.Remote ?? "").Split(':')[0],
-            udp = s.UdpEndPoint?.ToString() ?? "", udpLast = Ago(s.LastUdp), udpActive = s.UdpEndPoint != null && s.UdpActive(now, 10),
+            tcp = s.Conn?.Remote ?? "",
+            ip = (s.Conn?.Remote ?? "").Split(':')[0],
+            udp = s.UdpEndPoint?.ToString() ?? "",
+            udpLast = Ago(s.LastUdp),
+            udpActive = s.UdpEndPoint != null && s.UdpActive(now, 10),
             udpIpDiffers = s.UdpEndPoint != null && !string.IsNullOrEmpty(s.Conn?.Remote) && s.Conn.Remote.Split(':')[0] != s.UdpEndPoint.Address.ToString(),
-            statusLast = Ago(s.LastStatus), statusIntervalMs = cfg.statusIntervalMs,
+            statusLast = Ago(s.LastStatus),
+            statusIntervalMs = cfg.statusIntervalMs,
             localEp = s.LocalEp ?? "",
             // P2P
-            p2pServer = cfg.p2pEnabled, p2p = s.P2P, relayCount = s.RelayCount,
+            p2pServer = cfg.p2pEnabled,
+            p2p = s.P2P,
+            relayCount = s.RelayCount,
             peers,
             // Lobby
-            lobby = s.Lobby, lobbyCount = lobby?.Count ?? 0, lobbyMax = cfg.maxPlayersPerLobby,
+            lobby = s.Lobby,
+            lobbyCount = lobby?.Count ?? 0,
+            lobbyMax = cfg.maxPlayersPerLobby,
             island = Islands.Name(s.Island),
             // Zustand
-            carId = s.CarId, color = s.Color, inCar = s.InCar && s.UdpActive(now, 10),
-            px = Math.Round(s.Px, 1), pz = Math.Round(s.Pz, 1),
-            money = s.Money, nbCars = s.NbCars, nationality = s.Nationality,
-            rideWith = s.RideWith, passenger = s.Passenger, invites, notices,
-            mood = s.Mood, moodText = s.MoodTxt, hasAvatar = !string.IsNullOrEmpty(s.Avatar), photoVer = s.PhotoVer,
+            carId = s.CarId,
+            color = s.Color,
+            inCar = s.InCar && s.UdpActive(now, 10),
+            px = Math.Round(s.Px, 1),
+            pz = Math.Round(s.Pz, 1),
+            money = s.Money,
+            nbCars = s.NbCars,
+            nationality = s.Nationality,
+            rideWith = s.RideWith,
+            passenger = s.Passenger,
+            invites,
+            notices,
+            mood = s.Mood,
+            moodText = s.MoodTxt,
+            hasAvatar = !string.IsNullOrEmpty(s.Avatar),
+            photoVer = s.PhotoVer,
             // Konto
-            permission = a?.permission ?? "", email = a?.email ?? "", created = a?.created ?? "", lastLogin = a?.lastLogin ?? "",
+            permission = a?.permission ?? "",
+            email = a?.email ?? "",
+            created = a?.created ?? "",
+            lastLogin = a?.lastLogin ?? "",
             banned = a?.IsBanned ?? false,
         };
     }
@@ -590,9 +702,15 @@ public sealed class WebPanel
         var players = _ctx.Actions.Players();
         object Member(TDU2Server.Sessions.Session s) => new
         {
-            id = s.PlayerId, nick = s.Nick, island = Islands.Name(s.Island), islandCode = s.Island,
-            carId = s.CarId, inCar = s.InCar && (now - s.LastUdp).TotalSeconds < 10,
-            rideWith = s.RideWith, passenger = s.Passenger, p2p = s.P2P,
+            id = s.PlayerId,
+            nick = s.Nick,
+            island = Islands.Name(s.Island),
+            islandCode = s.Island,
+            carId = s.CarId,
+            inCar = s.InCar && (now - s.LastUdp).TotalSeconds < 10,
+            rideWith = s.RideWith,
+            passenger = s.Passenger,
+            p2p = s.P2P,
             udp = s.UdpEndPoint != null && s.UdpActive(now, 10),
             minutes = (int)(DateTime.Now - s.Since).TotalMinutes,
         };
@@ -603,8 +721,12 @@ public sealed class WebPanel
             var members = players.Where(p => ids.Contains(p.PlayerId)).OrderBy(p => p.Nick, StringComparer.OrdinalIgnoreCase).Select(Member).ToList();
             return new
             {
-                id = l.Id, island = Islands.Name(l.Island), islandCode = l.Island, count = l.Count,
-                created = l.Created.ToLocalTime().ToString("HH:mm:ss"), minutes = (int)(now - l.Created).TotalMinutes,
+                id = l.Id,
+                island = Islands.Name(l.Island),
+                islandCode = l.Island,
+                count = l.Count,
+                created = l.Created.ToLocalTime().ToString("HH:mm:ss"),
+                minutes = (int)(now - l.Created).TotalMinutes,
                 members,
                 missing = ids.Count - members.Count,   // Nummern ohne Sitzung (sollte 0 sein)
             };

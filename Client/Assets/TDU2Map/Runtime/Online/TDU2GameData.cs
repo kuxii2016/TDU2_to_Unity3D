@@ -164,7 +164,7 @@ namespace TDU2.Online
                 var moved = go.AddComponent<TDU2GameData>();
                 JsonUtility.FromJsonOverwrite(json, moved);
                 go.SetActive(true);   // Awake der Kopie: Instance + DontDestroyOnLoad
-                Debug.LogWarning("[TDU2] TDU2GameData lag auf '" + name + "' zusammen mit anderen Komponenten – auf eigenes Objekt verschoben (bitte in der Szene auf ein eigenes GameObject legen).");
+                Debug.LogWarning("TDU2GameData lag auf '" + name + "' zusammen mit anderen Komponenten – auf eigenes Objekt verschoben (bitte in der Szene auf ein eigenes GameObject legen).");
                 Destroy(this);
                 return;
             }
@@ -254,7 +254,7 @@ namespace TDU2.Online
                 var (task, p, done) = _lifeReq[k];
                 _lifeReq.Remove(k);
                 var r = task.Status == TaskStatus.RanToCompletion ? task.Result : null;
-                if (r == null || !r.ok || r.life == null) { Debug.Log("[TDU2] MyTDULife von " + p.Nick + ": " + (r?.error ?? "keine Antwort")); continue; }
+                if (r == null || !r.ok || r.life == null) { Debug.Log("MyTDULife von " + p.Nick + ": " + (r?.error ?? "keine Antwort")); continue; }
                 p.Life = r.life;
                 if (!string.IsNullOrEmpty(r.avatar)) p.Avatar = r.avatar;
                 p.Mood = r.life.mood ?? ""; p.MoodTxt = r.life.moodText ?? ""; p.PhotoVer = r.life.photoVer;
@@ -275,7 +275,7 @@ namespace TDU2.Online
                 if (tex.LoadImage(Convert.FromBase64String(b64))) return tex;
                 Destroy(tex);
             }
-            catch (Exception ex) { Debug.LogWarning("[TDU2] Foto: " + ex.Message); }
+            catch (Exception ex) { Debug.LogWarning("Foto: " + ex.Message); }
             return null;
         }
 

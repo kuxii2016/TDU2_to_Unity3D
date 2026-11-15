@@ -98,7 +98,7 @@ namespace TDU2.Online
             if (!_task.IsCompleted) return;
             var r = _task.Status == TaskStatus.RanToCompletion ? _task.Result : null;
             _task = null;
-            if (r == null || !r.ok) { if (r != null && r.error != "not_logged_in" && r.error != "unknown_op") Debug.LogWarning("[TDU2] News: " + r.error); return; }
+            if (r == null || !r.ok) { if (r != null && r.error != "not_logged_in" && r.error != "unknown_op") Debug.LogWarning("News: " + r.error); return; }
             Apply(r);
         }
 
@@ -127,8 +127,8 @@ namespace TDU2.Online
             Items.Sort((a, b) => b.id.CompareTo(a.id));
             Latest = r.newsLatest;
             if (!changed) return;
-            Debug.Log($"[TDU2] News: {Items.Count} Meldungen ({added} neu, {UnreadCount} ungelesen, höchste Id {Latest})");
-            try { Changed?.Invoke(); } catch (Exception ex) { Debug.LogWarning("[TDU2] News: " + ex.Message); }
+            Debug.Log($"News: {Items.Count} Meldungen ({added} neu, {UnreadCount} ungelesen, höchste Id {Latest})");
+            try { Changed?.Invoke(); } catch (Exception ex) { Debug.LogWarning("News: " + ex.Message); }
         }
 
         // ------------------------------------------------------------------ Bilder (op "newsimg", einzeln, im Speicher gehalten)
@@ -160,16 +160,16 @@ namespace TDU2.Online
             var r = _imageTask.Status == TaskStatus.RanToCompletion ? _imageTask.Result : null;
             int id = _imageTaskId;
             _imageTask = null; _imageTaskId = 0;
-            if (r == null || !r.ok || string.IsNullOrEmpty(r.newsImage)) { _imageFailed.Add(id); Debug.LogWarning($"[TDU2] News-Bild {id}: {r?.error ?? "keine Antwort"}"); return; }
+            if (r == null || !r.ok || string.IsNullOrEmpty(r.newsImage)) { _imageFailed.Add(id); Debug.LogWarning($"News-Bild {id}: {r?.error ?? "keine Antwort"}"); return; }
             try
             {
                 var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = "News " + id, wrapMode = TextureWrapMode.Clamp };
                 if (!tex.LoadImage(Convert.FromBase64String(r.newsImage))) { UnityEngine.Object.Destroy(tex); _imageFailed.Add(id); return; }
                 _images[id] = tex;
-                Debug.Log($"[TDU2] News-Bild {id}: {tex.width}x{tex.height}");
+                Debug.Log($"News-Bild {id}: {tex.width}x{tex.height}");
                 Changed?.Invoke();
             }
-            catch (Exception ex) { _imageFailed.Add(id); Debug.LogWarning($"[TDU2] News-Bild {id}: {ex.Message}"); }
+            catch (Exception ex) { _imageFailed.Add(id); Debug.LogWarning($"News-Bild {id}: {ex.Message}"); }
         }
 
         // ------------------------------------------------------------------ Hauptthread-Taktgeber

@@ -250,7 +250,7 @@ namespace TDU2.Online
             return m != null ? m.Database : null;
         }
 
-        static void Log(string text) => Debug.Log("[TDU2] Freunde: " + text);
+        static void Log(string text) => Debug.Log("Freunde: " + text);
 
         // ------------------------------------------------------------------ Meldungen für TDU Media (Reiter "Freunde & Klub")
         // Texte aus der Spieldatenbank (db_<sprache>.cpr), wie im Spiel; für Ablehnen/Entfernen gibt es dort keine Meldung.

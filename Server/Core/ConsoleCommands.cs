@@ -3,7 +3,7 @@ namespace TDU2Server.Core;
 /// <summary>Konsolenbefehle: list, accounts, reload, say, quit.</summary>
 public sealed class ConsoleCommands
 {
-    public const string Help = "list, lobbies, traffic, accounts, reload, say <Text>, panel, quit";
+    public const string Help = "list, lobbies, traffic, accounts, master, reload, say <Text>, panel, quit";
 
     readonly ServerContext _ctx;
     readonly Action _stop;
@@ -43,6 +43,7 @@ public sealed class ConsoleCommands
                         Log.Info($"  Lobby {l.Id} ({Islands.Name(l.Island)}): {l.Count}/{(_ctx.Config.maxPlayersPerLobby > 0 ? _ctx.Config.maxPlayersPerLobby.ToString() : "∞")} Spieler");
                     break;
                 case "accounts": foreach (var n in _ctx.Accounts.Names()) Log.Info("  " + n); break;
+                case "master": MasterStatus(); break;
                 case "reload":
                     _ctx.Config = ServerConfig.Load(_ctx.ConfigFile);
                     Log.Info("Konfiguration neu geladen.");
@@ -85,5 +86,19 @@ public sealed class ConsoleCommands
         Log.Info($"{all.Count} online");
         foreach (var s in all)
             Log.Info($"  #{s.PlayerId} {s.Nick}  ({s.Conn?.Remote}, UDP {s.UdpEndPoint?.ToString() ?? "-"}, Auto {s.CarId}, Insel {Islands.Name(s.Island)}, Lobby {s.Lobby}, seit {s.Since:HH:mm:ss})");
+    }
+
+    /// <summary>Zustand der Master-Anmeldung (Serverliste im Launcher).</summary>
+    void MasterStatus()
+    {
+        var cfg = _ctx.Config;
+        if (!cfg.masterEnabled)
+        {
+            Log.Info("Master-Anmeldung deaktiviert (config.masterEnabled=false).");
+            return;
+        }
+        var m = _ctx.Master;
+        Log.Info($"Master {cfg.masterUrl}: {m?.Status ?? "nicht gestartet"}"
+                 + (m?.IsRegistered == true ? $" (ID {cfg.masterId}, Port {(cfg.masterPort > 0 ? cfg.masterPort : cfg.tcpPort)})" : ""));
     }
 }

@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace TDU2Server.Web;
 
 /// <summary>Chat-Verlauf im Speicher (neueste zuletzt). Wird vom ChatPacket gespeist.</summary>

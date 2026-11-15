@@ -79,8 +79,8 @@ namespace TDU2.Online
 
         void Say(string text)
         {
-            Debug.Log("[TDU2] " + text);
-            GD?.AddChatLine("TDU2", text, 0);
+            //Debug.Log("" + text);
+            //GD?.AddChatLine("", text, 0);
         }
 
         // ================================================================== Beitreten

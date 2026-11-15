@@ -24,6 +24,7 @@ namespace TDU2.Vehicles
         public sealed class Wheel
         {
             public string Name;
+            public float DiagT;   // DIAG Feder
             public bool Front, Left, Driven;
             public Vector3 Anchor;
             public float Radius, Width, Mass, Inertia;
@@ -207,6 +208,13 @@ namespace TDU2.Vehicles
 #endif
             ForwardSpeed = Vector3.Dot(vel, tr.forward);
             SpeedKmh = vel.magnitude * 3.6f;
+            if (_bodyLog > 0)
+            {
+                // DIAG Body: Reaktion des Aufbaus nach einer Federkraft-Spitze (Vergleich mit der Paradise Engine, kann wieder raus)
+                _bodyLog--;
+                var avl = tr.InverseTransformDirection(_rb.angularVelocity);
+                Debug.Log($"[DIAG Body] {40 - _bodyLog,2}: vy {vel.y:+0.00;-0.00} m/s, Nick {avl.x:+0.00;-0.00} Gier {avl.y:+0.00;-0.00} Roll {avl.z:+0.00;-0.00} rad/s, Höhe {tr.position.y - _bodyY0:+0.000;-0.000} m, Einfederung {string.Join(" ", System.Array.ConvertAll(Wheels, w => w.Grounded ? w.Compression.ToString("0.000") : "frei"))}, Fz {string.Join(" ", System.Array.ConvertAll(Wheels, w => w.Fz.ToString("0")))}");
+            }
             float g = Physics.gravity.magnitude;
             UpdateSteering(dt);
             if (StartLock && Gear <= 0 && !Shifting) { int old = Gear; Gear = 1; _reverseTimer = 0f; GearChanged?.Invoke(old, Gear); }
@@ -411,6 +419,8 @@ namespace TDU2.Vehicles
 
         public float SteeringAngle => _steerCurrent;
 
+        int _bodyLog; float _bodyY0;   // DIAG Body
+
         void Suspension(Wheel w, float dt)
         {
             var tr = transform;
@@ -451,6 +461,13 @@ namespace TDU2.Vehicles
             if (w.Compression > w.TravelUp * 0.9f) f += w.SpringK * 8f * (w.Compression - w.TravelUp * 0.9f);   // Anschlagpuffer
             // Normalkraft entlang der Kontaktnormalen skaliert
             w.Fz = Mathf.Max(0f, f) * Mathf.Clamp01(Vector3.Dot(w.ContactNormal, up) * 1.2f);
+            // DIAG Feder (Vergleich mit der Paradise Engine, kann wieder raus)
+            if (w.Fz > 50000f && _bodyLog == 0) { _bodyLog = 40; _bodyY0 = transform.position.y; }
+            if (w.Fz > 3f * w.StaticLoad && Time.time - w.DiagT > 0.25f)
+            {
+                w.DiagT = Time.time;
+                Debug.Log($"[DIAG Feder] Spitze {w.Name} {SpeedKmh:0} km/h: Fz {w.Fz:0} N ({w.Fz / Mathf.Max(1f, w.StaticLoad):0.0}x) = statisch {w.StaticLoad:0} + Feder {w.SpringK * w.Compression:0} + Dämpfer {w.DamperC * cv:0} | Einfederung {w.PrevCompression:0.000} -> {w.Compression:0.000} ({cv:+0.00;-0.00} m/s), Strahl {dist:0.000} m, Boden {(w.GroundCollider != null ? w.GroundCollider.name : "Ersatzhöhe")} | SpringK {w.SpringK:0} DamperC {w.DamperC:0} TravelUp {w.TravelUp:0.000} Radius {w.Radius:0.000} dt {dt:0.0000}");
+            }
         }
 
         Vector3 WheelForward(Wheel w, Vector3 n)

@@ -49,7 +49,9 @@ public sealed class WebAuth
     public static void SetCookie(HttpContext http, string token) =>
         http.Response.Cookies.Append(Cookie, token, new CookieOptions
         {
-            HttpOnly = true, IsEssential = true, SameSite = SameSiteMode.Lax,
+            HttpOnly = true,
+            IsEssential = true,
+            SameSite = SameSiteMode.Lax,
             Expires = DateTimeOffset.UtcNow.AddHours(12),
         });
 

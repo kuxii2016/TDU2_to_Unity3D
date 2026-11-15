@@ -23,7 +23,10 @@ public sealed class RegisterHandler : SessionStartHandler
         string salt = Credentials.NewSalt();
         var a = new Account
         {
-            nick = nick, email = (r.email ?? "").Trim(), salt = salt, passwordHash = Credentials.HashPassword(r.password, salt),
+            nick = nick,
+            email = (r.email ?? "").Trim(),
+            salt = salt,
+            passwordHash = Credentials.HashPassword(r.password, salt),
             created = DateTime.UtcNow.ToString("o"),
             save = new SaveData { island = cfg.startIsland, money = cfg.startMoney, starterChosen = false },
         };

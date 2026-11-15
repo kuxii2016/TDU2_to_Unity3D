@@ -1,273 +1,202 @@
 # TDU2 to Unity3D
 
-**A Unity3D port of Test Drive Unlimited 2 — bringing the original game world, features, and experience into Unity with custom code and new possibilities.**
+**An attempt to bring Test Drive Unlimited 2 into Unity3D — and the foundation for something bigger.**
 
-TDU2 to Unity3D is a personal project dedicated to recreating and porting the world and gameplay systems of *Test Drive Unlimited 2* into the Unity3D engine.
+TDU2 to Unity3D was a personal project dedicated to recreating the world, gameplay systems, and overall experience of *Test Drive Unlimited 2* using the Unity3D engine.
 
-The goal is to bring as much of the original game's functionality as possible into Unity, including its maps, vehicles, interiors, racing activities, radio system, weather, time cycle, and online multiplayer features.
+The project aimed to bring as much of the original game as possible into a modern, flexible environment, including its maps, vehicles, interiors, racing activities, original interfaces, radio system, weather, dynamic time cycle, and online multiplayer functionality.
 
-This project is more than just a map viewer or a simple graphics port. It is an ongoing attempt to rebuild the systems that make TDU2 what it is, using custom code and a more flexible foundation for future development.
+Over time, a significant amount of work went into understanding the original game's file formats, reverse-engineering its systems, and rebuilding its functionality from scratch.
 
-## Screenshots
-<p align="center">
-  <img src="./Screenshots/MP.PNG" width="49%" alt="Screenshot 1">
-  <img src="./Screenshots/MP2.PNG" width="49%" alt="Screenshot 2">
-</p>
+However, the project eventually reached a point where the limitations of the Unity3D engine became increasingly difficult to work around.
 
-<p align="center">
-  <img src="./Screenshots/MP_INVITE.PNG" width="49%" alt="Screenshot 1">
-  <img src="./Screenshots/MP_LIVING.PNG" width="49%" alt="Screenshot 2">
-</p>
+---
 
-<p align="center">
-  <img src="./Screenshots/MP_GARAGE.PNG" width="49%" alt="Screenshot 1">
-  <img src="./Screenshots/MP_GARAGESYNC.PNG" width="49%" alt="Screenshot 2">
-</p>
+## Project Status
 
-<p align="center">
-  <img src="./Screenshots/Unbenannt.PNG" width="49%" alt="Screenshot 1">
-  <img src="./Screenshots/Unbenannt1.PNG" width="49%" alt="Screenshot 2">
-</p>
+**This project has been discontinued and is no longer actively developed.**
 
-<p align="center">
-  <img src="./Screenshots/Unbenannt2.PNG" width="49%" alt="Screenshot 3">
-  <img src="./Screenshots/Unbenannt3.PNG" width="49%" alt="Screenshot 4">
-</p>
+After spending a considerable amount of time working with Unity3D, I decided to move away from it and start developing my own game engine.
 
-<p align="center">
-  <img src="./Screenshots/Unbenannt4.PNG" width="49%" alt="Screenshot 5">
-  <img src="./Screenshots/Unbenannt5.PNG" width="49%" alt="Screenshot 6">
-</p>
+The main reason behind this decision was performance.
 
-<p align="center">
-  <img src="./Screenshots/Unbenannt6.PNG" width="49%" alt="Screenshot 7">
-  <img src="./Screenshots/Unbenannt7.PNG" width="49%" alt="Screenshot 8">
-</p>
+Despite implementing custom systems and continuously optimizing the project, Unity introduced limitations and overhead that made it increasingly difficult to achieve the performance, flexibility, and level of control I wanted.
 
-<p align="center">
-  <img src="./Screenshots/Unbenannt8.PNG" width="49%" alt="Screenshot 9">
-  <img src="./Screenshots/bikes.PNG" width="49%" alt="bikes">
-</p>
+Too much development time was spent working around engine limitations instead of improving the actual game and its systems.
 
-<p align="center">
-  <img src="./Screenshots/Unbenannt14.png" width="49%" alt="Screenshot 14">
-  <img src="./Screenshots/Unbenannt15.png" width="49%" alt="Screenshot 15">
-</p>
+Rather than continuing to fight against these limitations, I decided to take a different approach:
 
-<p align="center">
-  <img src="./Screenshots/Unbenannt16.png" width="49%" alt="Screenshot 16">
-  <img src="./Screenshots/Unbenannt17.png" width="49%" alt="Screenshot 17">
-</p>
+**Build my own engine, with the architecture, performance, and control I need.**
 
-<p align="center">
-  <img src="./Screenshots/bikedealer.PNG" width="49%" alt="bikedealer">
-  <img src="./Screenshots/biketestdrive.PNG" width="49%" alt="biketestdrive">
-</p>
+This is not the end of the TDU2 project. It is a change in direction.
 
-## Why This Project?
+The experience, research, reverse-engineered formats, and systems developed during the Unity project provide a foundation for the next stage of development.
 
-Why put so much work into recreating an existing game?
+## The Next Chapter – Project TDU2
 
-The answer is simple: **having control over the code opens up possibilities that would otherwise be difficult or impossible to achieve.**
+The development of TDU2 is continuing on a new foundation: **my own custom game engine.**
 
-By implementing game systems independently in Unity, the project can be extended, modified, and experimented with in ways that are not possible when working exclusively within the original game's architecture.
+Instead of adapting everything to the restrictions of an existing engine, I now have direct control over the core technology and can build systems specifically around the requirements of the project.
 
-The long-term vision is to recreate as much of the original TDU2 experience as possible while providing a flexible foundation for new features, improvements, and custom content.
+The new engine is being developed with a focus on:
 
-This is a work in progress, and the project is still evolving.
+- Vulkan-based rendering.
+- Custom rendering and shader systems.
+- Custom asset and resource loading.
+- A dedicated audio engine and sound mixer.
+- Custom physics and gameplay systems.
+- BepuPhysics for collision detection and physics functionality.
+- Greater control over memory management and performance.
+- An architecture designed specifically for the requirements of TDU2.
 
-## Current Development Status
+The goal is to create a much more flexible foundation that allows the project to grow without constantly having to work around limitations imposed by an existing engine.
 
-A significant amount of functionality has already been implemented. The following features are currently available to varying degrees of completion.
+**Continue following the project here:**
 
-### World and Map Loading
+[**Project TDU2 – GitHub Repository**](https://github.com/kuxii2016/Project-TDU2)
 
-- **Hawaii** — map loading and world rendering.
-- **Ibiza** — map loading and world rendering.
-- **Casino** — map loading and world rendering.
-- Map switching between Hawaii, Ibiza, and the Casino.
-- Road and terrain loading.
+---
+
+## What Was Achieved in the Unity Version?
+
+Although development has stopped, the Unity project represents a considerable amount of work and experimentation.
+
+Some of the implemented systems include:
+
+### World and Environment
+- Hawaii, Ibiza, and Casino map loading.
+- Terrain and road rendering.
 - Vegetation rendering.
-- Collision loading for supported world objects.
+- World object collision loading.
 - Animated textures.
-- Traffic vehicle spawning and movement.
-
-The objective is to recreate the original game environments using the original game data while handling the world through Unity's rendering and runtime systems.
-
-### Vehicles and Driving
-
-- Loading vehicle data from the original game's databases and files.
-- Loading vehicle models and associated resources.
-- Vehicle dirt and dirt accumulation systems.
-- Vehicle spawning and management.
-- Garage arrival vehicle functionality.
-- Multiplayer synchronization of vehicle states.
-
-The vehicle implementation is still under development. Differences between the original game engine and Unity's physics can affect vehicle handling, collisions, and gameplay mechanics.
-
-### Interiors and Buildings
-
-- Loading interior resources.
-- Partial implementation of houses and garages.
-- Support for selected interior areas and building components.
-- Ongoing work to improve interior loading and functionality.
-
-Not every interior is fully functional yet. Some locations may be incomplete, contain incorrectly positioned objects, or lack certain original interactions.
-
-### Racing and Activities
-
-- Racing event support.
-- Driving school functionality.
-- Support for selected racing activities and game modes.
-- Recovery of certain previously discarded or unused game features.
-
-**Important:** Some races, cups, and driving school challenges may be extremely difficult or impossible to complete due to differences in vehicle physics, handling, and gameplay behavior compared with the original game.
-
-### Original Game UI and Screens
-
-- Support for selected original Flash-based screens.
-- Implementation of selected original game interfaces.
-- Sticker Shop functionality.
-- Restoration of certain previously discarded features.
-
-The goal is to preserve as much of the original game's look and feel as possible while adapting its systems to the Unity environment.
-
-### Radio and Audio Systems
-
-- Original TDU2 radio functionality.
-- **Kalua Radio** support for custom music.
-- Radio synchronization in multiplayer.
-- Radio messages related to weather and time of day.
-
-The radio implementation aims to preserve the atmosphere of the original game while allowing additional customization through custom music and extended functionality.
-
-### Day/Night Cycle and Weather
-
-- Dynamic time-of-day changes.
-- Day/night cycle support.
+- Traffic spawning and movement.
+- Dynamic day/night cycle.
 - Weather system.
-- Weather synchronization between multiplayer players.
-- Time synchronization between multiplayer players.
-- Radio messages associated with changing weather conditions and time of day.
 
-These systems help recreate the changing atmosphere of the original game world and keep the experience consistent between connected players.
+### Vehicles and Gameplay
+- Vehicle loading from original game databases and files.
+- Vehicle spawning and management.
+- Vehicle dirt system.
+- Partial garage and house interiors.
+- Racing activities and driving schools.
+- Selected original game features and interactions.
+
+### UI and Audio
+- Original Flash-based game interfaces.
+- Sticker Shop functionality.
+- Original TDU2 radio system.
+- Kaluna Radio for custom music.
+- Weather and time-related radio messages.
 
 ### Online Multiplayer
-
-Multiplayer functionality is one of the major components of the project.
-
-Currently implemented or supported systems include:
-
-- Online connectivity.
-- In-game chat.
 - Player synchronization.
-- Multiplayer vehicle synchronization.
+- In-game chat.
 - Vehicle position and rotation synchronization.
-- Vehicle light synchronization.
-- Wheel synchronization.
-- Vehicle paint and color synchronization.
-- Sticker synchronization.
-- Weather synchronization.
-- Time-of-day synchronization.
-- Traffic synchronization.
-- Traffic light synchronization.
+- Lights and wheel synchronization.
+- Vehicle paint and sticker synchronization.
+- Weather and time synchronization.
+- Traffic and traffic light synchronization.
 - Radio synchronization.
 
-The intention is to allow multiple players to share the same recreated game world while synchronizing important gameplay and environmental states.
+These features were implemented to varying degrees of completion. The Unity version was experimental and never reached the level of completeness originally intended.
 
-Multiplayer functionality is still under development, and synchronization quality may vary depending on the feature and current implementation.
+---
 
-## Restored and Reimplemented Features
+## Screenshots
 
-In addition to the main systems, this project brings back selected features that were previously discarded or left unused during the original game's development.
+The following screenshots show selected stages of development and some of the functionality implemented in the Unity version.
 
-These features are being investigated, restored, or adapted to work within the Unity implementation.
+<p align="center">
+  <img src="./Screenshots/MP.PNG" width="49%" alt="Multiplayer"/>
+  <img src="./Screenshots/MP2.PNG" width="49%" alt="Multiplayer"/>
+</p>
 
-The exact availability and completeness of individual features may vary between builds.
+<p align="center">
+  <img src="./Screenshots/MP_INVITE.PNG" width="49%" alt="Multiplayer Invite"/>
+  <img src="./Screenshots/MP_LIVING.PNG" width="49%" alt="Multiplayer Living"/>
+</p>
 
-## Requirements
+<p align="center">
+  <img src="./Screenshots/MP_GARAGE.PNG" width="49%" alt="Multiplayer Garage"/>
+  <img src="./Screenshots/MP_GARAGESYNC.PNG" width="49%" alt="Garage Synchronization"/>
+</p>
 
-To use TDU2 to Unity3D, you must have a copy of the original *Test Drive Unlimited 2* game.
+<p align="center">
+  <img src="./Screenshots/Unbenannt.PNG" width="49%" alt="World Rendering"/>
+  <img src="./Screenshots/Unbenannt1.PNG" width="49%" alt="World Rendering"/>
+</p>
 
-**The original game files are not included in this repository.**
+<p align="center">
+  <img src="./Screenshots/Unbenannt2.PNG" width="49%" alt="Development Screenshot"/>
+  <img src="./Screenshots/Unbenannt3.PNG" width="49%" alt="Development Screenshot"/>
+</p>
 
-You must unpack the original game files before using the port. The required resources must then be copied into the appropriate Shared Assets directory used by the Unity project.
+<p align="center">
+  <img src="./Screenshots/Unbenannt4.PNG" width="49%" alt="Development Screenshot"/>
+  <img src="./Screenshots/Unbenannt5.PNG" width="49%" alt="Development Screenshot"/>
+</p>
 
-This includes:
+<p align="center">
+  <img src="./Screenshots/Unbenannt6.PNG" width="49%" alt="Development Screenshot"/>
+  <img src="./Screenshots/Unbenannt7.PNG" width="49%" alt="Development Screenshot"/>
+</p>
 
-- The unpacked game assets and resource files.
-- The required original game data.
-- The `.cpr` files.
-- The `.xmb` files located in the original game's root directory.
+<p align="center">
+  <img src="./Screenshots/Unbenannt8.PNG" width="49%" alt="Development Screenshot"/>
+  <img src="./Screenshots/bikes.PNG" width="49%" alt="Bikes"/>
+</p>
 
-The exact directory structure must match what the current build expects. Missing files, incorrect directory structures, or incomplete extraction may prevent the game world and other resources from loading correctly.
+<p align="center">
+  <img src="./Screenshots/Unbenannt14.png" width="49%" alt="Development Screenshot"/>
+  <img src="./Screenshots/Unbenannt15.png" width="49%" alt="Development Screenshot"/>
+</p>
 
-### Setup
+<p align="center">
+  <img src="./Screenshots/Unbenannt16.png" width="49%" alt="Development Screenshot"/>
+  <img src="./Screenshots/Unbenannt17.png" width="49%" alt="Development Screenshot"/>
+</p>
 
-1. Obtain and install the original *Test Drive Unlimited 2* game.
-2. Unpack the game's resource files using an appropriate extraction tool.
-3. Locate the Shared Assets directory used by the Unity port.
-4. Copy the required unpacked game files into that directory.
-5. Make sure the required `.cpr` and `.xmb` files from the original game's root directory are included in the expected locations.
-6. Launch the Unity build and check the logs if any resources fail to load.
+<p align="center">
+  <img src="./Screenshots/bikedealer.PNG" width="49%" alt="Bike Dealer"/>
+  <img src="./Screenshots/biketestdrive.PNG" width="49%" alt="Bike Test Drive"/>
+</p>
 
-**Note:** This is a general setup overview. The exact folder layout and any additional requirements may change as development progresses. Refer to the repository's current instructions and configuration for build-specific details.
+---
 
-## Known Limitations and Warnings
+## Requirements and Original Game Assets
 
-TDU2 to Unity3D is still an experimental, unfinished project.
+The Unity project requires an original copy of *Test Drive Unlimited 2*.
 
-Although many systems are already implemented, the port is not yet a complete or fully accurate recreation of the original game.
+No original game assets are included in this repository. Users must obtain and unpack their own copy of the game.
 
-You may encounter:
+The original game files, including required resources such as `.cpr` and `.xmb` files, must be placed in the directory structure expected by the project.
 
-- Missing or incorrectly loaded assets.
-- Visual glitches and rendering differences.
-- Incorrect object positions or collisions.
-- Incomplete interiors and interactions.
-- Vehicle handling differences.
-- Physics-related issues during races and driving school challenges.
-- Incomplete or inconsistent multiplayer synchronization.
-- Broken or partially implemented gameplay features.
-- Crashes, unexpected behavior, or other runtime errors.
+Refer to the repository's existing configuration and setup instructions for further details.
 
-The original game was built around its own engine, physics, and gameplay systems. Recreating these systems in Unity introduces differences that cannot always be resolved simply by loading the original assets.
-
-**Do not expect every feature to work exactly as it does in the original game.** Some systems are experimental, and others may require further implementation or significant rework.
-
-## Project Goals
-
-The ongoing development goals include:
-
-- Improving the stability of world and asset loading.
-- Increasing compatibility across Hawaii, Ibiza, and the Casino.
-- Improving vehicle physics and driving behavior.
-- Completing more interiors and interactive locations.
-- Expanding racing and driving school compatibility.
-- Improving multiplayer synchronization and reliability.
-- Restoring additional original game features.
-- Refining the radio, weather, and time-of-day systems.
-- Fixing bugs and improving overall performance.
-- Making the codebase easier to extend and maintain.
-
-The ultimate goal is to bring as much of the original TDU2 experience as possible into Unity while retaining the freedom to develop new features using custom code.
+---
 
 ## Disclaimer
 
-TDU2 to Unity3D is an independent fan-made project. It is not an official port, remake, or product of Eden Games or Atari.
+TDU2 to Unity3D is an independent fan-made project and is not affiliated with, endorsed by, or associated with Eden Games or Atari.
 
-*Test Drive Unlimited 2*, its original game assets, trademarks, and other associated intellectual property belong to their respective rights holders.
+*Test Drive Unlimited 2*, its trademarks, and original game assets remain the property of their respective rights holders.
 
-This project does not distribute the original game's assets. Users must obtain and unpack their own copy of the game.
+This repository does not distribute original game assets.
+
+---
 
 ## Final Words
 
-TDU2 to Unity3D is an ongoing personal development project built around one simple idea:
+What started as an experiment to bring *Test Drive Unlimited 2* into Unity3D eventually became something much bigger: an opportunity to understand the original game, explore its internal systems, and learn what it takes to rebuild an entire game experience.
 
-**What if Test Drive Unlimited 2 could be rebuilt in Unity, with custom code and the freedom to expand its functionality?**
+Unity3D was an important part of that journey, but it also showed me what I wanted from an engine — and why building my own was the right next step.
 
-There is still a lot of work to do, but the foundations are already in place: multiple playable environments, vehicle loading, world systems, racing activities, radio functionality, weather, and a growing multiplayer implementation.
+**Sometimes the best solution isn't to keep working around the limitations, but to build something without them.**
 
-The project is not finished, and there will be bugs. Nevertheless, every implemented system brings it one step closer to the goal of recreating the original TDU2 experience in Unity3D.
+The Unity version may be discontinued, but the journey of rebuilding TDU2 continues.
 
-**This is a work in progress. Enjoy exploring the project!**
+**Thank you to everyone who followed the Unity project!**
+
+See you in the next chapter.
+
+[**Project TDU2 – Continue the development**](https://github.com/kuxii2016/Project-TDU2)

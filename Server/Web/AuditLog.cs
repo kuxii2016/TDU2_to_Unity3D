@@ -1,5 +1,3 @@
-using TDU2Server.Core;
-
 namespace TDU2Server.Web;
 
 /// <summary>Ringspeicher für Ereignisse, die im Panel angezeigt werden (Anmeldungen, Moderationsaktionen).</summary>

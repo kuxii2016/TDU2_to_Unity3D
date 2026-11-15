@@ -24,7 +24,7 @@ Standard-Startautos wie im Original-Gebrauchtwagenhändler (DBCarShop `ESTOL_B`)
 `Delta_Integrale_Evo_2`, `Mustang_Fastback_68`, `Esprit_S3` – der dritte (oder alle) frei änderbar,
 z. B. `Corvette_C1`, `Type_E`, `300_SL`, `Golf_6_GTI`.
 
-Konsolenbefehle: `list` (online), `accounts`, `reload` (config.json neu lesen), `say <Text>` (Meldung an alle Spieler –
+Konsolenbefehle: `list` (online), `accounts`, `master` (Zustand der Master-Anmeldung), `reload` (config.json neu lesen), `say <Text>` (Meldung an alle Spieler –
 erscheint im Spiel als News-Fenster und im Chat), `panel` (Adresse des Web-Panels), `quit`.
 
 Konten liegen in `data/accounts/<name>.json` (Passwort als PBKDF2-Hash, Spielstand im Feld `save`).
@@ -49,6 +49,39 @@ Funktionen: Live-Spielerliste (Insel, Auto, Position, UDP-Status, Sitzungsdauer)
 Nachricht an einzelnen Spieler, Kick/Ban, Chat-Verlauf, Ereignis-Log (Logins/Moderation), Konten-Übersicht mit
 Info, Bearbeiten (E-Mail, Geld, Insel, Passwort, Rolle) und Löschen sowie ein Config-Editor.
 
+## MasterServer (Serverliste im Launcher)
+
+Der Server meldet sich beim Paradise-MasterServer an und steht dann im Launcher in der Serverliste.
+Alles läuft im Hintergrund und ist über `config.json` (oder das Web-Panel unter **Konfiguration**) einstellbar:
+
+| Feld                | Bedeutung                                                                              |
+|---------------------|----------------------------------------------------------------------------------------|
+| `masterEnabled`     | Anmeldung an/aus (Standard `true`)                                                      |
+| `masterUrl`         | Basis-Adresse des Masters, Standard `http://localhost:8080`                             |
+| `masterId`          | stabile Server-ID; leer = wird beim ersten Start erzeugt und gespeichert               |
+| `masterName`        | Name in der Liste (leer = `TDU2-Server`)                                                |
+| `masterHost`        | öffentliche Adresse für Clients; leer = Master nimmt die Absender-IP (NAT-freundlich)   |
+| `masterPort`        | Port in der Liste; `0` = `tcpPort`                                                      |
+| `masterModMessage`  | Mod-Nachricht in der Liste; leer = `motd`                                               |
+| `masterVersion`     | Version für die Liste (Standard `TDU2MapUnity`)                                         |
+| `masterLocked`      | als passwortgeschützt markieren                                                         |
+| `masterHeartbeatMs` | Heartbeat-Abstand in ms (Standard 10000; Master wirft nach 30 s ohne Heartbeat raus)    |
+| `masterRetryMs`     | Wartezeit nach Fehlern/abgelehnter Anmeldung in ms (Standard 15000)                     |
+
+Ablauf (`Core/MasterAdvertiser.cs`):
+
+* **Start** – `POST /api/register` mit der kompletten ServerInfo; der Master liefert ein Token.
+* **Heartbeat** – alle `masterHeartbeatMs` `POST /api/heartbeat` (Token, Spielerzahl, Max-Spieler, Mod-Nachricht).
+  Änderungen an Name/Host/Port/Version/Locked lösen automatisch ein vollständiges Update per `register` aus.
+* **Master neu gestartet** – Heartbeat liefert `404`, der Server meldet sich sofort neu an (gleiche `masterId`).
+* **Master nicht erreichbar** – der Server läuft normal weiter und versucht es nach `masterRetryMs` erneut.
+* **Beenden** – bei `quit`, Ctrl+C oder SIGTERM wird zuerst `POST /api/unregister` gesendet, damit kein toter
+  Eintrag in der Liste bleibt.
+
+Die JSON-Felder sind identisch zu `Paradise.Core.Net.MasterApi`/`ServerInfo`, das Server-Projekt bleibt aber
+unabhängig von Paradise.Core. Läuft der Master auf derselben Maschine wie das Web-Panel, muss ein Port geändert
+werden (beide nutzen standardmäßig `8080`, z. B. `webPort` auf `8081` setzen).
+
 ## Inseln (Ibiza / Hawaii)
 
 Jeder Spieler hat eine Insel (aus dem Spielstand `island` bzw. dem UDP-Zustand, Byte +80: 1 = Ibiza, 2 = Hawaii).
@@ -61,10 +94,11 @@ Clients ohne Inselbyte (alte Version) sehen und werden von allen gesehen.
 ```
 Program.cs                 Einstieg (startet GameServer)
 Core/
-  GameServer.cs            startet TCP, UDP und Konsole
+  GameServer.cs            startet TCP, UDP, Web-Panel, Master-Anmeldung und Konsole
   ServerContext.cs         gemeinsame Dienste (Konfiguration, Konten, Sitzungen, Radio)
   ServerConfig.cs          config.json
-  ConsoleCommands.cs       list, accounts, reload, say, quit
+  MasterAdvertiser.cs      Anmeldung/Heartbeat/Abmeldung beim MasterServer
+  ConsoleCommands.cs       list, accounts, master, reload, say, quit
   RadioClock.cs            gemeinsame Radio-Zeitbasis
   Islands.cs               Inselcodes (1 Ibiza, 2 Hawaii, 0 unbekannt)
   Log.cs                   Konsolenausgabe mit Uhrzeit

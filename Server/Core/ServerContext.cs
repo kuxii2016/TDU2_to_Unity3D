@@ -26,6 +26,8 @@ public sealed class ServerContext
     public FriendStore Friends { get; }
     /// <summary>UDP-Server (Datenmengen-Statistik für Konsole/Panel).</summary>
     public TDU2Server.Net.Udp.UdpServer Udp { get; set; }
+    /// <summary>Anmeldung beim MasterServer (Serverliste im Launcher).</summary>
+    public MasterAdvertiser Master { get; set; }
 
     /// <summary>Setzt eine Moderationsaktion um (Kick, Nachricht …). Wird vom Web-Panel belegt.</summary>
     public ServerActions Actions { get; set; }

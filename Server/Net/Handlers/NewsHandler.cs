@@ -22,7 +22,8 @@ public sealed class NewsHandler : RequestHandler
         if (me == null) return Fail("not_logged_in");
         return new NetResponse
         {
-            ok = true, online = Online,
+            ok = true,
+            online = Online,
             news = Ctx.News.Since(Math.Max(0, r.since), me.Island),
             newsLatest = Ctx.News.Latest,
             newsIds = Ctx.News.Ids(),
